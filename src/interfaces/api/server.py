@@ -159,18 +159,34 @@ def get_signal(ticker: str):
         df_ind = analyzer.compute_all(df)
         tech_signal = analyzer.generate_signal(df_ind)
 
-        divs = db.query(Instrument).filter_by(instrument_id=inst.id).all()
-        div_df = pd.DataFrame()
+        from src.db.models import Dividend as DivModel
+        divs = db.query(DivModel).filter_by(instrument_id=inst.id).all()
+        div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs]) if divs else pd.DataFrame()
         fund = fundamental.analyze(df, div_df)
 
         geo = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
         geo_dict = {"score": geo.score} if geo else {"score": 0.0}
+
+        from src.analysis.ml.prophet_model import ProphetPredictor
+        from src.analysis.ml.xgboost_model import XGBoostClassifier
+        ml_prediction = None
+        if len(df) >= 60:
+            try:
+                p = ProphetPredictor()
+                x = XGBoostClassifier()
+                pr = p.predict(df)
+                xr = x.predict(df_ind)
+                ml_prediction = pr
+                ml_prediction["ml_confidence"] = max(pr.get("confidence", 0), xr.get("confidence", 0))
+            except Exception:
+                pass
 
         fused = fusion.fuse(
             ticker=ticker.upper(),
             technical=tech_signal,
             fundamental=fund,
             geo=geo_dict,
+            ml_prediction=ml_prediction,
         )
 
         return fused
@@ -197,17 +213,30 @@ async def get_advice(ticker: str):
 
         df_ind = analyzer.compute_all(df)
         tech_signal = analyzer.generate_signal(df_ind)
-        divs = db.query(Instrument).filter_by(instrument_id=inst.id).all()
-        div_df = pd.DataFrame()
+        divs = db.query(DivModel).filter_by(instrument_id=inst.id).all()
+        div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs]) if divs else pd.DataFrame()
         fund = fundamental.analyze(df, div_df)
         geo = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
         geo_dict = {"score": geo.score} if geo else {"score": 0.0}
+
+        ml_prediction = None
+        if len(df) >= 60:
+            try:
+                p = ProphetPredictor()
+                x = XGBoostClassifier()
+                pr = p.predict(df)
+                xr = x.predict(df_ind)
+                ml_prediction = pr
+                ml_prediction["ml_confidence"] = max(pr.get("confidence", 0), xr.get("confidence", 0))
+            except Exception:
+                pass
 
         fused = fusion.fuse(
             ticker=ticker.upper(),
             technical=tech_signal,
             fundamental=fund,
             geo=geo_dict,
+            ml_prediction=ml_prediction,
         )
 
         advice = await llm.advise(fused)
