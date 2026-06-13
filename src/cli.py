@@ -1,0 +1,302 @@
+import asyncio
+import logging
+import sys
+from datetime import date, timedelta
+from typing import Optional
+
+import pandas as pd
+import typer
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
+
+from src.config import settings
+from src.db.connection import get_session, init_db
+from src.db.models import Instrument, Price, Dividend
+from src.collectors.moex import MOEXCollector
+from src.collectors.cbr import CBRCollector
+from src.analysis.technical import TechnicalAnalyzer
+from src.analysis.fundamental import FundamentalAnalyzer
+from src.signal.engine import SignalFusionEngine
+from src.llm.router import llm
+
+if sys.stdout.encoding != "utf-8" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+console = Console()
+app = typer.Typer(help="FinAdvisor — AI финансовый ассистент для MOEX")
+logger = logging.getLogger(__name__)
+
+analyzer = TechnicalAnalyzer()
+fundamental = FundamentalAnalyzer()
+fusion = SignalFusionEngine()
+
+
+@app.callback()
+def callback():
+    pass
+
+
+@app.command()
+def init():
+    """Инициализировать базу данных"""
+    init_db()
+    console.print("[green]OK[/green] База данных инициализирована")
+
+
+@app.command()
+def update(ticker: Optional[str] = typer.Argument(None, help="Тикер (например, SBER)")):
+    """Обновить данные с MOEX"""
+    async def _run():
+        async with MOEXCollector() as moex:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as p:
+                if ticker:
+                    task = p.add_task(f"Загрузка {ticker}...", total=None)
+                    await _update_ticker(moex, ticker.upper())
+                    p.update(task, description=f"[green]✓[/green] {ticker} обновлён")
+                else:
+                    task = p.add_task("Загрузка списка акций...", total=None)
+                    stocks = await moex.get_stocks()
+                    p.update(task, description=f"Загружено {len(stocks)} акций")
+
+                    for s in stocks[:10]:
+                        secid = s.get("SECID") or s.get("secid")
+                        if secid:
+                            await _update_ticker(moex, secid)
+                    p.update(task, description="[green]✓[/green] Обновление завершено")
+
+        console.print("[green]✓[/green] Данные обновлены")
+
+    asyncio.run(_run())
+
+
+async def _update_ticker(moex: MOEXCollector, ticker: str):
+    db = get_session()
+    try:
+        inst = db.query(Instrument).filter_by(ticker=ticker).first()
+        if not inst:
+            market_data = await moex.get_marketdata(ticker)
+            if not market_data:
+                logger.warning(f"Не удалось найти {ticker} на MOEX")
+                return
+            inst = Instrument(
+                ticker=ticker,
+                full_name=market_data.get("SHORTNAME", ticker),
+                instrument_type="stock",
+                lot_size=market_data.get("LOTSIZE", 1),
+            )
+            db.add(inst)
+            db.commit()
+
+        last_date = db.query(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
+        from_date = (last_date[0] + timedelta(days=1)).isoformat() if last_date else (date.today() - timedelta(days=365)).isoformat()
+
+        history = await moex.get_history(ticker, from_date=from_date)
+        if not history:
+            logger.info(f"Нет новых данных для {ticker}")
+            return
+
+        for row in history:
+            d = row.get("TRADEDATE") or row.get("tradedate")
+            if not d:
+                continue
+            if isinstance(d, str):
+                d = date.fromisoformat(d)
+            exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
+            if not exists:
+                price = Price(
+                    instrument_id=inst.id,
+                    date=d,
+                    open=row.get("OPEN") or row.get("open"),
+                    high=row.get("HIGH") or row.get("high"),
+                    low=row.get("LOW") or row.get("low"),
+                    close=row.get("CLOSE") or row.get("close"),
+                    volume=row.get("VOLUME") or row.get("volume"),
+                )
+                db.add(price)
+
+        dividends = await moex.get_dividends(ticker)
+        for row in dividends:
+            d = row.get("recordDate") or row.get("recorddate")
+            amt = row.get("value") or row.get("dividendGross")
+            if not d or not amt:
+                continue
+            if isinstance(d, str):
+                d = date.fromisoformat(d)
+            exists = db.query(Dividend).filter_by(
+                instrument_id=inst.id, date=d, amount=float(amt)
+            ).first()
+            if not exists:
+                div = Dividend(
+                    instrument_id=inst.id,
+                    date=d,
+                    amount=float(amt),
+                    currency="RUB",
+                )
+                db.add(div)
+
+        db.commit()
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ошибка при обновлении {ticker}: {e}")
+    finally:
+        db.close()
+
+
+async def run_analysis(ticker: str, with_llm: bool = True) -> tuple[dict, str]:
+    db = get_session()
+    try:
+        inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+        if not inst:
+            return None, f"Инструмент {ticker} не найден"
+
+        prices_q = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
+        if not prices_q:
+            return None, f"Нет данных для {ticker}"
+
+        df = pd.DataFrame([{
+            "date": p.date, "open": p.open, "high": p.high,
+            "low": p.low, "close": p.close, "volume": p.volume,
+        } for p in prices_q])
+
+        dividends_q = db.query(Dividend).filter_by(instrument_id=inst.id).all()
+        div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in dividends_q])
+
+        df_ind = analyzer.compute_all(df)
+        tech_signal = analyzer.generate_signal(df_ind)
+        fund_result = fundamental.analyze(df, div_df)
+
+        geo = {"score": 0.0, "level": "LOW"}
+        fused = fusion.fuse(
+            ticker=ticker.upper(),
+            technical=tech_signal,
+            fundamental=fund_result,
+            geo=geo,
+        )
+
+        advice = ""
+        if with_llm:
+            advice = await llm.advise(fused)
+
+        return fused, advice
+    finally:
+        db.close()
+
+
+@app.command()
+def analyze(
+    ticker: str = typer.Argument(..., help="Тикер (например, SBER)"),
+    with_llm: bool = typer.Option(True, "--llm/--no-llm", help="Использовать LLM для совета"),
+):
+    """Проанализировать инструмент"""
+    async def _run():
+        db = get_session()
+        try:
+            inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+            if not inst:
+                console.print(f"[red]✗[/red] Инструмент {ticker} не найден")
+                return
+
+            prices_q = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
+            if not prices_q:
+                console.print(f"[red]✗[/red] Нет данных для {ticker}")
+                return
+
+            with Progress(console=console) as p:
+                p.add_task("Анализ...", total=None)
+                fused, advice = await run_analysis(ticker, with_llm)
+
+            if not fused:
+                return
+
+            df = pd.DataFrame([{
+                "date": p.date, "open": p.open, "high": p.high,
+                "low": p.low, "close": p.close, "volume": p.volume,
+            } for p in prices_q])
+            df_ind = analyzer.compute_all(df)
+            last = df_ind.iloc[-1] if not df_ind.empty else None
+
+            table = Table(title=f"📊 {ticker.upper()} — анализ")
+            table.add_column("Показатель", style="cyan")
+            table.add_column("Значение", style="yellow")
+
+            if last is not None:
+                price = last.get("close", "—")
+                table.add_row("Цена", f"{price:.2f} ₽" if isinstance(price, float) else str(price))
+                for col in ["rsi", "macd_hist", "sma_20", "sma_50", "sma_200"]:
+                    val = last.get(col)
+                    if val is not None and not pd.isna(val):
+                        table.add_row(col.upper(), f"{val:.2f}")
+                for col in ["bb_upper", "bb_lower"]:
+                    val = last.get(col)
+                    if val is not None and not pd.isna(val):
+                        table.add_row(col.upper(), f"{val:.2f}")
+                table.add_row("Сигнал", f"[bold]{fused['action']}[/bold] (уверенность: {fused['confidence']:.0%})")
+                table.add_row("Макс. доля", f"до {fused['max_portfolio_pct']}% портфеля")
+
+            console.print(table)
+
+            if advice:
+                console.print(f"\n[bold]🤖 Совет:[/bold]\n{advice}")
+
+        finally:
+            db.close()
+
+    asyncio.run(_run())
+
+
+@app.command()
+def list_instruments(
+    type_filter: str = typer.Option("stock", "--type", "-t", help="Тип: stock, bond, etf"),
+):
+    """Список инструментов в базе"""
+    db = get_session()
+    try:
+        instruments = db.query(Instrument).filter_by(instrument_type=type_filter).order_by(Instrument.ticker).all()
+        if not instruments:
+            console.print(f"Нет инструментов типа {type_filter}. Выполните: finn update")
+            return
+
+        table = Table(title=f"📋 {type_filter.upper()} — {len(instruments)} шт.")
+        table.add_column("Тикер", style="cyan")
+        table.add_column("Название", style="white")
+        table.add_column("Цена", style="yellow")
+
+        for inst in instruments:
+            last_price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
+            price_str = f"{last_price.close:.2f}" if last_price and last_price.close else "—"
+            table.add_row(inst.ticker, inst.full_name or "—", price_str)
+
+        console.print(table)
+    finally:
+        db.close()
+
+
+@app.command()
+def rates():
+    """Получить курсы валют ЦБ РФ"""
+    async def _run():
+        console.print("[bold]🏦 Курсы валют (ЦБ РФ):[/bold]")
+        try:
+            cbr = CBRCollector()
+            rates = await cbr.get_rates()
+            table = Table()
+            table.add_column("Код", style="cyan")
+            table.add_column("Валюта", style="white")
+            table.add_column("Курс", style="yellow")
+            for r in rates:
+                table.add_row(r["code"], r["name"], f"{r['value']:.2f} ₽")
+            console.print(table)
+        except Exception as e:
+            console.print(f"[red]Ошибка получения курсов ЦБ: {e}[/red]")
+
+    asyncio.run(_run())
+
+
+def main():
+    app()
