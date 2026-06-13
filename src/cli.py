@@ -17,6 +17,8 @@ from src.collectors.moex import MOEXCollector
 from src.collectors.cbr import CBRCollector
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.fundamental import FundamentalAnalyzer
+from src.analysis.ml.prophet_model import ProphetPredictor
+from src.analysis.ml.xgboost_model import XGBoostClassifier
 from src.signal.engine import SignalFusionEngine
 from src.llm.router import llm
 
@@ -30,6 +32,8 @@ logger = logging.getLogger(__name__)
 analyzer = TechnicalAnalyzer()
 fundamental = FundamentalAnalyzer()
 fusion = SignalFusionEngine()
+prophet = ProphetPredictor()
+xgb_classifier = XGBoostClassifier()
 
 
 @app.callback()
@@ -148,7 +152,7 @@ async def _update_ticker(moex: MOEXCollector, ticker: str):
         db.close()
 
 
-async def run_analysis(ticker: str, with_llm: bool = True) -> tuple[dict, str]:
+async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True) -> tuple[dict, str]:
     db = get_session()
     try:
         inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
@@ -171,12 +175,27 @@ async def run_analysis(ticker: str, with_llm: bool = True) -> tuple[dict, str]:
         tech_signal = analyzer.generate_signal(df_ind)
         fund_result = fundamental.analyze(df, div_df)
 
+        ml_prediction = None
+        if with_ml and len(df) >= 60:
+            try:
+                prophet_result = prophet.predict(df)
+                xgb_result = xgb_classifier.predict(df_ind)
+                ml_prediction = prophet_result
+                ml_prediction["ml_confidence"] = max(
+                    prophet_result.get("confidence", 0),
+                    xgb_result.get("confidence", 0),
+                )
+                ml_prediction["xgb_action"] = xgb_result.get("action", "NEUTRAL")
+            except Exception as e:
+                logger.warning(f"ML prediction failed for {ticker}: {e}")
+
         geo = {"score": 0.0, "level": "LOW"}
         fused = fusion.fuse(
             ticker=ticker.upper(),
             technical=tech_signal,
             fundamental=fund_result,
             geo=geo,
+            ml_prediction=ml_prediction,
         )
 
         advice = ""
@@ -294,6 +313,53 @@ def rates():
             console.print(table)
         except Exception as e:
             console.print(f"[red]Ошибка получения курсов ЦБ: {e}[/red]")
+
+    asyncio.run(_run())
+
+
+@app.command()
+def auto():
+    """Запустить полный цикл: обновить ВСЕ MOEX + анализ + сигналы"""
+    async def _run():
+        from src.scheduler.tasks import daily_update
+
+        console.print("[bold]🚀 Запуск автономного цикла...[/bold]")
+        await daily_update()
+        console.print("[green]✓[/green] Цикл завершён. Все инструменты проанализированы.")
+
+    asyncio.run(_run())
+
+
+@app.command()
+def scan(ticker: str = typer.Argument(..., help="Тикер для массового поиска")):
+    """Найти и добавить все тикеры, содержащие строку (например: SBER, GAZP, VTBR)"""
+    async def _run():
+        async with MOEXCollector() as moex:
+            with console.status("Поиск инструментов..."):
+                stocks = await moex.get_stocks()
+                etfs = await moex.get_etfs()
+                bonds = await moex.get_bonds()
+
+            matches = [s for s in stocks + etfs + bonds
+                       if ticker.upper() in str(s.get("SECID", "")).upper()
+                       or ticker.upper() in str(s.get("SHORTNAME", "")).upper()]
+
+            if not matches:
+                console.print(f"Ничего не найдено по запросу '{ticker}'")
+                return
+
+            table = Table(title=f"Найдено {len(matches)} инструментов")
+            table.add_column("Тикер", style="cyan")
+            table.add_column("Название")
+            table.add_column("Тип")
+
+            for m in matches[:30]:
+                secid = m.get("SECID") or m.get("secid", "?")
+                name = m.get("SHORTNAME") or m.get("shortname", "?")
+                table.add_row(secid, name, "акция")
+
+            console.print(table)
+            console.print(f"\nЧтобы загрузить: finn update {matches[0].get('SECID', 'TICKER')}")
 
     asyncio.run(_run())
 

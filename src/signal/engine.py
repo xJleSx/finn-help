@@ -20,10 +20,10 @@ class SignalFusionEngine:
     ) -> dict:
         reasons = []
         weights = {
-            "technical": 0.5,
+            "technical": 0.35,
             "fundamental": 0.2,
             "geo": 0.2,
-            "ml": 0.1,
+            "ml": 0.25,
         }
 
         tech_action = technical.get("action", "NEUTRAL")
@@ -36,10 +36,15 @@ class SignalFusionEngine:
 
         geo_score = geo.get("score", 0.0) if geo else 0.0
 
-        ml_confidence = ml_prediction.get("confidence", 0.0) if ml_prediction else 0.0
         ml_signal = 0.0
+        ml_confidence = 0.0
+        ml_target = None
+        ml_change = None
         if ml_prediction:
             ml_signal = ml_prediction.get("signal_score", 0.0)
+            ml_confidence = ml_prediction.get("ml_confidence", ml_prediction.get("confidence", 0.0))
+            ml_target = ml_prediction.get("target_price")
+            ml_change = ml_prediction.get("price_change_pct")
 
         weighted_score = (
             tech_score * weights["technical"]
@@ -67,6 +72,10 @@ class SignalFusionEngine:
 
         reasons.extend(tech_reasons)
 
+        if ml_prediction and ml_change is not None:
+            arrow = "↗" if ml_change > 0 else "↘"
+            reasons.append(f"ML-прогноз: {ml_change:+.1f}% ({arrow})")
+
         if fund_anomalies:
             reasons.append(f"⚠️ аномалии: {'; '.join(fund_anomalies[:3])}")
             action = self._downgrade_buy(action)
@@ -91,7 +100,12 @@ class SignalFusionEngine:
                 "technical": {"action": tech_action, "confidence": tech_conf, "score": tech_score},
                 "fundamental_risk": fund_risk,
                 "geo_risk": geo_score,
-                "ml_confidence": ml_confidence,
+                "ml": {
+                    "signal_score": ml_signal,
+                    "confidence": ml_confidence,
+                    "target_price": ml_target,
+                    "change_pct": ml_change,
+                },
             },
         }
 
@@ -111,13 +125,23 @@ class SignalFusionEngine:
             pct = min(pct, 10)
         return pct
 
+    def _to_native(self, obj):
+        if isinstance(obj, dict):
+            return {k: self._to_native(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._to_native(v) for v in obj]
+        elif hasattr(obj, "item"):
+            return obj.item()
+        return obj
+
     def save_signal(self, db: Session, instrument_id: int, fused: dict) -> SignalModel:
+        fused_clean = self._to_native(fused)
         signal = SignalModel(
             instrument_id=instrument_id,
             date=datetime.utcnow(),
             action=fused["action"],
-            confidence=fused["confidence"],
-            fused_json=fused,
+            confidence=fused_clean["confidence"],
+            fused_json=fused_clean,
         )
         db.add(signal)
         db.commit()

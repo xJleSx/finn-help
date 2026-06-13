@@ -28,7 +28,7 @@ class LLMRouter:
 
             client = AsyncGroq(api_key=settings.groq_api_key)
             response = await client.chat.completions.create(
-                model="llama3-70b-8192",
+                model="llama-3.3-70b-versatile",
                 messages=[
                     {"role": "system", "content": prompts.SYSTEM_PROMPT},
                     {"role": "user", "content": prompts.build_user_message(signal)},

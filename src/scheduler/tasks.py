@@ -2,15 +2,18 @@ import asyncio
 import logging
 from datetime import date, datetime
 
+import pandas as pd
 from sqlalchemy.orm import Session
 
 from src.db.connection import get_session
-from src.db.models import Instrument, Price, Indicator, Dividend, News, NewsInstrument, GeoRiskScore
+from src.db.models import Instrument, Price, Indicator, Dividend, Prediction, News, GeoRiskScore
 from src.collectors.moex import MOEXCollector
 from src.collectors.news import NewsCollector
 from src.collectors.cbr import CBRCollector
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.fundamental import FundamentalAnalyzer
+from src.analysis.ml.prophet_model import ProphetPredictor
+from src.analysis.ml.xgboost_model import XGBoostClassifier
 from src.geo.sentiment_divergence import SentimentDivergenceDetector
 from src.geo.risk_scorer import GeoRiskScorer
 from src.signal.engine import SignalFusionEngine
@@ -21,12 +24,13 @@ logger = logging.getLogger(__name__)
 analyzer = TechnicalAnalyzer()
 fundamental = FundamentalAnalyzer()
 fusion = SignalFusionEngine()
+prophet = ProphetPredictor()
+xgb_classifier = XGBoostClassifier()
 divergence = SentimentDivergenceDetector()
 geo_risk = GeoRiskScorer()
 
 
 async def daily_update():
-    """Full daily cycle: collect → analyze → signal"""
     logger.info("Starting daily update cycle...")
     db = get_session()
 
@@ -49,7 +53,7 @@ async def _collect_prices(db: Session):
         instruments = db.query(Instrument).all()
         for inst in instruments:
             last = db.query(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-            from_date = last[0].isoformat() if last else (date.today().isoformat())
+            from_date = last[0].isoformat() if last else (date.today() - __import__("datetime").timedelta(days=365)).isoformat()
             history = await moex.get_history(inst.ticker, from_date=from_date)
             for row in history:
                 d = row.get("TRADEDATE") or row.get("tradedate")
@@ -77,7 +81,6 @@ def _compute_indicators(db: Session):
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
         if len(prices) < 50:
             continue
-        import pandas as pd
         df = pd.DataFrame([{
             "date": p.date, "open": p.open, "high": p.high,
             "low": p.low, "close": p.close, "volume": p.volume,
@@ -134,33 +137,42 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
     if usd_rate:
         today = date.today()
         old = db.query(GeoRiskScore).filter_by(date=today).first()
-        if old:
-            currency_vol = old.components_json.get("currency_stress", 0) if old.components_json else 0
+        if old and old.components_json:
+            currency_vol = old.components_json.get("currency_stress", 0)
 
     risk = geo_risk.score(news_list, currency_volatility=currency_vol)
 
-    score = GeoRiskScore(
-        date=date.today(),
-        score=risk["score"],
-        components_json=risk["components"],
-        sources_json={"sentiment_divergence": sent, "news_count": len(news_list)},
-    )
-    db.add(score)
+    today = date.today()
+    existing = db.query(GeoRiskScore).filter_by(date=today).first()
+    if existing:
+        existing.score = risk["score"]
+        existing.components_json = risk.get("components")
+        existing.sources_json = {"sentiment_divergence": sent, "news_count": len(news_list)}
+    else:
+        score = GeoRiskScore(
+            date=today,
+            score=risk["score"],
+            components_json=risk.get("components"),
+            sources_json={"sentiment_divergence": sent, "news_count": len(news_list)},
+        )
+        db.add(score)
     db.commit()
 
 
 async def _generate_signals(db: Session) -> list[dict]:
     instruments = db.query(Instrument).all()
     signals = []
+
     for inst in instruments:
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
         if len(prices) < 50:
             continue
-        import pandas as pd
+
         df = pd.DataFrame([{
             "date": p.date, "open": p.open, "high": p.high,
             "low": p.low, "close": p.close, "volume": p.volume,
         } for p in prices])
+
         df_ind = analyzer.compute_all(df)
         tech_signal = analyzer.generate_signal(df_ind)
 
@@ -168,15 +180,29 @@ async def _generate_signals(db: Session) -> list[dict]:
         div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
         fund = fundamental.analyze(df, div_df)
 
+        ml_prediction = None
+        if len(df) >= 60:
+            try:
+                prophet_result = prophet.predict(df)
+                xgb_result = xgb_classifier.predict(df_ind)
+                ml_prediction = prophet_result
+                ml_prediction["ml_confidence"] = max(
+                    prophet_result.get("confidence", 0),
+                    xgb_result.get("confidence", 0),
+                )
+                ml_prediction["xgb_action"] = xgb_result.get("action", "NEUTRAL")
+            except Exception as e:
+                logger.warning(f"ML failed for {inst.ticker}: {e}")
+
         geo = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
-        geo_dict = {"score": geo.score, "level": "LOW"} if geo else {"score": 0.0}
-        geo_dict["divergence"] = 0.0
+        geo_dict = {"score": geo.score} if geo else {"score": 0.0}
 
         fused = fusion.fuse(
             ticker=inst.ticker,
             technical=tech_signal,
             fundamental=fund,
             geo=geo_dict,
+            ml_prediction=ml_prediction,
         )
         fusion.save_signal(db, inst.id, fused)
         signals.append(fused)
@@ -188,4 +214,8 @@ async def _notify_signals(signals: list[dict]):
     top_signals = sorted(signals, key=lambda s: abs(s["weighted_score"]), reverse=True)[:5]
     for s in top_signals:
         advice = await llm.advise(s)
-        logger.info(f"Signal: {advice}")
+        logger.info(f"Signal for {s['ticker']}: {advice[:200]}")
+
+
+def run_daily_sync():
+    asyncio.run(daily_update())
