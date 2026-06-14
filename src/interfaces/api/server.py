@@ -5,11 +5,11 @@ from typing import Optional
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import func
 from sse_starlette.sse import EventSourceResponse
 
 from src.db.connection import get_session
 from src.db.models import Instrument, Price, Indicator, Signal, News, GeoRiskScore, Dividend as DivModel
-from src.collectors.moex import MOEXCollector
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.fundamental import FundamentalAnalyzer
 from src.signal.engine import SignalFusionEngine
@@ -30,6 +30,8 @@ app.add_middleware(
 analyzer = TechnicalAnalyzer()
 fundamental = FundamentalAnalyzer()
 fusion = SignalFusionEngine()
+prophet = ProphetPredictor()
+xgb_classifier = XGBoostClassifier()
 
 
 @app.get("/api/health")
@@ -149,6 +151,13 @@ def get_signal(ticker: str):
         if not inst:
             raise HTTPException(404, "Instrument not found")
 
+        cached = db.query(Signal).filter(
+            Signal.instrument_id == inst.id,
+            func.date(Signal.date) == date.today(),
+        ).order_by(Signal.date.desc()).first()
+        if cached and cached.fused_json:
+            return cached.fused_json
+
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
         if len(prices) < 50:
             raise HTTPException(400, "Not enough data")
@@ -158,8 +167,20 @@ def get_signal(ticker: str):
             "low": p.low, "close": p.close, "volume": p.volume,
         } for p in prices])
 
-        df_ind = analyzer.compute_all(df)
-        tech_signal = analyzer.generate_signal(df_ind)
+        ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
+        if len(ind_rows) < 2:
+            raise HTTPException(400, "Not enough indicator data")
+
+        ind_df = pd.DataFrame([{
+            "date": r.date,
+            "rsi": r.rsi, "macd_line": r.macd_line,
+            "macd_signal": r.macd_signal, "macd_hist": r.macd_hist,
+            "sma_20": r.sma_20, "sma_50": r.sma_50, "sma_200": r.sma_200,
+            "bb_upper": r.bb_upper, "bb_lower": r.bb_lower, "bb_mid": r.bb_mid,
+            "volume_sma_20": r.volume_sma_20, "atr": r.atr,
+        } for r in ind_rows])
+
+        tech_signal = analyzer.generate_signal(ind_df)
 
         divs = db.query(DivModel).filter_by(instrument_id=inst.id).all()
         div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs]) if divs else pd.DataFrame()
@@ -171,10 +192,8 @@ def get_signal(ticker: str):
         ml_prediction = None
         if len(df) >= 60:
             try:
-                p = ProphetPredictor()
-                x = XGBoostClassifier()
-                pr = p.predict(df)
-                xr = x.predict(df_ind)
+                pr = prophet.predict(df)
+                xr = xgb_classifier.predict(ind_df)
                 ml_prediction = pr
                 ml_prediction["ml_confidence"] = max(pr.get("confidence", 0), xr.get("confidence", 0))
             except Exception:
@@ -187,6 +206,8 @@ def get_signal(ticker: str):
             geo=geo_dict,
             ml_prediction=ml_prediction,
         )
+
+        fusion.save_signal(db, inst.id, fused)
 
         return fused
     finally:
@@ -201,6 +222,14 @@ async def get_advice(ticker: str):
         if not inst:
             raise HTTPException(404, "Instrument not found")
 
+        cached = db.query(Signal).filter(
+            Signal.instrument_id == inst.id,
+            func.date(Signal.date) == date.today(),
+        ).order_by(Signal.date.desc()).first()
+        if cached and cached.fused_json:
+            advice = await llm.advise(cached.fused_json)
+            return {"signal": cached.fused_json, "advice": advice}
+
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
         if len(prices) < 50:
             raise HTTPException(400, "Not enough data")
@@ -210,8 +239,20 @@ async def get_advice(ticker: str):
             "low": p.low, "close": p.close, "volume": p.volume,
         } for p in prices])
 
-        df_ind = analyzer.compute_all(df)
-        tech_signal = analyzer.generate_signal(df_ind)
+        ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
+        if len(ind_rows) < 2:
+            raise HTTPException(400, "Not enough indicator data")
+
+        ind_df = pd.DataFrame([{
+            "date": r.date,
+            "rsi": r.rsi, "macd_line": r.macd_line,
+            "macd_signal": r.macd_signal, "macd_hist": r.macd_hist,
+            "sma_20": r.sma_20, "sma_50": r.sma_50, "sma_200": r.sma_200,
+            "bb_upper": r.bb_upper, "bb_lower": r.bb_lower, "bb_mid": r.bb_mid,
+            "volume_sma_20": r.volume_sma_20, "atr": r.atr,
+        } for r in ind_rows])
+
+        tech_signal = analyzer.generate_signal(ind_df)
         divs = db.query(DivModel).filter_by(instrument_id=inst.id).all()
         div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs]) if divs else pd.DataFrame()
         fund = fundamental.analyze(df, div_df)
@@ -221,10 +262,8 @@ async def get_advice(ticker: str):
         ml_prediction = None
         if len(df) >= 60:
             try:
-                p = ProphetPredictor()
-                x = XGBoostClassifier()
-                pr = p.predict(df)
-                xr = x.predict(df_ind)
+                pr = prophet.predict(df)
+                xr = xgb_classifier.predict(ind_df)
                 ml_prediction = pr
                 ml_prediction["ml_confidence"] = max(pr.get("confidence", 0), xr.get("confidence", 0))
             except Exception:
@@ -237,6 +276,8 @@ async def get_advice(ticker: str):
             geo=geo_dict,
             ml_prediction=ml_prediction,
         )
+
+        fusion.save_signal(db, inst.id, fused)
 
         advice = await llm.advise(fused)
         return {"signal": fused, "advice": advice}

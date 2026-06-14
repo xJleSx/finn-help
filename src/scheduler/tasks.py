@@ -3,10 +3,12 @@ import logging
 from datetime import date, datetime
 
 import pandas as pd
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.db.connection import get_session
 from src.db.models import Instrument, Price, Indicator, Dividend, Prediction, News, GeoRiskScore
+from src.db.models import Signal as SignalModel
 from src.collectors.moex import MOEXCollector
 from src.collectors.news import NewsCollector
 from src.collectors.cbr import CBRCollector
@@ -35,11 +37,12 @@ async def daily_update():
     db = get_session()
 
     try:
-        await _collect_prices(db)
-        _compute_indicators(db)
+        updated_ids = await _collect_prices(db)
+        await _collect_dividends(db)
+        _compute_indicators(db, instrument_ids=updated_ids)
         news_list = await _collect_news(db)
         await _compute_geo_risk(db, news_list)
-        signals = await _generate_signals(db)
+        signals = await _generate_signals(db, updated_ids=updated_ids)
         await _notify_signals(signals)
         logger.info("Daily update cycle completed")
     except Exception as e:
@@ -48,13 +51,16 @@ async def daily_update():
         db.close()
 
 
-async def _collect_prices(db: Session):
+async def _collect_prices(db: Session) -> set[int]:
+    updated_ids: set[int] = set()
     async with MOEXCollector() as moex:
         instruments = db.query(Instrument).all()
         for inst in instruments:
             last = db.query(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
             from_date = last[0].isoformat() if last else (date.today() - __import__("datetime").timedelta(days=365)).isoformat()
-            history = await moex.get_history(inst.ticker, from_date=from_date)
+            board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(inst.instrument_type, "shares")
+            history = await moex.get_history(inst.ticker, from_date=from_date, board=board)
+            new_count = 0
             for row in history:
                 d = row.get("TRADEDATE") or row.get("tradedate")
                 if isinstance(d, str):
@@ -72,11 +78,52 @@ async def _collect_prices(db: Session):
                         volume=row.get("VOLUME") or row.get("volume"),
                     )
                     db.add(p)
+                    new_count += 1
             db.commit()
+            if new_count > 0:
+                updated_ids.add(inst.id)
+    return updated_ids
 
 
-def _compute_indicators(db: Session):
-    instruments = db.query(Instrument).all()
+async def _collect_dividends(db: Session):
+    async with MOEXCollector() as moex:
+        instruments = db.query(Instrument).filter(
+            Instrument.instrument_type.in_(["stock", "etf"])
+        ).all()
+        for inst in instruments:
+            last = db.query(Dividend.date).filter_by(instrument_id=inst.id).order_by(Dividend.date.desc()).first()
+            if last:
+                continue
+            try:
+                dividends = await moex.get_dividends(inst.ticker)
+                for row in dividends:
+                    d = row.get("recordDate") or row.get("recorddate")
+                    amt = row.get("value") or row.get("dividendGross")
+                    if not d or not amt:
+                        continue
+                    if isinstance(d, str):
+                        d = date.fromisoformat(d)
+                    exists = db.query(Dividend).filter_by(
+                        instrument_id=inst.id, date=d, amount=float(amt)
+                    ).first()
+                    if not exists:
+                        div = Dividend(
+                            instrument_id=inst.id,
+                            date=d,
+                            amount=float(amt),
+                            currency="RUB",
+                        )
+                        db.add(div)
+                db.commit()
+            except Exception as e:
+                logger.warning(f"Dividends failed for {inst.ticker}: {e}")
+
+
+def _compute_indicators(db: Session, instrument_ids: set[int] | None = None):
+    q = db.query(Instrument)
+    if instrument_ids is not None:
+        q = q.filter(Instrument.id.in_(instrument_ids))
+    instruments = q.all()
     for inst in instruments:
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
         if len(prices) < 50:
@@ -163,12 +210,20 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
     db.commit()
 
 
-async def _generate_signals(db: Session) -> list[dict]:
+async def _generate_signals(db: Session, updated_ids: set[int] | None = None) -> list[dict]:
+    today = date.today()
     instruments = db.query(Instrument).all()
     signals = []
-    changes = []
 
     for inst in instruments:
+        cached = db.query(SignalModel).filter(
+            SignalModel.instrument_id == inst.id,
+            func.date(SignalModel.date) == today,
+        ).first()
+        if cached and cached.fused_json:
+            signals.append(cached.fused_json)
+            continue
+
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
         if len(prices) < 50:
             continue
@@ -178,8 +233,20 @@ async def _generate_signals(db: Session) -> list[dict]:
             "low": p.low, "close": p.close, "volume": p.volume,
         } for p in prices])
 
-        df_ind = analyzer.compute_all(df)
-        tech_signal = analyzer.generate_signal(df_ind)
+        ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
+        if len(ind_rows) < 2:
+            continue
+
+        ind_df = pd.DataFrame([{
+            "date": r.date,
+            "rsi": r.rsi, "macd_line": r.macd_line,
+            "macd_signal": r.macd_signal, "macd_hist": r.macd_hist,
+            "sma_20": r.sma_20, "sma_50": r.sma_50, "sma_200": r.sma_200,
+            "bb_upper": r.bb_upper, "bb_lower": r.bb_lower, "bb_mid": r.bb_mid,
+            "volume_sma_20": r.volume_sma_20, "atr": r.atr,
+        } for r in ind_rows])
+
+        tech_signal = analyzer.generate_signal(ind_df)
 
         divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
         div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
@@ -189,7 +256,7 @@ async def _generate_signals(db: Session) -> list[dict]:
         if len(df) >= 60:
             try:
                 prophet_result = prophet.predict(df)
-                xgb_result = xgb_classifier.predict(df_ind)
+                xgb_result = xgb_classifier.predict(ind_df)
                 ml_prediction = prophet_result
                 ml_prediction["ml_confidence"] = max(
                     prophet_result.get("confidence", 0),

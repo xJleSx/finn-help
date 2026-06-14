@@ -9,6 +9,14 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
+BOARD_MAP = {
+    "stock": "/history/engines/stock/markets/shares/boards/TQBR/securities/{ticker}.json",
+    "etf": "/history/engines/stock/markets/shares/boards/TQTF/securities/{ticker}.json",
+    "bond": "/history/engines/stock/markets/bonds/boards/TQCB/securities/{ticker}.json",
+    "shares": "/history/engines/stock/markets/shares/securities/{ticker}.json",
+}
+
+
 class MOEXCollector:
     BASE = settings.moex_iss_url
 
@@ -29,7 +37,7 @@ class MOEXCollector:
 
     async def get_securities(self) -> list[dict]:
         data = await self._fetch_json("/securities.json", {"iss.meta": "off"})
-        securities = data.get("securities", [])
+        securities = data.get("securities", {})
         cols = securities.get("columns", [])
         rows = securities.get("data", [])
         return [dict(zip(cols, row)) for row in rows]
@@ -39,7 +47,7 @@ class MOEXCollector:
             "/engines/stock/markets/shares/boards/TQBR/securities.json",
             {"iss.meta": "off"},
         )
-        securities = data.get("securities", [])
+        securities = data.get("securities", {})
         cols = securities.get("columns", [])
         rows = securities.get("data", [])
         return [dict(zip(cols, row)) for row in rows]
@@ -49,21 +57,29 @@ class MOEXCollector:
             "/engines/stock/markets/shares/boards/TQTF/securities.json",
             {"iss.meta": "off"},
         )
-        securities = data.get("securities", [])
+        securities = data.get("securities", {})
         cols = securities.get("columns", [])
         rows = securities.get("data", [])
         return [dict(zip(cols, row)) for row in rows]
 
     async def get_history(
-        self, ticker: str, from_date: Optional[str] = None, to_date: Optional[str] = None
+        self,
+        ticker: str,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        board: str = "shares",
     ) -> list[dict]:
         if from_date is None:
             from_date = (date.today() - timedelta(days=365)).isoformat()
         if to_date is None:
             to_date = date.today().isoformat()
 
+        path = BOARD_MAP.get(board)
+        if not path:
+            path = BOARD_MAP["shares"]
+
         data = await self._fetch_json(
-            f"/history/engines/stock/markets/shares/securities/{ticker}.json",
+            path.format(ticker=ticker),
             {"from": from_date, "till": to_date, "iss.meta": "off"},
         )
         history = data.get("history", {})

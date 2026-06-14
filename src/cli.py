@@ -60,94 +60,112 @@ def update(ticker: Optional[str] = typer.Argument(None, help="Тикер (нап
             ) as p:
                 if ticker:
                     task = p.add_task(f"Загрузка {ticker}...", total=None)
-                    await _update_ticker(moex, ticker.upper())
+                    await _update_ticker(moex, tk=ticker.upper())
                     p.update(task, description=f"[green]✓[/green] {ticker} обновлён")
                 else:
                     task = p.add_task("Загрузка списка акций...", total=None)
                     stocks = await moex.get_stocks()
                     p.update(task, description=f"Загружено {len(stocks)} акций")
-
-                    for s in stocks[:10]:
+                    for s in stocks[:50]:
                         secid = s.get("SECID") or s.get("secid")
                         if secid:
-                            await _update_ticker(moex, secid)
-                    p.update(task, description="[green]✓[/green] Обновление завершено")
+                            await _update_ticker(moex, tk=secid, itype="stock")
+                    p.update(task, description="[green]✓[/green] Акции обновлены")
+
+                    task2 = p.add_task("Загрузка ETF...", total=None)
+                    etfs = await moex.get_etfs()
+                    p.update(task2, description=f"Загружено {len(etfs)} ETF")
+                    for e in etfs[:20]:
+                        secid = e.get("SECID") or e.get("secid")
+                        if secid:
+                            await _update_ticker(moex, tk=secid, itype="etf")
+                    p.update(task2, description="[green]✓[/green] ETF обновлены")
+
+                    task3 = p.add_task("Загрузка облигаций...", total=None)
+                    bonds = await moex.get_bonds()
+                    p.update(task3, description=f"Загружено {len(bonds)} облигаций")
+                    for b in bonds[:10]:
+                        secid = b.get("SECID") or b.get("secid")
+                        if secid:
+                            await _update_ticker(moex, tk=secid, itype="bond")
+                    p.update(task3, description="[green]✓[/green] Облигации обновлены")
 
         console.print("[green]✓[/green] Данные обновлены")
 
     asyncio.run(_run())
 
 
-async def _update_ticker(moex: MOEXCollector, ticker: str):
+async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock"):
     db = get_session()
     try:
-        inst = db.query(Instrument).filter_by(ticker=ticker).first()
+        inst = db.query(Instrument).filter_by(ticker=tk).first()
         if not inst:
-            market_data = await moex.get_marketdata(ticker)
+            market_data = await moex.get_marketdata(tk)
             if not market_data:
-                logger.warning(f"Не удалось найти {ticker} на MOEX")
+                logger.warning(f"Не удалось найти {tk} на MOEX")
                 return
             inst = Instrument(
-                ticker=ticker,
-                full_name=market_data.get("SHORTNAME", ticker),
-                instrument_type="stock",
+                ticker=tk,
+                full_name=market_data.get("SHORTNAME", tk),
+                instrument_type=itype,
                 lot_size=market_data.get("LOTSIZE", 1),
             )
             db.add(inst)
             db.commit()
 
+        board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(inst.instrument_type, "shares")
         last_date = db.query(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
         from_date = (last_date[0] + timedelta(days=1)).isoformat() if last_date else (date.today() - timedelta(days=365)).isoformat()
 
-        history = await moex.get_history(ticker, from_date=from_date)
+        history = await moex.get_history(tk, from_date=from_date, board=board)
         if not history:
-            logger.info(f"Нет новых данных для {ticker}")
-            return
+            logger.info(f"Нет новых данных для {tk}")
+        else:
+            for row in history:
+                d = row.get("TRADEDATE") or row.get("tradedate")
+                if not d:
+                    continue
+                if isinstance(d, str):
+                    d = date.fromisoformat(d)
+                exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
+                if not exists:
+                    price = Price(
+                        instrument_id=inst.id,
+                        date=d,
+                        open=row.get("OPEN") or row.get("open"),
+                        high=row.get("HIGH") or row.get("high"),
+                        low=row.get("LOW") or row.get("low"),
+                        close=row.get("CLOSE") or row.get("close"),
+                        volume=row.get("VOLUME") or row.get("volume"),
+                    )
+                    db.add(price)
+            db.commit()
 
-        for row in history:
-            d = row.get("TRADEDATE") or row.get("tradedate")
-            if not d:
-                continue
-            if isinstance(d, str):
-                d = date.fromisoformat(d)
-            exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
-            if not exists:
-                price = Price(
-                    instrument_id=inst.id,
-                    date=d,
-                    open=row.get("OPEN") or row.get("open"),
-                    high=row.get("HIGH") or row.get("high"),
-                    low=row.get("LOW") or row.get("low"),
-                    close=row.get("CLOSE") or row.get("close"),
-                    volume=row.get("VOLUME") or row.get("volume"),
-                )
-                db.add(price)
-
-        dividends = await moex.get_dividends(ticker)
-        for row in dividends:
-            d = row.get("recordDate") or row.get("recorddate")
-            amt = row.get("value") or row.get("dividendGross")
-            if not d or not amt:
-                continue
-            if isinstance(d, str):
-                d = date.fromisoformat(d)
-            exists = db.query(Dividend).filter_by(
-                instrument_id=inst.id, date=d, amount=float(amt)
-            ).first()
-            if not exists:
-                div = Dividend(
-                    instrument_id=inst.id,
-                    date=d,
-                    amount=float(amt),
-                    currency="RUB",
-                )
-                db.add(div)
-
-        db.commit()
+        if inst.instrument_type in ("stock", "etf"):
+            dividends = await moex.get_dividends(tk)
+            for row in dividends:
+                d = row.get("recordDate") or row.get("recorddate")
+                amt = row.get("value") or row.get("dividendGross")
+                if not d or not amt:
+                    continue
+                if isinstance(d, str):
+                    d = date.fromisoformat(d)
+                exists = db.query(Dividend).filter_by(
+                    instrument_id=inst.id, date=d, amount=float(amt)
+                ).first()
+                if not exists:
+                    div = Dividend(
+                        instrument_id=inst.id,
+                        date=d,
+                        amount=float(amt),
+                        currency="RUB",
+                    )
+                    db.add(div)
+            db.commit()
 
     except Exception as e:
         db.rollback()
-        logger.error(f"Ошибка при обновлении {ticker}: {e}")
+        logger.error(f"Ошибка при обновлении {tk}: {e}")
     finally:
         db.close()
 

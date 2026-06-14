@@ -35,6 +35,13 @@ package = true
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+    "pytest-asyncio>=1.4.0",
+    "pytest-httpx>=0.36.2",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
