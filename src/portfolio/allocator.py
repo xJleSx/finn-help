@@ -102,6 +102,10 @@ class PortfolioAllocator:
                     share = item["score"] / cat_total
                     amount = round(budget * share, 2)
 
+                    last_price = item.get("last_price")
+                    if last_price and last_price > 0 and amount < last_price:
+                        continue
+
                     sector = item.get("sector", "Прочее")
                     limit = SECTOR_LIMITS.get(sector, 0.30)
                     current_sector_weight = (sector_allocation.get(sector, 0.0) + amount) / capital
