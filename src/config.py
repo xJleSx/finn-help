@@ -6,6 +6,9 @@ load_dotenv()
 
 class Settings(BaseSettings):
     groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:7b"
     tinkoff_token: str = ""
     database_url: str = "sqlite:///data/finn.db"
     telegram_bot_token: str = ""

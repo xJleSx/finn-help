@@ -12,6 +12,9 @@ class LLMRouter:
     def __init__(self):
         self._groq_client: Optional = None
         self._use_groq = bool(settings.groq_api_key)
+        self._groq_model = settings.groq_model
+        self._ollama_model = settings.ollama_model
+        self._ollama_url = settings.ollama_url
 
     async def advise(self, signal: dict) -> str:
         if self._use_groq:
@@ -28,7 +31,7 @@ class LLMRouter:
 
             client = AsyncGroq(api_key=settings.groq_api_key)
             response = await client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=self._groq_model,
                 messages=[
                     {"role": "system", "content": prompts.SYSTEM_PROMPT},
                     {"role": "user", "content": prompts.build_user_message(signal)},
@@ -47,7 +50,7 @@ class LLMRouter:
 
             async with httpx.AsyncClient(timeout=60.0) as client:
                 payload = {
-                    "model": "qwen2.5:7b",
+                    "model": self._ollama_model,
                     "messages": [
                         {"role": "system", "content": prompts.SYSTEM_PROMPT},
                         {"role": "user", "content": prompts.build_user_message(signal)},
@@ -56,7 +59,7 @@ class LLMRouter:
                     "max_tokens": 512,
                     "stream": False,
                 }
-                resp = await client.post("http://localhost:11434/api/chat", json=payload)
+                resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
                 resp.raise_for_status()
                 data = resp.json()
                 return data.get("message", {}).get("content", self._fallback_text(signal))
