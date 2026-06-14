@@ -325,6 +325,11 @@ async def run_bot():
         logger.warning("TELEGRAM_BOT_TOKEN not set in .env")
         return
 
+    from src.db.connection import init_db
+
+    init_db()
+    logger.info("Database tables ensured")
+
     app = Application.builder().token(settings.telegram_bot_token).build()
 
     app.add_handler(CommandHandler("start", start))
