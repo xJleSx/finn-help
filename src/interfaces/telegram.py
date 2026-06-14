@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import re
 from typing import Optional
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from src.cli import run_analysis
 from src.config import settings
@@ -24,8 +25,11 @@ subscribers: set[int] = set()
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "\U0001f916 FinAdvisor — финансовый ассистент\n\n"
+        "Просто напишите название тикера (SBER, GAZP, LKOH...)\n"
+        "или задайте вопрос в свободной форме.\n\n"
         "Команды:\n"
         "/analyze TICKER — анализ инструмента\n"
+        "/ask вопрос — совет по инструменту\n"
         "/portfolio — портфель\n"
         "/rates — курсы валют\n"
         "/geo — геополитический риск\n"
@@ -63,6 +67,42 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     ticker = context.args[0].upper()
+    await _reply_with_analysis(update, ticker)
+
+
+async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = " ".join(context.args) if context.args else ""
+    if not text:
+        await update.message.reply_text("Задайте вопрос, например: /ask Что думаешь про SBER?")
+        return
+    await _handle_chat(update, text)
+
+
+async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    await _handle_chat(update, text)
+
+
+async def _handle_chat(update: Update, text: str):
+    tickers = _extract_tickers(text)
+    if not tickers:
+        await update.message.reply_text(
+            "Я не нашёл тикер в вашем сообщении.\n"
+            "Напишите название акции (SBER, GAZP, LKOH, YNDX...)\n"
+            "или используйте /analyze TICKER."
+        )
+        return
+
+    if len(tickers) > 1:
+        ticker = tickers[0]
+        await update.message.reply_text(f"Нашёл несколько тикеров, анализирую {ticker}")
+    else:
+        ticker = tickers[0]
+
+    await _reply_with_analysis(update, ticker)
+
+
+async def _reply_with_analysis(update: Update, ticker: str):
     await update.message.reply_text(f"\U0001f50d Анализирую {ticker}...")
 
     try:
@@ -70,16 +110,45 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not fused:
             await update.message.reply_text(f"\u274c {advice}")
             return
+
         emoji = ACTION_EMOJI.get(fused["action"], "\u26aa")
         text = f"{emoji} *{ticker}* — {fused['action']} (уверенность: {fused['confidence']:.0%})\n"
         for r in fused.get("reasons", []):
             text += f"\u2022 {r}\n"
+
         if advice:
             text += f"\n{advice}"
         text += f"\n\U0001f4a1 Доля: до {fused['max_portfolio_pct']}% портфеля"
-        await update.message.reply_markdown(text)
+
+        for chunk in _chunk_text(text, 4096):
+            await update.message.reply_markdown(chunk)
     except Exception as e:
-        await update.message.reply_text(f"\u274c Ошибка: {e}")
+        logger.warning("Analysis error", exc_info=True)
+        await update.message.reply_text(f"\u274c Ошибка: {e}. Попробуйте /analyze {ticker}")
+
+
+def _extract_tickers(text: str) -> list[str]:
+    known = {"SBER", "GAZP", "LKOH", "VTBR", "MOEX", "YNDX", "NLMK", "MGNT", "MTSS",
+             "SNGS", "TATN", "RTKM", "PHOR", "AFKS", "AFLT", "ROSN", "GMKN", "PLZL",
+             "ALRS", "CHMF", "MAGN", "IRAO", "SMLT", "FIVE", "OZON", "QIWI", "TCSG",
+             "SBERP", "SNGSP", "RASP", "TRNFP", "BANE", "BANEP", "FEES", "HYDR",
+             "LSRG", "MSNG", "PIKK", "POLY", "RUAL", "RTKMP", "SELG", "TATNP",
+             "UPRO", "VSMO", "MOSP", "SGZH",
+             "FXRL", "SBMX", "TMOS", "AKIM", "RUSB", "TRUR",
+             "SU26238RMFS5", "SU26243RMFS2", "SU26248RMFS1"}
+
+    words = re.findall(r"[A-Za-z0-9]{2,}", text.upper())
+    found = [w for w in words if w in known]
+    return found
+
+
+def _chunk_text(text: str, max_len: int) -> list[str]:
+    if len(text) <= max_len:
+        return [text]
+    chunks = []
+    for i in range(0, len(text), max_len):
+        chunks.append(text[i:i + max_len])
+    return chunks
 
 
 async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -198,12 +267,15 @@ async def run_bot():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", start))
     app.add_handler(CommandHandler("analyze", analyze))
+    app.add_handler(CommandHandler("ask", ask))
     app.add_handler(CommandHandler("portfolio", portfolio))
     app.add_handler(CommandHandler("rates", rates))
     app.add_handler(CommandHandler("geo", geo))
     app.add_handler(CommandHandler("subscribe", subscribe))
     app.add_handler(CommandHandler("unsubscribe", unsubscribe))
     app.add_handler(CommandHandler("daily", daily))
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 
     logger.info("Bot started polling...")
     await app.initialize()
