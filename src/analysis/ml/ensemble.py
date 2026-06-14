@@ -99,8 +99,6 @@ class EnsemblePredictor:
         def _make_model():
             from xgboost import XGBClassifier
 
-            return XGBClassifier(
-                n_estimators=50, max_depth=3, learning_rate=0.1, eval_metric="logloss", verbosity=0
-            )
+            return XGBClassifier(n_estimators=50, max_depth=3, learning_rate=0.1, eval_metric="logloss", verbosity=0)
 
         return walk_forward_validate(x, y_clean, _make_model, n_splits=3)

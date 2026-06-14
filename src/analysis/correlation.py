@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 class CorrelationAnalyzer:
     THRESHOLD = 0.7
 
-    def diversification_penalty(
-        self, ticker: str, existing_tickers: list[str], db: Session
-    ) -> float:
+    def diversification_penalty(self, ticker: str, existing_tickers: list[str], db: Session) -> float:
         if not existing_tickers:
             return 0.0
 
@@ -36,23 +34,14 @@ class CorrelationAnalyzer:
             return round(penalty, 2)
         return 0.0
 
-    def _load_correlation_matrix(
-        self, tickers: list[str], db: Session
-    ) -> pd.DataFrame | None:
-        instruments = (
-            db.query(Instrument).filter(Instrument.ticker.in_(tickers)).all()
-        )
+    def _load_correlation_matrix(self, tickers: list[str], db: Session) -> pd.DataFrame | None:
+        instruments = db.query(Instrument).filter(Instrument.ticker.in_(tickers)).all()
         if len(instruments) < 2:
             return None
 
         price_dict: dict[str, pd.Series] = {}
         for inst in instruments:
-            rows = (
-                db.query(Price)
-                .filter_by(instrument_id=inst.id)
-                .order_by(Price.date.asc())
-                .all()
-            )
+            rows = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.asc()).all()
             if len(rows) < 20:
                 continue
             closes = pd.Series(

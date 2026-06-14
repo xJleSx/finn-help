@@ -22,30 +22,44 @@ ACTION_EMOJI = {
 }
 
 RUSSIAN_NAMES: dict[str, str] = {
-    "сбер": "SBER", "сбера": "SBER", "сбербанк": "SBER",
-    "газпром": "GAZP", "газпрома": "GAZP",
-    "лукойл": "LKOH", "лукойла": "LKOH",
+    "сбер": "SBER",
+    "сбера": "SBER",
+    "сбербанк": "SBER",
+    "газпром": "GAZP",
+    "газпрома": "GAZP",
+    "лукойл": "LKOH",
+    "лукойла": "LKOH",
     "втб": "VTBR",
-    "яндекс": "YNDX", "yandex": "YNDX",
+    "яндекс": "YNDX",
+    "yandex": "YNDX",
     "нлмк": "NLMK",
-    "магнит": "MGNT", "магнита": "MGNT",
+    "магнит": "MGNT",
+    "магнита": "MGNT",
     "мтс": "MTSS",
-    "татнефть": "TATN", "татнефти": "TATN",
+    "татнефть": "TATN",
+    "татнефти": "TATN",
     "ростелеком": "RTKM",
     "фосагро": "PHOR",
-    "афк система": "AFKS", "система": "AFKS",
+    "афк система": "AFKS",
+    "система": "AFKS",
     "аэрофлот": "AFLT",
-    "роснефть": "ROSN", "роснефти": "ROSN",
-    "норникель": "GMKN", "норильский никель": "GMKN",
+    "роснефть": "ROSN",
+    "роснефти": "ROSN",
+    "норникель": "GMKN",
+    "норильский никель": "GMKN",
     "полюс": "PLZL",
     "алроса": "ALRS",
     "северсталь": "CHMF",
     "магнитогорский": "MAGN",
     "интер рао": "IRAO",
     "ozon": "OZON",
-    "тинькофф": "TCSG", "ткс": "TCSG", "tcsg": "TCSG",
+    "тинькофф": "TCSG",
+    "ткс": "TCSG",
+    "tcsg": "TCSG",
     "озон": "OZON",
-    "московская биржа": "MOEX", "биржа": "MOEX", "moex": "MOEX",
+    "московская биржа": "MOEX",
+    "биржа": "MOEX",
+    "moex": "MOEX",
     "распадская": "RASP",
     "транснефть": "TRNFP",
     "преф сбер": "SBERP",
@@ -53,20 +67,29 @@ RUSSIAN_NAMES: dict[str, str] = {
     "преф": "SNGSP",
     "самараэнерго": "SMLT",
     "юнипро": "UPRO",
-    "всм": "VSMO", "всмпо": "VSMO",
+    "всм": "VSMO",
+    "всмпо": "VSMO",
     "полиметалл": "POLY",
     "русал": "RUAL",
-    "пик": "PIKK", "пикк": "PIKK",
-    "лср": "LSRG", "лсрг": "LSRG",
+    "пик": "PIKK",
+    "пикк": "PIKK",
+    "лср": "LSRG",
+    "лсрг": "LSRG",
     "мосэнерго": "MSNG",
-    "фск": "FEES", "федеральная сетевая": "FEES",
-    "русгидро": "HYDR", "гидро": "HYDR",
+    "фск": "FEES",
+    "федеральная сетевая": "FEES",
+    "русгидро": "HYDR",
+    "гидро": "HYDR",
     "башнефть": "BANE",
     "преф башнефть": "BANEP",
     "селенга": "SELG",
     "трубная": "TRNR",
-    "five": "FIVE", "пятерочка": "FIVE", "x5": "FIVE", "икс5": "FIVE",
-    "fix": "FIX", "фикс": "FIX",
+    "five": "FIVE",
+    "пятерочка": "FIVE",
+    "x5": "FIVE",
+    "икс5": "FIVE",
+    "fix": "FIX",
+    "фикс": "FIX",
 }
 
 subscribers: set[int] = set()
@@ -191,8 +214,13 @@ async def _reply_with_analysis(update: Update, ticker: str):
         confidence = fused["confidence"]
         emoji = ACTION_EMOJI.get(action, "\u26aa")
 
-        action_labels = {"BUY": "рекомендуется к покупке", "CAUTIOUS_BUY": "можно рассмотреть для покупки",
-                         "HOLD": "рекомендуется держать", "SELL": "рекомендуется продать", "NEUTRAL": "нейтрально"}
+        action_labels = {
+            "BUY": "рекомендуется к покупке",
+            "CAUTIOUS_BUY": "можно рассмотреть для покупки",
+            "HOLD": "рекомендуется держать",
+            "SELL": "рекомендуется продать",
+            "NEUTRAL": "нейтрально",
+        }
         label = action_labels.get(action, action)
 
         text = f"{emoji} *{ticker}* — {label}\n"
@@ -207,15 +235,12 @@ async def _reply_with_analysis(update: Update, ticker: str):
             await update.message.reply_markdown(chunk)
     except Exception as e:
         logger.warning("Analysis error", exc_info=True)
-        await update.message.reply_text(
-            f"\u274c Ошибка: {e}\nУбедитесь, что запущен `finn update` и данные загружены."
-        )
+        await update.message.reply_text(f"\u274c Ошибка: {e}\nУбедитесь, что запущен `finn update` и данные загружены.")
 
 
 def _extract_allocation_amount(text: str) -> float | None:
     text_lower = text.lower().strip()
-    alloc_keywords = ["вложить", "инвестировать", "распредели", "распределение",
-                      "allocate", "разложить", "разместить"]
+    alloc_keywords = ["вложить", "инвестировать", "распредели", "распределение", "allocate", "разложить", "разместить"]
     if not any(k in text_lower for k in alloc_keywords):
         return None
     numbers = re.findall(r"(\d[\d\s]*\d|\d)", text_lower.replace(",", ".").replace(" ", ""))
@@ -297,10 +322,7 @@ def _format_allocation_plan(picks: list[dict], capital: float) -> str:
     allocated = 0.0
     for item in used:
         allocated += item["amount"]
-        text += (
-            f"• *{item['ticker']}* ({item.get('name', '')}): "
-            f"{item['amount']:,.0f} ₽ ({item['pct']*100:.0f}%)"
-        )
+        text += f"• *{item['ticker']}* ({item.get('name', '')}): {item['amount']:,.0f} ₽ ({item['pct'] * 100:.0f}%)"
         if item["shares"] > 0:
             text += f" → ~{item['shares']} шт. по {item['last_price']:.0f} ₽"
         text += "\n"
@@ -325,14 +347,18 @@ async def _ask_llm_general(update: Update, text: str):
             "Не давай инвестиционных рекомендаций без оговорки о рисках."
         )
         messages = [
-            {"role": "system", "content": "Ты — финансовый ассистент. "
-             "Отвечай кратко, по делу, на русском. Называй конкретные тикеры и цены. "
-             "Всегда добавляй предупреждение о рисках."},
+            {
+                "role": "system",
+                "content": "Ты — финансовый ассистент. "
+                "Отвечай кратко, по делу, на русском. Называй конкретные тикеры и цены. "
+                "Всегда добавляй предупреждение о рисках.",
+            },
             {"role": "user", "content": prompt},
         ]
 
         if settings.groq_api_key:
             from groq import AsyncGroq
+
             client = AsyncGroq(api_key=settings.groq_api_key)
             response = await client.chat.completions.create(
                 model=settings.groq_model,
@@ -343,11 +369,17 @@ async def _ask_llm_general(update: Update, text: str):
             answer = response.choices[0].message.content
         else:
             import httpx
+
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
                     f"{settings.ollama_url}/api/chat",
-                    json={"model": settings.ollama_model, "messages": messages,
-                          "temperature": 0.3, "max_tokens": 512, "stream": False},
+                    json={
+                        "model": settings.ollama_model,
+                        "messages": messages,
+                        "temperature": 0.3,
+                        "max_tokens": 512,
+                        "stream": False,
+                    },
                 )
                 data = resp.json()
                 answer = data.get("message", {}).get("content", "")
@@ -462,7 +494,7 @@ def _find_tickers(text: str) -> list[str]:
 def _chunk_text(text: str, max_len: int) -> list[str]:
     if len(text) <= max_len:
         return [text]
-    return [text[i:i + max_len] for i in range(0, len(text), max_len)]
+    return [text[i : i + max_len] for i in range(0, len(text), max_len)]
 
 
 async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
