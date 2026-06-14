@@ -251,11 +251,12 @@ async def _reply_with_allocation(update: Update, capital: float):
         for cat, data in plan["plan"].items():
             text += f"*{data['label']}* — {data['budget']:,.0f} ₽\n"
             for item in data.get("items", []):
+                name = item.get("name") or item["ticker"]
                 shares_info = ""
                 risk = item.get("risk", {})
                 if risk.get("suggested_shares", 0) > 0:
                     shares_info = f" ≈ {risk['suggested_shares']} шт."
-                text += f"  \u2022 {item['ticker']}: {item['amount']:,.0f} ₽{shares_info}\n"
+                text += f"  \u2022 *{item['ticker']}* ({name}): {item['amount']:,.0f} ₽{shares_info}\n"
                 if item.get("reason"):
                     text += f"    ({item['reason']})\n"
             text += "\n"
