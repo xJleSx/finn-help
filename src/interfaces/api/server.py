@@ -19,11 +19,17 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="FinAdvisor API", version="0.1.0")
 
-origins = settings.cors_origins.split(",")
+origins = [o.strip() for o in settings.cors_origins.split(",")]
+if "*" in origins and origins != ["*"]:
+    origins = [o for o in origins if o != "*"]
+allow_creds = False if "*" in origins else settings.cors_credentials
+if "*" in origins and settings.cors_credentials:
+    logger.warning("CORS: allow_origins=* and allow_credentials=True is not allowed by spec, disabling credentials")
+    allow_creds = False
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=allow_creds,
     allow_methods=["*"],
     allow_headers=["*"],
 )
