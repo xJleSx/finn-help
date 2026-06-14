@@ -42,15 +42,35 @@ def _max_drawdown(prices: np.ndarray) -> float:
     return float(abs(dd.min()))
 
 
+def _calmar_ratio(returns: np.ndarray, prices: np.ndarray) -> float:
+    if len(returns) < 2:
+        return 0.0
+    cagr = float(np.mean(returns) * 252)
+    mdd = _max_drawdown(prices)
+    return cagr / mdd if mdd > 0 else 0.0
+
+
+def _omega_ratio(returns: np.ndarray, rf: float = 0.0) -> float:
+    if len(returns) < 2:
+        return 0.0
+    threshold = rf / 252
+    excess = returns - threshold
+    gains = excess[excess > 0].sum()
+    losses = abs(excess[excess < 0].sum())
+    return float(gains / losses) if losses > 0 else float("inf")
+
+
 def compute_risk_metrics(price_series: list[float]) -> dict:
     arr = np.array(price_series, dtype=float)
     if len(arr) < 10:
-        return {"sharpe": 0.0, "sortino": 0.0, "max_drawdown": 0.0}
+        return {"sharpe": 0.0, "sortino": 0.0, "max_drawdown": 0.0, "calmar": 0.0, "omega": 0.0}
     returns = np.diff(arr) / arr[:-1]
     return {
         "sharpe": round(_sharpe_ratio(returns), 2),
         "sortino": round(_sortino_ratio(returns), 2),
         "max_drawdown": round(_max_drawdown(arr), 4),
+        "calmar": round(_calmar_ratio(returns, arr), 2),
+        "omega": round(_omega_ratio(returns), 2),
     }
 
 
@@ -185,9 +205,16 @@ class SignalFusionEngine:
             sharpe = risk_metrics.get("sharpe", 0.0)
             sortino = risk_metrics.get("sortino", 0.0)
             mdd = risk_metrics.get("max_drawdown", 0.0)
-            risk_adj = 1.0 + min(sharpe * 0.05, 0.15) + min(sortino * 0.03, 0.10) - min(mdd * 2, 0.20)
+            calmar = risk_metrics.get("calmar", 0.0)
+            omega = risk_metrics.get("omega", 0.0)
+            risk_adj = 1.0
+            risk_adj += min(sharpe * 0.05, 0.15)
+            risk_adj += min(sortino * 0.03, 0.10)
+            risk_adj -= min(mdd * 2, 0.20)
+            risk_adj += min(calmar * 0.02, 0.08)
+            risk_adj += min(omega * 0.01, 0.05)
             confidence *= max(risk_adj, 0.3)
-            reasons.append(f"Risk: Sharpe={sharpe:.1f}, DD={mdd:.1%}")
+            reasons.append(f"Risk: Sharpe={sharpe:.1f}, Calmar={calmar:.1f}, DD={mdd:.1%}")
 
         confidence = min(confidence, 1.0)
 
