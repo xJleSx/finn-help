@@ -51,8 +51,10 @@ def _add_missing_columns():
 
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
-    _add_missing_columns()
+    from alembic.config import Config
 
+    from alembic import command
 
-init_db()
+    alembic_cfg = Config(Path(__file__).resolve().parents[2] / "alembic.ini")
+    command.upgrade(alembic_cfg, "head")
+    logger.info("Database migrated to latest revision")

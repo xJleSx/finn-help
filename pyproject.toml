@@ -27,6 +27,7 @@ dependencies = [
     "catboost>=1.2.0",
     "transformers>=4.38.0",
     "torch>=2.3.0",
+    "alembic>=1.18.4",
 ]
 
 [project.scripts]
