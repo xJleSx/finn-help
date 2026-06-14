@@ -79,10 +79,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• «анализ сбер»\n"
         "• «что с газпромом?»\n"
         "• «дивиденды лукойла»\n"
+        "• «куда вложить 50000»\n"
         "• или /analyze SBER\n\n"
         "Команды:\n"
         "/analyze TICKER — анализ инструмента\n"
         "/ask вопрос — совет в свободной форме\n"
+        "/allocate СУММА — распределение капитала\n"
         "/portfolio — портфель\n"
         "/rates — курсы валют\n"
         "/geo — геополитический риск\n"
@@ -113,6 +115,20 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_markdown(text)
 
 
+async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Укажите сумму: /allocate 100000")
+        return
+    try:
+        amount = float(context.args[0].replace(" ", "").replace(",", "."))
+        if amount < 500:
+            await update.message.reply_text("Минимальная сумма — 500 ₽")
+            return
+        await _reply_with_allocation(update, amount)
+    except ValueError:
+        await update.message.reply_text("Укажите число: /allocate 100000")
+
+
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Укажите тикер: /analyze SBER")
@@ -130,26 +146,48 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _handle_text(update, update.message.text.strip())
+    text = update.message.text.strip()
+    amount = _extract_allocation_amount(text)
+    if amount is not None:
+        await _reply_with_allocation(update, amount)
+    else:
+        tickers = _find_tickers(text)
+        if tickers:
+            ticker = tickers[0]
+            if len(tickers) > 1:
+                await update.message.reply_text(f"Нашёл несколько, анализирую {ticker}")
+            await _reply_with_analysis(update, ticker)
+        else:
+            await update.message.reply_text(
+                "Не нашёл тикер в вашем сообщении.\n"
+                "Попробуйте:\n"
+                "• «анализ сбер»\n"
+                "• «куда вложить 50000»\n"
+                "• «распредели 100000 рублей»\n"
+                "• /allocate 100000"
+            )
 
 
 async def _handle_text(update: Update, text: str):
-    tickers = _find_tickers(text)
-    if not tickers:
-        await update.message.reply_text(
-            "Не нашёл тикер в вашем сообщении.\n"
-            "Попробуйте: «анализ сбер», «что с газпромом?»\n"
-            "или /analyze SBER"
-        )
+    amount = _extract_allocation_amount(text)
+    if amount is not None:
+        await _reply_with_allocation(update, amount)
         return
 
-    if len(tickers) > 1:
+    tickers = _find_tickers(text)
+    if tickers:
         ticker = tickers[0]
-        await update.message.reply_text(f"Нашёл несколько, анализирую {ticker}")
+        if len(tickers) > 1:
+            await update.message.reply_text(f"Нашёл несколько, анализирую {ticker}")
+        await _reply_with_analysis(update, ticker)
     else:
-        ticker = tickers[0]
-
-    await _reply_with_analysis(update, ticker)
+        await update.message.reply_text(
+            "Не нашёл тикер в вашем сообщении.\n"
+            "Попробуйте:\n"
+            "• «анализ сбер»\n"
+            "• «куда вложить 50000»\n"
+            "• «распредели 100000 рублей»"
+        )
 
 
 async def _reply_with_analysis(update: Update, ticker: str):
@@ -184,6 +222,60 @@ async def _reply_with_analysis(update: Update, ticker: str):
         await update.message.reply_text(
             f"\u274c Ошибка: {e}\nУбедитесь, что запущен `finn update` и данные загружены."
         )
+
+
+def _extract_allocation_amount(text: str) -> float | None:
+    text_lower = text.lower().strip()
+    alloc_keywords = ["вложить", "инвестировать", "распредели", "распределение",
+                      "allocate", "разложить", "разместить"]
+    if not any(k in text_lower for k in alloc_keywords):
+        return None
+    numbers = re.findall(r"(\d[\d\s]*\d|\d)", text_lower.replace(",", ".").replace(" ", ""))
+    if numbers:
+        return float(numbers[-1])
+    return None
+
+
+async def _reply_with_allocation(update: Update, capital: float):
+    await update.message.reply_text(f"\U0001f50d Распределяю {capital:,.0f} ₽...")
+
+    try:
+        from src.portfolio.allocator import allocator
+
+        plan = allocator.allocate(capital)
+        if not plan or not plan.get("plan"):
+            await update.message.reply_text("Не удалось составить план. Запустите `finn update` для загрузки данных.")
+            return
+
+        text = f"\U0001f4b0 Распределение {capital:,.0f} ₽\n\n"
+        for cat, data in plan["plan"].items():
+            text += f"*{data['label']}* — {data['budget']:,.0f} ₽\n"
+            for item in data.get("items", []):
+                shares_info = ""
+                risk = item.get("risk", {})
+                if risk.get("suggested_shares", 0) > 0:
+                    shares_info = f" ≈ {risk['suggested_shares']} шт."
+                text += f"  \u2022 {item['ticker']}: {item['amount']:,.0f} ₽{shares_info}\n"
+                if item.get("reason"):
+                    text += f"    ({item['reason']})\n"
+            text += "\n"
+
+        total = plan.get("total_allocated", 0)
+        text += f"\U0001f4b5 *Итого распределено:* {total:,.0f} ₽"
+        reserve = plan.get("reserve", 0)
+        if reserve > 0:
+            text += f"\n\U0001f4a4 *Резерв:* {reserve:,.0f} ₽"
+
+        monthly = plan.get("projected_monthly_yield", 0)
+        if monthly > 0:
+            pct = plan.get("projected_monthly_pct", 0)
+            text += f"\n\U0001f4c8 *Прогноз доходности:* {monthly:,.0f} ₽/мес ({pct:.1f}%)"
+
+        for chunk in _chunk_text(text, 4096):
+            await update.message.reply_markdown(chunk)
+    except Exception as e:
+        logger.warning("Allocation error", exc_info=True)
+        await update.message.reply_text(f"\u274c Ошибка: {e}. Убедитесь, что запущен `finn update`.")
 
 
 def _simplify_reasons(reasons: list[str]) -> str:
@@ -401,6 +493,7 @@ async def run_bot():
     app.add_handler(CommandHandler("help", start))
     app.add_handler(CommandHandler("analyze", analyze))
     app.add_handler(CommandHandler("ask", ask))
+    app.add_handler(CommandHandler("allocate", allocate))
     app.add_handler(CommandHandler("portfolio", portfolio))
     app.add_handler(CommandHandler("rates", rates))
     app.add_handler(CommandHandler("geo", geo))
