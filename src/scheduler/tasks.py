@@ -162,6 +162,7 @@ async def _collect_news(db: Session) -> list[dict]:
     for item in news_list:
         exists = db.query(News).filter_by(url=item["url"]).first()
         if not exists:
+            detail = item.get("sentiment_detail", {})
             n = News(
                 url=item["url"],
                 title=item["title"],
@@ -170,6 +171,9 @@ async def _collect_news(db: Session) -> list[dict]:
                 source_name=item["source_name"],
                 published_at=item["published_at"],
                 sentiment_score=item.get("sentiment_score"),
+                sentiment_weighted=item.get("sentiment_weighted"),
+                sentiment_bert_score=detail.get("bert_score"),
+                source_weight=detail.get("source_weight"),
             )
             db.add(n)
     db.commit()

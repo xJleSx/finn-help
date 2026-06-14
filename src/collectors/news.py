@@ -1,8 +1,9 @@
 import logging
-import re
 from datetime import datetime, timezone
 
 import feedparser
+
+from src.collectors.sentiment import analyze_sentiment
 
 logger = logging.getLogger(__name__)
 
@@ -14,59 +15,6 @@ RSS_FEEDS = [
     {"url": "https://www.kommersant.ru/RSS/main.xml", "name": "Коммерсантъ"},
     {"url": "https://econs.online/rss/", "name": "Econs"},
 ]
-
-POSITIVE_WORDS = {
-    "рост",
-    "увеличение",
-    "прибыль",
-    "успех",
-    "развитие",
-    "выгода",
-    "восстановление",
-    "повышение",
-    "рекорд",
-    "доход",
-    "укрепление",
-    "стабильность",
-    "профицит",
-    "диверсификация",
-    "модернизация",
-    "инвестиция",
-    "капитализация",
-    "рост",
-    "уверенный",
-    "позитивный",
-    "перспективный",
-    "эффективность",
-}
-
-NEGATIVE_WORDS = {
-    "падение",
-    "убыток",
-    "кризис",
-    "санкции",
-    "обвал",
-    "потери",
-    "снижение",
-    "дефолт",
-    "банкротство",
-    "нестабильность",
-    "отток",
-    "инфляция",
-    "рецессия",
-    "девальвация",
-    "эмбарго",
-    "блокировка",
-    "отзыв",
-    "ликвидация",
-    "долг",
-    "риск",
-    "ущерб",
-    "потеря",
-    "ограничение",
-    "негативный",
-    "заморозка",
-}
 
 
 class NewsCollector:
@@ -101,7 +49,7 @@ class NewsCollector:
                 summary = entry.description
 
             text = f"{entry.get('title', '')} {summary}"
-            sentiment_score = self._estimate_sentiment(text)
+            sentiment = analyze_sentiment(text, source_name=source)
 
             items.append(
                 {
@@ -111,16 +59,9 @@ class NewsCollector:
                     "source_type": "rss",
                     "source_name": source,
                     "published_at": published,
-                    "sentiment_score": sentiment_score,
+                    "sentiment_score": sentiment["score"],
+                    "sentiment_weighted": sentiment["weighted_score"],
+                    "sentiment_detail": sentiment,
                 }
             )
         return items
-
-    def _estimate_sentiment(self, text: str) -> float:
-        words = set(re.findall(r"[а-яёa-z]+", text.lower()))
-        pos_count = len(words & POSITIVE_WORDS)
-        neg_count = len(words & NEGATIVE_WORDS)
-        total = pos_count + neg_count
-        if total == 0:
-            return 0.0
-        return round((pos_count - neg_count) / total, 3)

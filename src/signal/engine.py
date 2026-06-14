@@ -10,10 +10,11 @@ from src.db.models import Signal as SignalModel
 logger = logging.getLogger(__name__)
 
 BASE_WEIGHTS = {
-    "technical": 0.45,
-    "fundamental": 0.20,
-    "geo": 0.20,
-    "ml": 0.15,
+    "technical": 0.40,
+    "fundamental": 0.18,
+    "geo": 0.17,
+    "ml": 0.13,
+    "sentiment": 0.12,
 }
 
 
@@ -85,6 +86,7 @@ class SignalFusionEngine:
         volatility_regime: Optional[dict] = None,
         risk_metrics: Optional[dict] = None,
         macro_context: Optional[dict] = None,
+        sentiment: Optional[dict] = None,
     ) -> dict:
         reasons = []
         weights = dict(BASE_WEIGHTS)
@@ -103,6 +105,19 @@ class SignalFusionEngine:
 
         macro_adjustment = 0.0
         macro_reasons = []
+
+        sentiment_signal = 0.0
+        sentiment_source = "нет данных"
+        if sentiment is not None:
+            raw = sentiment.get("score", 0.0)
+            divergence = sentiment.get("divergence", 0.0)
+            sentiment_signal = raw * (1 - min(divergence, 0.5))
+            sentiment_source = sentiment.get("source", "rss")
+            if raw > 0.3:
+                reasons.append(f"Новости позитивные ({raw:.1f})")
+            elif raw < -0.3:
+                reasons.append(f"Новости негативные ({raw:.1f})")
+
         if macro_context:
             imoex = macro_context.get("imoex")
             cpi = macro_context.get("cpi")
@@ -190,13 +205,16 @@ class SignalFusionEngine:
             + fund_signal * weights["fundamental"]
             + geo_signal * weights["geo"]
             + ml_signal * weights["ml"]
+            + sentiment_signal * weights["sentiment"]
             + macro_adjustment * 0.10
         )
 
         macro_max = 0.10
         w = weights
-        max_positive = 1.0 * w["technical"] + 1.0 * w["fundamental"] + 0.0 * w["geo"] + 1.0 * w["ml"] + macro_max
-        max_negative = 1.0 * w["technical"] + 1.0 * w["fundamental"] + 1.0 * w["geo"] + 1.0 * w["ml"] + macro_max
+        all_except_geo = w["technical"] + w["fundamental"] + w["ml"] + w["sentiment"]
+        all_weights = all_except_geo + w["geo"]
+        max_positive = all_except_geo + macro_max
+        max_negative = all_weights + macro_max
         max_possible = max_positive if weighted_score >= 0 else max_negative
 
         confidence = abs(weighted_score) / max_possible if max_possible > 0 else 0.0
@@ -260,6 +278,10 @@ class SignalFusionEngine:
                     "confidence": ml_confidence,
                     "target_price": ml_target,
                     "change_pct": ml_change,
+                },
+                "sentiment": {
+                    "score": round(sentiment_signal, 3),
+                    "source": sentiment_source,
                 },
             },
         }

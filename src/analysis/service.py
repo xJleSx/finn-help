@@ -94,6 +94,25 @@ class AnalysisService:
 
         return MacroCollector.latest_values(db)
 
+    def _load_sentiment(self, db: Session) -> dict:
+        from datetime import datetime, timedelta
+
+        from src.db.models import News
+
+        cutoff = datetime.utcnow() - timedelta(days=3)
+        recent = db.query(News).filter(News.created_at >= cutoff).all()
+        if not recent:
+            return {"score": 0.0, "divergence": 0.0, "source": "none"}
+        scores = [n.sentiment_weighted or n.sentiment_score or 0.0 for n in recent]
+        mean = sum(scores) / len(scores)
+        variance = sum((s - mean) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
+        return {
+            "score": round(mean, 3),
+            "divergence": round(min(variance * 2, 1.0), 3),
+            "source": "rss",
+            "count": len(scores),
+        }
+
     def analyze_single(self, db: Session, inst: Instrument, ticker: str, with_ml: bool = True) -> dict:
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
         if len(prices) < 50:
@@ -115,6 +134,7 @@ class AnalysisService:
         ml = self._compute_ml(df, ind_df) if with_ml else None
         geo = self._load_geo(db)
         macro_context = self._load_macro(db)
+        sentiment = self._load_sentiment(db)
 
         volatility_regime = self.volatility.detect(df, ind_df)
 
@@ -129,6 +149,7 @@ class AnalysisService:
             volatility_regime=volatility_regime,
             risk_metrics=risk_metrics,
             macro_context=macro_context,
+            sentiment=sentiment,
         )
         return fused
 
