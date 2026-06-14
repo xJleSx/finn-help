@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from datetime import date, timedelta
 from typing import Optional
 
@@ -11,6 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
+from src.config import settings
 from src.db.connection import get_session
 from src.db.models import Instrument, Price, Indicator, Signal, News, GeoRiskScore, Dividend as DivModel
 from src.analysis.technical import TechnicalAnalyzer
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="FinAdvisor API", version="0.1.0")
 
-origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+origins = settings.cors_origins.split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
