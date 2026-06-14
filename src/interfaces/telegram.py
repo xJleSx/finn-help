@@ -8,6 +8,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 from src.cli import run_analysis
 from src.config import settings
+from src.db.connection import get_session
+from src.db.models import Instrument
 
 logger = logging.getLogger(__name__)
 
@@ -19,24 +21,74 @@ ACTION_EMOJI = {
     "NEUTRAL": "\u26aa",
 }
 
+RUSSIAN_NAMES: dict[str, str] = {
+    "сбер": "SBER", "сбера": "SBER", "сбербанк": "SBER",
+    "газпром": "GAZP", "газпрома": "GAZP",
+    "лукойл": "LKOH", "лукойла": "LKOH",
+    "втб": "VTBR",
+    "яндекс": "YNDX", "yandex": "YNDX",
+    "нлмк": "NLMK",
+    "магнит": "MGNT", "магнита": "MGNT",
+    "мтс": "MTSS",
+    "татнефть": "TATN", "татнефти": "TATN",
+    "ростелеком": "RTKM",
+    "фосагро": "PHOR",
+    "афк система": "AFKS", "система": "AFKS",
+    "аэрофлот": "AFLT",
+    "роснефть": "ROSN", "роснефти": "ROSN",
+    "норникель": "GMKN", "норильский никель": "GMKN",
+    "полюс": "PLZL",
+    "алроса": "ALRS",
+    "северсталь": "CHMF",
+    "магнитогорский": "MAGN",
+    "интер рао": "IRAO",
+    "ozon": "OZON",
+    "тинькофф": "TCSG", "ткс": "TCSG", "tcsg": "TCSG",
+    "озон": "OZON",
+    "московская биржа": "MOEX", "биржа": "MOEX", "moex": "MOEX",
+    "распадская": "RASP",
+    "транснефть": "TRNFP",
+    "преф сбер": "SBERP",
+    "преф татнефть": "TATNP",
+    "преф": "SNGSP",
+    "самараэнерго": "SMLT",
+    "юнипро": "UPRO",
+    "всм": "VSMO", "всмпо": "VSMO",
+    "полиметалл": "POLY",
+    "русал": "RUAL",
+    "пик": "PIKK", "пикк": "PIKK",
+    "лср": "LSRG", "лсрг": "LSRG",
+    "мосэнерго": "MSNG",
+    "фск": "FEES", "федеральная сетевая": "FEES",
+    "русгидро": "HYDR", "гидро": "HYDR",
+    "башнефть": "BANE",
+    "преф башнефть": "BANEP",
+    "селенга": "SELG",
+    "трубная": "TRNR",
+    "five": "FIVE", "пятерочка": "FIVE", "x5": "FIVE", "икс5": "FIVE",
+    "fix": "FIX", "фикс": "FIX",
+}
+
 subscribers: set[int] = set()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "\U0001f916 FinAdvisor — финансовый ассистент\n\n"
-        "Просто напишите название тикера (SBER, GAZP, LKOH...)\n"
-        "или задайте вопрос в свободной форме.\n\n"
+        "Просто напишите вопрос про акцию:\n"
+        "• «анализ сбер»\n"
+        "• «что с газпромом?»\n"
+        "• «дивиденды лукойла»\n"
+        "• или /analyze SBER\n\n"
         "Команды:\n"
         "/analyze TICKER — анализ инструмента\n"
-        "/ask вопрос — совет по инструменту\n"
+        "/ask вопрос — совет в свободной форме\n"
         "/portfolio — портфель\n"
         "/rates — курсы валют\n"
         "/geo — геополитический риск\n"
         "/subscribe — подписаться на уведомления\n"
         "/unsubscribe — отписаться\n"
-        "/daily — ежедневная сводка\n"
-        "/help — справка"
+        "/daily — ежедневная сводка"
     )
 
 
@@ -65,7 +117,6 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Укажите тикер: /analyze SBER")
         return
-
     ticker = context.args[0].upper()
     await _reply_with_analysis(update, ticker)
 
@@ -75,27 +126,26 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         await update.message.reply_text("Задайте вопрос, например: /ask Что думаешь про SBER?")
         return
-    await _handle_chat(update, text)
+    await _handle_text(update, text)
 
 
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    await _handle_chat(update, text)
+    await _handle_text(update, update.message.text.strip())
 
 
-async def _handle_chat(update: Update, text: str):
-    tickers = _extract_tickers(text)
+async def _handle_text(update: Update, text: str):
+    tickers = _find_tickers(text)
     if not tickers:
         await update.message.reply_text(
-            "Я не нашёл тикер в вашем сообщении.\n"
-            "Напишите название акции (SBER, GAZP, LKOH, YNDX...)\n"
-            "или используйте /analyze TICKER."
+            "Не нашёл тикер в вашем сообщении.\n"
+            "Попробуйте: «анализ сбер», «что с газпромом?»\n"
+            "или /analyze SBER"
         )
         return
 
     if len(tickers) > 1:
         ticker = tickers[0]
-        await update.message.reply_text(f"Нашёл несколько тикеров, анализирую {ticker}")
+        await update.message.reply_text(f"Нашёл несколько, анализирую {ticker}")
     else:
         ticker = tickers[0]
 
@@ -124,40 +174,54 @@ async def _reply_with_analysis(update: Update, ticker: str):
             await update.message.reply_markdown(chunk)
     except Exception as e:
         logger.warning("Analysis error", exc_info=True)
-        await update.message.reply_text(f"\u274c Ошибка: {e}. Попробуйте /analyze {ticker}")
+        await update.message.reply_text(
+            f"\u274c Ошибка: {e}\nУбедитесь, что запущен `finn update` и данные загружены."
+        )
 
 
-def _extract_tickers(text: str) -> list[str]:
-    known = {"SBER", "GAZP", "LKOH", "VTBR", "MOEX", "YNDX", "NLMK", "MGNT", "MTSS",
-             "SNGS", "TATN", "RTKM", "PHOR", "AFKS", "AFLT", "ROSN", "GMKN", "PLZL",
-             "ALRS", "CHMF", "MAGN", "IRAO", "SMLT", "FIVE", "OZON", "QIWI", "TCSG",
-             "SBERP", "SNGSP", "RASP", "TRNFP", "BANE", "BANEP", "FEES", "HYDR",
-             "LSRG", "MSNG", "PIKK", "POLY", "RUAL", "RTKMP", "SELG", "TATNP",
-             "UPRO", "VSMO", "MOSP", "SGZH",
-             "FXRL", "SBMX", "TMOS", "AKIM", "RUSB", "TRUR",
-             "SU26238RMFS5", "SU26243RMFS2", "SU26248RMFS1"}
+def _find_tickers(text: str) -> list[str]:
+    text_lower = text.lower().strip()
+
+    matched = re.findall(r"([а-яёa-z]+)", text_lower)
+    for word in matched:
+        if word in RUSSIAN_NAMES:
+            return [RUSSIAN_NAMES[word]]
+
+    for phrase, ticker in RUSSIAN_NAMES.items():
+        if phrase in text_lower:
+            return [ticker]
+
+    try:
+        db = get_session()
+        try:
+            instruments = db.query(Instrument.ticker).all()
+            db_tickers = {r[0] for r in instruments}
+        finally:
+            db.close()
+    except Exception:
+        db_tickers = set()
 
     words = re.findall(r"[A-Za-z0-9]{2,}", text.upper())
-    found = [w for w in words if w in known]
-    return found
+    found = [w for w in words if w in db_tickers or w in RUSSIAN_NAMES.values()]
+    if found:
+        return found
+
+    return []
 
 
 def _chunk_text(text: str, max_len: int) -> list[str]:
     if len(text) <= max_len:
         return [text]
-    chunks = []
-    for i in range(0, len(text), max_len):
-        chunks.append(text[i:i + max_len])
-    return chunks
+    return [text[i:i + max_len] for i in range(0, len(text), max_len)]
 
 
 async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.db.connection import get_session
-    from src.db.models import Instrument, Portfolio, Price
+    from src.db.models import Portfolio as PortModel
+    from src.db.models import Price
 
     db = get_session()
     try:
-        positions = db.query(Portfolio).all()
+        positions = db.query(PortModel).all()
         if not positions:
             await update.message.reply_text("Портфель пуст")
             return
@@ -200,7 +264,6 @@ async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.db.connection import get_session
     from src.db.models import GeoRiskScore
 
     db = get_session()
@@ -231,7 +294,7 @@ async def broadcast_signal(n):
     from src.notifications.service import format_signal_text
 
     text = format_signal_text(n)
-    for uid in subscribers:
+    for uid in list(subscribers):
         try:
             await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
         except Exception as e:
@@ -246,7 +309,7 @@ async def broadcast_daily_summary():
     ns = NotificationService()
     summary = ns.get_daily_summary()
     text = format_daily_summary_text(summary)
-    for uid in subscribers:
+    for uid in list(subscribers):
         try:
             await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
         except Exception as e:
