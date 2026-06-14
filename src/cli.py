@@ -440,5 +440,13 @@ def seed_portfolio(
         db.close()
 
 
+@app.command()
+def bot():
+    """Запустить Telegram бота"""
+    from src.interfaces.telegram import run_bot
+
+    asyncio.run(run_bot())
+
+
 def main():
     app()
