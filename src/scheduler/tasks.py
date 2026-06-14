@@ -1,33 +1,22 @@
 import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import pandas as pd
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from src.db.connection import get_session
-from src.db.models import Instrument, Price, Indicator, Dividend, Prediction, News, GeoRiskScore
-from src.db.models import Signal as SignalModel
+from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.collectors.news import NewsCollector
-from src.collectors.cbr import CBRCollector
-from src.analysis.technical import TechnicalAnalyzer
-from src.analysis.fundamental import FundamentalAnalyzer
-from src.analysis.ml.prophet_model import ProphetPredictor
-from src.analysis.ml.xgboost_model import XGBoostClassifier
-from src.geo.sentiment_divergence import SentimentDivergenceDetector
+from src.db.connection import get_session
+from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Price
 from src.geo.risk_scorer import GeoRiskScorer
+from src.geo.sentiment_divergence import SentimentDivergenceDetector
 from src.signal.engine import SignalFusionEngine
-from src.llm.router import llm
 
 logger = logging.getLogger(__name__)
 
-analyzer = TechnicalAnalyzer()
-fundamental = FundamentalAnalyzer()
 fusion = SignalFusionEngine()
-prophet = ProphetPredictor()
-xgb_classifier = XGBoostClassifier()
 divergence = SentimentDivergenceDetector()
 geo_risk = GeoRiskScorer()
 
@@ -120,6 +109,8 @@ async def _collect_dividends(db: Session):
 
 
 def _compute_indicators(db: Session, instrument_ids: set[int] | None = None):
+    from src.analysis.technical import TechnicalAnalyzer
+    analyzer = TechnicalAnalyzer()
     q = db.query(Instrument)
     if instrument_ids is not None:
         q = q.filter(Instrument.id.in_(instrument_ids))
@@ -184,7 +175,6 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
     usd_rate = next((r for r in rates if r["code"] == "USD"), None)
     currency_vol = 0.0
     if usd_rate:
-        from src.collectors.cbr import CBRCollector as C
         prev = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
         if prev and prev.components_json:
             prev_stress = prev.components_json.get("currency_stress", 0)
@@ -212,79 +202,12 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
 
 
 async def _generate_signals(db: Session, updated_ids: set[int] | None = None) -> list[dict]:
-    today = date.today()
-    instruments = db.query(Instrument).all()
-    signals = []
-
-    for inst in instruments:
-        cached = db.query(SignalModel).filter(
-            SignalModel.instrument_id == inst.id,
-            func.date(SignalModel.date) == today,
-        ).first()
-        if cached and cached.fused_json:
-            signals.append(cached.fused_json)
-            continue
-
-        prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
-        if len(prices) < 50:
-            continue
-
-        df = pd.DataFrame([{
-            "date": p.date, "open": p.open, "high": p.high,
-            "low": p.low, "close": p.close, "volume": p.volume,
-        } for p in prices])
-
-        ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
-        if len(ind_rows) < 2:
-            continue
-
-        ind_df = pd.DataFrame([{
-            "date": r.date,
-            "rsi": r.rsi, "macd_line": r.macd_line,
-            "macd_signal": r.macd_signal, "macd_hist": r.macd_hist,
-            "sma_20": r.sma_20, "sma_50": r.sma_50, "sma_200": r.sma_200,
-            "bb_upper": r.bb_upper, "bb_lower": r.bb_lower, "bb_mid": r.bb_mid,
-            "volume_sma_20": r.volume_sma_20, "atr": r.atr,
-        } for r in ind_rows])
-
-        tech_signal = analyzer.generate_signal(ind_df)
-
-        divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
-        div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
-        fund = fundamental.analyze(df, div_df)
-
-        ml_prediction = None
-        if len(df) >= 60:
-            try:
-                prophet_result = prophet.predict(df)
-                xgb_result = xgb_classifier.predict(ind_df)
-                ml_prediction = prophet_result
-                ml_prediction["ml_confidence"] = max(
-                    prophet_result.get("confidence", 0),
-                    xgb_result.get("confidence", 0),
-                )
-                ml_prediction["xgb_action"] = xgb_result.get("action", "NEUTRAL")
-            except Exception:
-                logger.warning("ML failed for %s", inst.ticker, exc_info=True)
-
-        geo = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
-        geo_dict = {"score": geo.score} if geo else {"score": 0.0}
-
-        fused = fusion.fuse(
-            ticker=inst.ticker,
-            technical=tech_signal,
-            fundamental=fund,
-            geo=geo_dict,
-            ml_prediction=ml_prediction,
-        )
-        fusion.save_signal(db, inst.id, fused)
-        signals.append(fused)
-
-    return signals
+    from src.analysis.service import analysis_service
+    return analysis_service.analyze_all(db, updated_ids=updated_ids)
 
 
 async def _notify_signals(signals: list[dict]):
-    from src.interfaces.telegram import broadcast_signal, broadcast_daily_summary
+    from src.interfaces.telegram import broadcast_daily_summary, broadcast_signal
 
     for s in signals:
         n = _to_signal_notification(s)

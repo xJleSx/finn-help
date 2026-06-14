@@ -1,13 +1,12 @@
 import asyncio
 import logging
-from datetime import date
 from typing import Optional
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-from src.config import settings
 from src.cli import run_analysis
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +84,7 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from src.db.connection import get_session
-    from src.db.models import Portfolio, Instrument, Price
+    from src.db.models import Instrument, Portfolio, Price
 
     db = get_session()
     try:

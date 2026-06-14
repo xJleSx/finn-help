@@ -1,14 +1,14 @@
-import asyncio
 import logging
 from datetime import date
 from typing import Optional
 
 from src.db.connection import get_session
-from src.db.models import Signal as SignalModel, GeoRiskScore, Portfolio, Instrument, Price
+from src.db.models import GeoRiskScore, Instrument, Portfolio, Price
+from src.db.models import Signal as SignalModel
 from src.notifications import (
-    SignalNotification,
-    GeoRiskNotification,
     DailySummaryNotification,
+    GeoRiskNotification,
+    SignalNotification,
 )
 
 logger = logging.getLogger(__name__)

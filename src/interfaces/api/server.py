@@ -3,22 +3,17 @@ import logging
 from datetime import date, timedelta
 from typing import Optional
 
-import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
+from src.analysis.service import analysis_service
 from src.config import settings
 from src.db.connection import get_session
-from src.db.models import Instrument, Price, Indicator, Signal, News, GeoRiskScore, Dividend as DivModel
-from src.analysis.technical import TechnicalAnalyzer
-from src.analysis.fundamental import FundamentalAnalyzer
-from src.signal.engine import SignalFusionEngine
+from src.db.models import GeoRiskScore, Indicator, Instrument, News, Price, Signal
 from src.llm.router import llm
-from src.analysis.ml.prophet_model import ProphetPredictor
-from src.analysis.ml.xgboost_model import XGBoostClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +28,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-analyzer = TechnicalAnalyzer()
-fundamental = FundamentalAnalyzer()
-fusion = SignalFusionEngine()
-prophet = ProphetPredictor()
-xgb_classifier = XGBoostClassifier()
-
 
 def get_db():
     db = get_session()
@@ -46,67 +35,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-def _compute_signal(db: Session, inst: Instrument, ticker: str) -> dict:
-    cached = db.query(Signal).filter(
-        Signal.instrument_id == inst.id,
-        func.date(Signal.date) == date.today(),
-    ).order_by(Signal.date.desc()).first()
-    if cached and cached.fused_json:
-        return cached.fused_json
-
-    prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
-    if len(prices) < 50:
-        raise HTTPException(400, "Not enough data")
-
-    df = pd.DataFrame([{
-        "date": p.date, "open": p.open, "high": p.high,
-        "low": p.low, "close": p.close, "volume": p.volume,
-    } for p in prices])
-
-    ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
-    if len(ind_rows) < 2:
-        raise HTTPException(400, "Not enough indicator data")
-
-    ind_df = pd.DataFrame([{
-        "date": r.date,
-        "rsi": r.rsi, "macd_line": r.macd_line,
-        "macd_signal": r.macd_signal, "macd_hist": r.macd_hist,
-        "sma_20": r.sma_20, "sma_50": r.sma_50, "sma_200": r.sma_200,
-        "bb_upper": r.bb_upper, "bb_lower": r.bb_lower, "bb_mid": r.bb_mid,
-        "volume_sma_20": r.volume_sma_20, "atr": r.atr,
-    } for r in ind_rows])
-
-    tech_signal = analyzer.generate_signal(ind_df)
-
-    divs = db.query(DivModel).filter_by(instrument_id=inst.id).all()
-    div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs]) if divs else pd.DataFrame()
-    fund = fundamental.analyze(df, div_df)
-
-    geo = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
-    geo_dict = {"score": geo.score} if geo else {"score": 0.0}
-
-    ml_prediction = None
-    if len(df) >= 60:
-        try:
-            pr = prophet.predict(df)
-            xr = xgb_classifier.predict(ind_df)
-            ml_prediction = pr
-            ml_prediction["ml_confidence"] = max(pr.get("confidence", 0), xr.get("confidence", 0))
-        except Exception:
-            logger.warning("ML prediction failed for %s", ticker, exc_info=True)
-
-    fused = fusion.fuse(
-        ticker=ticker.upper(),
-        technical=tech_signal,
-        fundamental=fund,
-        geo=geo_dict,
-        ml_prediction=ml_prediction,
-    )
-
-    fusion.save_signal(db, inst.id, fused)
-    return fused
 
 
 @app.get("/api/health")
@@ -207,7 +135,21 @@ def get_signal(ticker: str, db: Session = Depends(get_db)):
     inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
     if not inst:
         raise HTTPException(404, "Instrument not found")
-    return _compute_signal(db, inst, ticker)
+
+    cached = db.query(Signal).filter(
+        Signal.instrument_id == inst.id,
+        func.date(Signal.date) == date.today(),
+    ).order_by(Signal.date.desc()).first()
+    if cached and cached.fused_json:
+        return cached.fused_json
+
+    try:
+        fused = analysis_service.analyze_single(db, inst, ticker)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    analysis_service.fusion.save_signal(db, inst.id, fused)
+    return fused
 
 
 @app.get("/api/instruments/{ticker}/advice")
@@ -224,7 +166,12 @@ async def get_advice(ticker: str, db: Session = Depends(get_db)):
         advice = await llm.advise(cached.fused_json)
         return {"signal": cached.fused_json, "advice": advice}
 
-    fused = _compute_signal(db, inst, ticker)
+    try:
+        fused = analysis_service.analyze_single(db, inst, ticker)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    analysis_service.fusion.save_signal(db, inst.id, fused)
     advice = await llm.advise(fused)
     return {"signal": fused, "advice": advice}
 
@@ -257,7 +204,7 @@ def get_geo_risk(days: int = Query(30), db: Session = Depends(get_db)):
 
 @app.get("/api/portfolio")
 def get_portfolio(db: Session = Depends(get_db)):
-    from src.db.models import Portfolio, Transaction
+    from src.db.models import Portfolio
     positions = db.query(Portfolio).all()
     result = []
     for p in positions:

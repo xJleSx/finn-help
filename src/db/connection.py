@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import scoped_session, sessionmaker
 
 from src.config import settings
 from src.db.models import Base

@@ -4,7 +4,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from src.db.models import Signal as SignalModel, Instrument
+from src.db.models import Signal as SignalModel
 
 logger = logging.getLogger(__name__)
 

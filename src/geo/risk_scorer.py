@@ -1,5 +1,4 @@
 import logging
-from datetime import date, timedelta
 
 logger = logging.getLogger(__name__)
 

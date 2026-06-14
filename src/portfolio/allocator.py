@@ -1,11 +1,7 @@
 import logging
-from typing import Optional
-
-import numpy as np
-import pandas as pd
 
 from src.db.connection import get_session
-from src.db.models import Instrument, Price, Dividend
+from src.db.models import Dividend, Instrument, Price
 
 logger = logging.getLogger(__name__)
 

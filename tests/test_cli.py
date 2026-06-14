@@ -1,7 +1,6 @@
 """Tests for CLI update command logic"""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 
 
@@ -49,15 +48,16 @@ class TestSchedulerDividends:
 
     def test_instrument_filter_for_dividends(self):
         """_collect_dividends should only query stock and etf instruments"""
-        from src.db.models import Instrument
         from sqlalchemy import inspect
+
+        from src.db.models import Instrument
         mapper = inspect(Instrument)
         assert hasattr(mapper, "columns")
 
     @pytest.mark.asyncio
     async def test_dividend_collection_skips_existing(self):
         from src.db.connection import get_session
-        from src.db.models import Instrument, Dividend
+        from src.db.models import Dividend
         db = get_session()
         try:
             all_divs = db.query(Dividend).count()

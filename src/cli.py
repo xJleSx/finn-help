@@ -7,20 +7,14 @@ from typing import Optional
 import pandas as pd
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
 
-from src.config import settings
-from src.db.connection import get_session, init_db
-from src.db.models import Instrument, Price, Dividend, Portfolio
-from src.collectors.moex import MOEXCollector
+from src.analysis.service import analysis_service
 from src.collectors.cbr import CBRCollector
-from src.analysis.technical import TechnicalAnalyzer
-from src.analysis.fundamental import FundamentalAnalyzer
-from src.analysis.ml.prophet_model import ProphetPredictor
-from src.analysis.ml.xgboost_model import XGBoostClassifier
-from src.signal.engine import SignalFusionEngine
-from src.llm.router import llm
+from src.collectors.moex import MOEXCollector
+from src.db.connection import get_session, init_db
+from src.db.models import Dividend, Instrument, Portfolio, Price
 
 if sys.stdout.encoding != "utf-8" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -28,12 +22,6 @@ if sys.stdout.encoding != "utf-8" and hasattr(sys.stdout, "reconfigure"):
 console = Console()
 app = typer.Typer(help="FinAdvisor — AI финансовый ассистент для MOEX")
 logger = logging.getLogger(__name__)
-
-analyzer = TechnicalAnalyzer()
-fundamental = FundamentalAnalyzer()
-fusion = SignalFusionEngine()
-prophet = ProphetPredictor()
-xgb_classifier = XGBoostClassifier()
 
 
 @app.callback()
@@ -176,51 +164,7 @@ async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True)
         inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
         if not inst:
             return None, f"Инструмент {ticker} не найден"
-
-        prices_q = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
-        if not prices_q:
-            return None, f"Нет данных для {ticker}"
-
-        df = pd.DataFrame([{
-            "date": p.date, "open": p.open, "high": p.high,
-            "low": p.low, "close": p.close, "volume": p.volume,
-        } for p in prices_q])
-
-        dividends_q = db.query(Dividend).filter_by(instrument_id=inst.id).all()
-        div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in dividends_q])
-
-        df_ind = analyzer.compute_all(df)
-        tech_signal = analyzer.generate_signal(df_ind)
-        fund_result = fundamental.analyze(df, div_df)
-
-        ml_prediction = None
-        if with_ml and len(df) >= 60:
-            try:
-                prophet_result = prophet.predict(df)
-                xgb_result = xgb_classifier.predict(df_ind)
-                ml_prediction = prophet_result
-                ml_prediction["ml_confidence"] = max(
-                    prophet_result.get("confidence", 0),
-                    xgb_result.get("confidence", 0),
-                )
-                ml_prediction["xgb_action"] = xgb_result.get("action", "NEUTRAL")
-            except Exception as e:
-                logger.warning(f"ML prediction failed for {ticker}: {e}")
-
-        geo = {"score": 0.0, "level": "LOW"}
-        fused = fusion.fuse(
-            ticker=ticker.upper(),
-            technical=tech_signal,
-            fundamental=fund_result,
-            geo=geo,
-            ml_prediction=ml_prediction,
-        )
-
-        advice = ""
-        if with_llm:
-            advice = await llm.advise(fused)
-
-        return fused, advice
+        return await analysis_service.analyze_with_advice(db, inst, ticker, with_ml=with_ml)
     finally:
         db.close()
 
@@ -255,7 +199,7 @@ def analyze(
                 "date": p.date, "open": p.open, "high": p.high,
                 "low": p.low, "close": p.close, "volume": p.volume,
             } for p in prices_q])
-            df_ind = analyzer.compute_all(df)
+            df_ind = analysis_service.analyzer.compute_all(df)
             last = df_ind.iloc[-1] if not df_ind.empty else None
 
             table = Table(title=f"📊 {ticker.upper()} — анализ")
