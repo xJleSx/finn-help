@@ -86,7 +86,13 @@ class PortfolioAllocator:
                 budget = capital * cfg["weight"]
                 candidates = self._score_candidates(instruments_data, category, budget, existing, db)
 
-                selected = candidates[: cfg["max"]]
+                max_positions = cfg["max"]
+                if capital < 1000 and budget < 500:
+                    max_positions = 1
+                elif capital < 3000 and budget < 1000:
+                    max_positions = min(max_positions, 2)
+
+                selected = candidates[:max_positions]
                 if not selected:
                     continue
 
@@ -95,13 +101,11 @@ class PortfolioAllocator:
                 for item in selected:
                     share = item["score"] / cat_total
                     amount = round(budget * share, 2)
-                    if amount < 500:
-                        amount = 500.0
 
                     sector = item.get("sector", "Прочее")
                     limit = SECTOR_LIMITS.get(sector, 0.30)
                     current_sector_weight = (sector_allocation.get(sector, 0.0) + amount) / capital
-                    if current_sector_weight > limit:
+                    if capital >= 10000 and current_sector_weight > limit:
                         continue
 
                     sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
@@ -127,10 +131,11 @@ class PortfolioAllocator:
                 }
 
             leftover = round(capital - total_allocated, 2)
-            if leftover > 500:
+            if leftover > max(500, capital * 0.1):
                 for cat_name in ["etf", "dividend"]:
                     if cat_name in plan and plan[cat_name]["items"]:
                         plan[cat_name]["items"][0]["amount"] = round(plan[cat_name]["items"][0]["amount"] + leftover, 2)
+                        total_allocated += leftover
                         break
 
             projected_monthly = self._calc_projected_yield(plan, capital)
