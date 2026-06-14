@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -8,6 +8,7 @@ type Instrument = {
   id: number;
   ticker: string;
   full_name: string;
+  type: string;
   last_price: number | null;
   last_date: string | null;
 };
@@ -54,8 +55,179 @@ type AllocationPlan = {
   plan: Record<string, AllocationCategory>;
   projected_monthly_yield: number;
   projected_monthly_pct: number;
-  existing_portfolio: { ticker: string; quantity: number; avg_price: number; current_value: number }[];
+  existing_portfolio: { ticker: string; quantity: number; current_value: number }[];
 };
+
+type PricePoint = {
+  date: string;
+  close: number;
+  volume?: number;
+};
+
+function formatCurrency(v: number) {
+  return v.toLocaleString("ru-RU", { style: "currency", currency: "RUB", minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function formatNumber(v: number, decimals = 2) {
+  return v.toLocaleString("ru-RU", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+function DonutChart({ plan, reserve, capital }: { plan: Record<string, AllocationCategory>; reserve: number; capital: number }) {
+  const entries = Object.entries(plan);
+  const colors = ["#F0B90B", "#10B981", "#F97316", "#8B5CF6", "#6B7280"];
+  const labels: Record<string, string> = { etf: "БПИФ", dividend: "Дивиденды", bond: "Облигации", growth: "Рост" };
+
+  let cumulative = 0;
+  const segments = entries.map(([key, cat], i) => {
+    const pct = cat.budget / capital;
+    const start = cumulative;
+    cumulative += pct;
+    return { key, pct, start, color: colors[i % colors.length], label: labels[key] || cat.label };
+  });
+
+  const R = 120;
+  const cx = 150;
+  const cy = 150;
+
+  return (
+    <svg width={300} height={300} viewBox="0 0 300 300" className="drop-shadow-lg">
+      {segments.map((seg, i) => {
+        const p = seg.pct * 360;
+        const s = seg.start * 360;
+        const sr = (s - 90) * (Math.PI / 180);
+        const er = (s + p - 90) * (Math.PI / 180);
+        const x1 = cx + R * Math.cos(sr);
+        const y1 = cy + R * Math.sin(sr);
+        const x2 = cx + R * Math.cos(er);
+        const y2 = cy + R * Math.sin(er);
+        const large = p > 180 ? 1 : 0;
+        return (
+          <path
+            key={seg.key}
+            d={`M ${cx} ${cy} L ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} Z`}
+            fill={seg.color}
+            opacity={0.85}
+            className="hover:opacity-100 transition-opacity cursor-pointer"
+          >
+            <title>{seg.label}: {formatCurrency(seg.pct * capital)} ({(seg.pct * 100).toFixed(0)}%)</title>
+          </path>
+        );
+      })}
+      <circle cx={cx} cy={cy} r={60} fill="#0B1A2F" />
+      <text x={cx} y={cy - 8} textAnchor="middle" fill="#fff" className="text-xs font-mono" fontSize={14}>
+        {formatCurrency(capital)}
+      </text>
+      <text x={cx} y={cy + 12} textAnchor="middle" fill="#9CA3AF" className="text-xs" fontSize={11}>
+        всего
+      </text>
+    </svg>
+  );
+}
+
+function ContributionBar({ plan, capital }: { plan: Record<string, AllocationCategory>; capital: number }) {
+  const colors: Record<string, string> = { etf: "bg-amber-400", dividend: "bg-emerald-500", bond: "bg-orange-500", growth: "bg-violet-500" };
+  const labels: Record<string, string> = { etf: "БПИФ", dividend: "Дивиденды", bond: "Облигации", growth: "Рост" };
+
+  return (
+    <div className="flex gap-0.5 h-2 rounded-full overflow-hidden">
+      {Object.entries(plan).map(([key, cat]) => {
+        const pct = (cat.budget / capital) * 100;
+        return (
+          <div
+            key={key}
+            className={`${colors[key] || "bg-gray-500"} transition-all hover:opacity-80`}
+            style={{ width: `${pct}%` }}
+            title={`${labels[key] || key}: ${pct.toFixed(1)}%`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function PriceChart({ ticker, company }: { ticker: string; company: string }) {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const [prices, setPrices] = useState<PricePoint[]>([]);
+  const [period, setPeriod] = useState("1M");
+  const [showSMA, setShowSMA] = useState(false);
+
+  useEffect(() => {
+    const daysMap: Record<string, number> = { "1Н": 7, "1М": 30, "3М": 90, "1Г": 365 };
+    const days = daysMap[period] || 30;
+    fetch(`${API}/api/instruments/${ticker}/prices?days=${days}`)
+      .then((r) => r.json())
+      .then(setPrices)
+      .catch(() => setPrices([]));
+  }, [ticker, period]);
+
+  useEffect(() => {
+    if (!chartRef.current || prices.length === 0) return;
+    let chart: any, line: any, smaLine: any;
+
+    import("lightweight-charts").then((lc) => {
+      chart = lc.createChart(chartRef.current!, {
+        width: chartRef.current!.clientWidth,
+        height: 280,
+        layout: { background: { type: lc.ColorType.Solid, color: "transparent" } as any, textColor: "#9CA3AF" },
+        grid: { vertLines: { color: "rgba(255,255,255,0.03)" }, horzLines: { color: "rgba(255,255,255,0.03)" } },
+        crosshair: { vertLine: { color: "#F0B90B", width: 1, style: 2 }, horzLine: { color: "#F0B90B", width: 1, style: 2 } },
+        timeScale: { borderColor: "rgba(255,255,255,0.08)" },
+        rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
+      });
+
+      const data = prices.map((p) => ({ time: p.date.slice(0, 10), value: p.close }));
+      line = chart.addLineSeries({ color: "#F0B90B", lineWidth: 2, crosshairMarkerVisible: true });
+      line.setData(data);
+
+      if (showSMA) {
+        const smaData = data.map((d, i, arr) => {
+          if (i < 19) return d;
+          const vals = arr.slice(i - 19, i + 1).map((x) => x.value);
+          return { ...d, value: vals.reduce((a, b) => a + b, 0) / vals.length };
+        });
+        smaLine = chart.addLineSeries({ color: "#10B981", lineWidth: 1, lineStyle: 2 });
+        smaLine.setData(smaData);
+      }
+
+      const handleResize = () => {
+        if (chartRef.current) chart.applyOptions({ width: chartRef.current.clientWidth });
+      };
+      window.addEventListener("resize", handleResize);
+      return () => {
+        window.removeEventListener("resize", handleResize);
+        chart.remove();
+      };
+    });
+  }, [prices, showSMA]);
+
+  const periods = ["1Н", "1М", "3М", "1Г"];
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-xl p-4 backdrop-blur-sm">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-sm">{ticker} — {company}</h3>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-gray-400 cursor-pointer">
+            <input type="checkbox" checked={showSMA} onChange={(e) => setShowSMA(e.target.checked)} className="accent-amber-400" />
+            SMA 20
+          </label>
+          <div className="flex bg-white/5 rounded-lg p-0.5">
+            {periods.map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-2.5 py-1 text-xs rounded-md transition ${period === p ? "bg-amber-400/20 text-amber-400" : "text-gray-500 hover:text-white"}`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div ref={chartRef} className="w-full" />
+    </div>
+  );
+}
 
 export default function Home() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -65,15 +237,16 @@ export default function Home() {
   const [selectedTicker, setSelectedTicker] = useState<string>("SBER");
   const [advice, setAdvice] = useState<string>("");
 
-  const [capital, setCapital] = useState<string>("100000");
+  const [capital, setCapital] = useState("100000");
   const [allocation, setAllocation] = useState<AllocationPlan | null>(null);
   const [loadingAlloc, setLoadingAlloc] = useState(false);
+  const [showAlloc, setShowAlloc] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [instRes, newsRes, geoRes] = await Promise.all([
-          fetch(`${API}/api/instruments`),
+          fetch(`${API}/api/instruments?type=stock`),
           fetch(`${API}/api/news?limit=5`),
           fetch(`${API}/api/geo-risk?days=14`),
         ]);
@@ -84,43 +257,40 @@ export default function Home() {
         console.error("Failed to fetch data", e);
       }
     };
-
     const fetchEvents = () => {
       const es = new EventSource(`${API}/api/events`);
       es.onmessage = (e) => setDashboard(JSON.parse(e.data));
+      es.onerror = () => {};
       return () => es.close();
     };
-
     fetchData();
-    const cleanup = fetchEvents();
-    return cleanup;
+    return fetchEvents();
   }, []);
 
-  const fetchAdvice = async (ticker: string) => {
+  const fetchAdvice = useCallback(async (ticker: string) => {
     try {
       const res = await fetch(`${API}/api/instruments/${ticker}/advice`);
       if (!res.ok) return;
       const data = await res.json();
       setAdvice(data.advice || JSON.stringify(data.signal, null, 2));
     } catch {
-      setAdvice("API недоступен. Запустите: uv run finn");
+      setAdvice("API недоступен");
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchAdvice(selectedTicker);
-  }, [selectedTicker]);
+  }, [selectedTicker, fetchAdvice]);
 
   const fetchAllocation = async () => {
     setLoadingAlloc(true);
     try {
       const val = Math.max(500, parseFloat(capital) || 50000);
-      const res = await fetch(`${API}/api/portfolio/allocate?capital=${val}`, {
-        method: "POST",
-      });
+      const res = await fetch(`${API}/api/portfolio/allocate?capital=${val}`, { method: "POST" });
       if (!res.ok) throw new Error(await res.text());
       setAllocation(await res.json());
       setCapital(String(val));
+      setShowAlloc(true);
     } catch (e) {
       console.error("Allocation failed", e);
     } finally {
@@ -129,263 +299,267 @@ export default function Home() {
   };
 
   const latestGeo = geoHistory[geoHistory.length - 1];
-
-  const formatCurrency = (v: number) =>
-    v.toLocaleString("ru-RU", { style: "currency", currency: "RUB", minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const selectedInst = instruments.find((i) => i.ticker === selectedTicker);
 
   const catColors: Record<string, string> = {
-    etf: "bg-blue-500",
+    etf: "border-l-amber-400",
+    dividend: "border-l-emerald-500",
+    bond: "border-l-orange-500",
+    growth: "border-l-violet-500",
+  };
+  const catBarColors: Record<string, string> = {
+    etf: "bg-amber-400",
     dividend: "bg-emerald-500",
-    bond: "bg-amber-500",
+    bond: "bg-orange-500",
     growth: "bg-violet-500",
+  };
+  const catLabels: Record<string, string> = {
+    etf: "БПИФ",
+    dividend: "Дивиденды",
+    bond: "Облигации",
+    growth: "Рост",
   };
 
   return (
-    <main className="p-6 max-w-6xl mx-auto">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold">FinAdvisor</h1>
-        <p className="text-gray-400">AI финансовый ассистент для MOEX</p>
-        {dashboard && (
-          <div className="flex gap-6 mt-2 text-sm text-gray-500">
-            <span>Инструментов: {dashboard.instruments}</span>
-            <span>Сигналов: {dashboard.signals}</span>
-            {latestGeo && (
-              <span className={latestGeo.score > 7 ? "text-red-400" : latestGeo.score > 5 ? "text-yellow-400" : "text-green-400"}>
-                GeoRisk: {latestGeo.score.toFixed(1)}/10
-              </span>
-            )}
-          </div>
-        )}
-      </header>
-
-      <section className="bg-gray-900 rounded-xl p-6 mb-6">
-        <h2 className="text-xl font-semibold mb-4">📊 Распределение портфеля</h2>
-
-        <div className="flex flex-wrap items-end gap-4 mb-6">
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-sm text-gray-400 mb-1">Капитал для инвестиций (₽)</label>
-            <input
-              type="number"
-              value={capital}
-              onChange={(e) => setCapital(e.target.value)}
-              className="w-full bg-gray-800 px-4 py-2 rounded-lg text-lg"
-              min="500"
-              step="1000"
-            />
-          </div>
-          <button
-            onClick={fetchAllocation}
-            disabled={loadingAlloc}
-            className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 px-6 py-2 rounded-lg font-medium transition"
-          >
-            {loadingAlloc ? "Расчёт..." : "Рассчитать"}
-          </button>
-        </div>
-
-        {allocation && (
+    <div className="min-h-screen" style={{ background: "#0B1A2F" }}>
+      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6 animate-fadeIn">
+        <header className="flex items-center justify-between bg-white/[0.04] border border-white/10 rounded-2xl px-6 py-4 backdrop-blur-sm">
           <div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-              <div className="bg-gray-800 rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-400">Капитал</p>
-                <p className="text-lg font-bold">{formatCurrency(allocation.capital)}</p>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-400">Распределено</p>
-                <p className="text-lg font-bold text-emerald-400">{formatCurrency(allocation.total_allocated)}</p>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-400">Резерв</p>
-                <p className="text-lg font-bold text-amber-400">{formatCurrency(allocation.reserve)}</p>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-400">Доходность/мес</p>
-                <p className="text-lg font-bold text-emerald-400">
-                  {allocation.projected_monthly_yield > 0
-                    ? `${formatCurrency(allocation.projected_monthly_yield)}`
-                    : "—"}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-1 mb-6 h-3 rounded-full overflow-hidden">
-              {Object.entries(allocation.plan).map(([key, cat]) => {
-                const pct = (cat.budget / allocation.capital) * 100;
-                return (
-                  <div
-                    key={key}
-                    className={`${catColors[key] || "bg-gray-500"} transition-all`}
-                    style={{ width: `${pct}%` }}
-                    title={`${cat.label}: ${pct.toFixed(0)}%`}
-                  />
-                );
-              })}
-              {allocation.reserve > 0 && (
-                <div
-                  className="bg-gray-700 transition-all"
-                  style={{ width: `${(allocation.reserve / allocation.capital) * 100}%` }}
-                  title={`Резерв: ${((allocation.reserve / allocation.capital) * 100).toFixed(0)}%`}
-                />
-              )}
-            </div>
-
-            <div className="space-y-4">
-              {Object.entries(allocation.plan).map(([key, cat]) => (
-                <div key={key}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={`w-3 h-3 rounded-full ${catColors[key] || "bg-gray-500"}`} />
-                    <h3 className="font-semibold">{cat.label}</h3>
-                    <span className="text-sm text-gray-400">— {formatCurrency(cat.budget)}</span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-gray-400 border-b border-gray-800">
-                          <th className="text-left py-1">Тикер</th>
-                          <th className="text-left py-1">Название</th>
-                          <th className="text-right py-1">Сумма</th>
-                          <th className="text-left py-1 hidden sm:table-cell">Обоснование</th>
-                          <th className="text-right py-1 hidden md:table-cell">Доходность</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {cat.items.map((item) => (
-                          <tr key={item.ticker} className="border-b border-gray-800/30">
-                            <td className="py-2 font-mono text-blue-400">{item.ticker}</td>
-                            <td className="py-2">{item.name}</td>
-                            <td className="py-2 text-right font-mono">{formatCurrency(item.amount)}</td>
-                            <td className="py-2 text-gray-400 text-xs hidden sm:table-cell">{item.reason}</td>
-                            <td className="py-2 text-right hidden md:table-cell">
-                              {item.expected_yield > 0 ? `${item.expected_yield.toFixed(1)}%` : "—"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {allocation.existing_portfolio.length > 0 && (
-              <div className="mt-6 p-4 bg-gray-800/50 rounded-lg">
-                <h3 className="font-semibold mb-2">Текущий портфель</h3>
-                <div className="text-sm text-gray-400">
-                  {allocation.existing_portfolio.map((p) => (
-                    <span key={p.ticker} className="mr-4">
-                      {p.ticker}: {p.quantity} шт. ({formatCurrency(p.current_value)})
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <p className="text-xs text-gray-500 mt-4">
-              * Консервативное распределение: 40% БПИФ, 30% дивидендные акции, 20% облигации, 10% акции роста.
-              Целевая доходность ~10% годовых (0.8% в месяц).
-            </p>
+            <h1 className="text-2xl font-light tracking-tight" style={{ fontFamily: "Inter, sans-serif" }}>
+              Fin<span className="text-amber-400 font-medium">Advisor</span>
+            </h1>
+            <p className="text-gray-500 text-xs mt-0.5">AI финансовый ассистент для MOEX</p>
           </div>
-        )}
-      </section>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2">
-          <div className="bg-gray-900 rounded-xl p-4 mb-4">
-            <div className="flex items-center gap-3 mb-4">
-              <h2 className="text-xl font-semibold">Совет AI</h2>
-              <input
-                list="tickers"
-                className="bg-gray-800 px-3 py-1 rounded text-sm flex-1"
-                value={selectedTicker}
-                onChange={(e) => setSelectedTicker(e.target.value.toUpperCase())}
-              />
-              <datalist id="tickers">
-                {instruments.map((i) => (
-                  <option key={i.id} value={i.ticker} />
-                ))}
-              </datalist>
-            </div>
-            <pre className="text-sm whitespace-pre-wrap font-sans bg-gray-800 p-4 rounded-lg min-h-[100px]">
-              {advice || "Загрузка..."}
-            </pre>
-          </div>
-
-          <div className="bg-gray-900 rounded-xl p-4">
-            <h2 className="text-xl font-semibold mb-3">Инструменты</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-gray-400 border-b border-gray-800">
-                    <th className="text-left py-2">Тикер</th>
-                    <th className="text-left py-2">Название</th>
-                    <th className="text-right py-2">Цена</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {instruments.slice(0, 20).map((i) => (
-                    <tr key={i.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 cursor-pointer"
-                      onClick={() => setSelectedTicker(i.ticker)}>
-                      <td className="py-2 font-mono text-blue-400">{i.ticker}</td>
-                      <td className="py-2">{i.full_name}</td>
-                      <td className="py-2 text-right">
-                        {i.last_price !== null ? `${i.last_price.toFixed(2)} ₽` : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-        <aside className="space-y-4">
-          {latestGeo && (
-            <div className="bg-gray-900 rounded-xl p-4">
-              <h3 className="font-semibold mb-2">Геополитический риск</h3>
-              <div className="flex items-center gap-2">
-                <div className={`w-3 h-3 rounded-full ${latestGeo.score > 7 ? "bg-red-500" : latestGeo.score > 5 ? "bg-yellow-500" : "bg-green-500"}`} />
-                <span className="text-2xl font-bold">{latestGeo.score.toFixed(1)}</span>
-                <span className="text-gray-400">/10</span>
+          {dashboard && (
+            <div className="flex gap-5 text-xs">
+              <div className="text-right">
+                <p className="text-gray-500">Инструментов</p>
+                <p className="font-mono text-white">{dashboard.instruments}</p>
               </div>
-              <div className="mt-2 h-2 bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${latestGeo.score > 7 ? "bg-red-500" : latestGeo.score > 5 ? "bg-yellow-500" : "bg-green-500"}`}
-                  style={{ width: `${latestGeo.score * 10}%` }}
-                />
+              <div className="text-right">
+                <p className="text-gray-500">Сигналов</p>
+                <p className="font-mono text-white">{dashboard.signals}</p>
               </div>
-              {geoHistory.length > 1 && (
-                <div className="mt-3">
-                  <p className="text-xs text-gray-500 mb-1">История (14 дней)</p>
-                  <div className="flex items-end gap-1 h-12">
-                    {geoHistory.map((g, i) => (
-                      <div
-                        key={i}
-                        className={`flex-1 rounded-t ${g.score > 7 ? "bg-red-500/60" : g.score > 5 ? "bg-yellow-500/60" : "bg-green-500/60"}`}
-                        style={{ height: `${g.score * 10}%` }}
-                        title={`${g.date}: ${g.score.toFixed(1)}`}
-                      />
-                    ))}
-                  </div>
+              {latestGeo && (
+                <div className="text-right">
+                  <p className="text-gray-500">GeoRisk</p>
+                  <p className={`font-mono ${latestGeo.score > 7 ? "text-red-400" : latestGeo.score > 5 ? "text-amber-400" : "text-emerald-400"}`}>
+                    {latestGeo.score.toFixed(1)}
+                  </p>
                 </div>
               )}
             </div>
           )}
+        </header>
 
-          <div className="bg-gray-900 rounded-xl p-4">
-            <h3 className="font-semibold mb-2">Последние новости</h3>
-            <div className="space-y-2">
-              {news.map((n) => (
-                <div key={n.id} className="text-sm border-b border-gray-800 pb-2">
-                  <a href={n.url} target="_blank" className="text-blue-400 hover:text-blue-300 line-clamp-2" rel="noreferrer">
-                    {n.title}
-                  </a>
-                  <p className="text-gray-500 text-xs mt-1">{n.source} — {n.published_at?.slice(0, 10)}</p>
-                </div>
-              ))}
-              {news.length === 0 && <p className="text-gray-500 text-sm">Новости не загружены</p>}
+        <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-6 backdrop-blur-sm transition-all duration-500 ease-out"
+          style={{ transform: showAlloc ? "translateY(0)" : "translateY(0)", opacity: 1 }}>
+          <h2 className="text-lg font-light text-white mb-5">
+            <span className="text-amber-400 font-medium">Собрать</span> пакет
+          </h2>
+
+          <div className="flex flex-wrap items-end gap-3 mb-6">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs text-gray-500 mb-1.5 font-mono">Сумма (₽)</label>
+              <input
+                type="number"
+                value={capital}
+                onChange={(e) => setCapital(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-lg font-mono text-white placeholder-gray-600 focus:outline-none focus:border-amber-400/50 transition"
+                min="500"
+                step="100"
+                placeholder="100000"
+              />
             </div>
+            <button
+              onClick={fetchAllocation}
+              disabled={loadingAlloc}
+              className="px-8 py-3 rounded-xl font-medium text-sm transition-all duration-200 disabled:opacity-50"
+              style={{ background: "linear-gradient(135deg, #F0B90B, #D4A107)", color: "#0B1A2F" }}
+            >
+              {loadingAlloc ? "Расчёт..." : "Рассчитать"}
+            </button>
           </div>
-        </aside>
+
+          {allocation && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: "Капитал", value: formatCurrency(allocation.capital), color: "text-white" },
+                  { label: "Распределено", value: formatCurrency(allocation.total_allocated), color: "text-emerald-400" },
+                  { label: "Резерв", value: formatCurrency(allocation.reserve), color: "text-amber-400" },
+                  { label: "Доходность/мес", value: allocation.projected_monthly_yield > 0 ? `${formatNumber(allocation.projected_monthly_yield, 0)} ₽` : "—", color: "text-emerald-400" },
+                ].map((m) => (
+                  <div key={m.label} className="bg-white/[0.03] rounded-xl p-3 text-center border border-white/5">
+                    <p className="text-xs text-gray-500 mb-1">{m.label}</p>
+                    <p className={`text-lg font-mono ${m.color}`}>{m.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <ContributionBar plan={allocation.plan} capital={allocation.capital} />
+
+              <div className="flex flex-col lg:flex-row gap-6">
+                <div className="flex-shrink-0 flex justify-center">
+                  <DonutChart plan={allocation.plan} reserve={allocation.reserve} capital={allocation.capital} />
+                </div>
+
+                <div className="flex-1 space-y-3 min-w-0">
+                  {Object.entries(allocation.plan).map(([key, cat]) => (
+                    <div key={key}>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className={`w-2 h-2 rounded-full ${catBarColors[key] || "bg-gray-500"}`} />
+                        <span className="text-sm font-medium text-white">{catLabels[key] || cat.label}</span>
+                        <span className="text-xs text-gray-500 font-mono ml-auto">{formatCurrency(cat.budget)}</span>
+                      </div>
+                      {cat.items.map((item) => (
+                        <div
+                          key={item.ticker}
+                          className={`bg-white/[0.03] border border-white/5 rounded-xl p-3 pl-4 mb-1.5 border-l-4 ${catColors[key] || "border-l-gray-500"} hover:bg-white/[0.06] transition cursor-pointer`}
+                          onClick={() => { setSelectedTicker(item.ticker); }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="font-mono text-sm text-white">{item.ticker}</span>
+                              <span className="text-xs text-gray-500 ml-2">{item.name}</span>
+                            </div>
+                            <span className="font-mono text-sm text-white">{formatCurrency(item.amount)}</span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] text-gray-500">{item.reason}</span>
+                            {item.expected_yield > 0 && (
+                              <span className="text-[10px] text-emerald-400 font-mono">+{item.expected_yield.toFixed(1)}%</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-gray-600 mt-3">
+                    Консервативное распределение: 40% БПИФ, 30% дивиденды, 20% облигации, 10% рост
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
+              <div className="flex items-center gap-3 mb-4">
+                <h2 className="text-sm font-light text-white">AI совет</h2>
+                <input
+                  list="tickers"
+                  className="bg-white/5 border border-white/10 px-3 py-1.5 rounded-lg text-sm font-mono text-white flex-1 min-w-0 focus:outline-none focus:border-amber-400/50"
+                  value={selectedTicker}
+                  onChange={(e) => setSelectedTicker(e.target.value.toUpperCase())}
+                />
+                <datalist id="tickers">
+                  {instruments.map((i) => <option key={i.id} value={i.ticker} />)}
+                </datalist>
+              </div>
+              <pre className="text-xs whitespace-pre-wrap font-sans bg-white/[0.02] rounded-xl p-4 min-h-[80px] text-gray-300 leading-relaxed">
+                {advice || "Загрузка..."}
+              </pre>
+            </section>
+
+            {selectedInst && (
+              <PriceChart ticker={selectedTicker} company={selectedInst.full_name || selectedTicker} />
+            )}
+
+            <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
+              <h2 className="text-sm font-light text-white mb-4">Инструменты</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-gray-600 border-b border-white/5">
+                      <th className="text-left py-2 font-mono text-xs">Тикер</th>
+                      <th className="text-left py-2 font-mono text-xs">Название</th>
+                      <th className="text-right py-2 font-mono text-xs">Цена</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {instruments.slice(0, 20).map((i) => (
+                      <tr
+                        key={i.id}
+                        className="border-b border-white/5 hover:bg-white/[0.02] cursor-pointer transition"
+                        onClick={() => setSelectedTicker(i.ticker)}
+                      >
+                        <td className="py-2.5 font-mono text-amber-400/80 text-xs">{i.ticker}</td>
+                        <td className="py-2.5 text-xs text-gray-300">{i.full_name}</td>
+                        <td className="py-2.5 text-right font-mono text-xs text-white">
+                          {i.last_price !== null ? `${i.last_price.toFixed(2)} ₽` : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <aside className="space-y-5">
+            {latestGeo && (
+              <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
+                <h3 className="text-sm font-light text-white mb-3">Геополитический риск</h3>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-2.5 h-2.5 rounded-full ${latestGeo.score > 7 ? "bg-red-500" : latestGeo.score > 5 ? "bg-amber-400" : "bg-emerald-500"} animate-pulse`} />
+                  <span className="text-3xl font-mono font-light text-white">{latestGeo.score.toFixed(1)}</span>
+                  <span className="text-xs text-gray-600">/10</span>
+                </div>
+                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${latestGeo.score > 7 ? "bg-red-500" : latestGeo.score > 5 ? "bg-amber-400" : "bg-emerald-500"}`}
+                    style={{ width: `${latestGeo.score * 10}%` }}
+                  />
+                </div>
+                {geoHistory.length > 1 && (
+                  <div className="mt-4">
+                    <p className="text-[10px] text-gray-600 mb-1.5">14 дней</p>
+                    <div className="flex items-end gap-0.5 h-10">
+                      {geoHistory.map((g, i) => (
+                        <div
+                          key={i}
+                          className={`flex-1 rounded-t ${g.score > 7 ? "bg-red-500/40" : g.score > 5 ? "bg-amber-400/40" : "bg-emerald-500/40"}`}
+                          style={{ height: `${g.score * 10}%` }}
+                          title={`${g.date}: ${g.score.toFixed(1)}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
+              <h3 className="text-sm font-light text-white mb-3">Последние новости</h3>
+              <div className="space-y-2.5">
+                {news.map((n) => (
+                  <div key={n.id} className="border-b border-white/5 pb-2.5 last:border-0">
+                    <a href={n.url} target="_blank" className="text-xs text-gray-300 hover:text-amber-400 transition line-clamp-2" rel="noreferrer">
+                      {n.title}
+                    </a>
+                    <p className="text-[10px] text-gray-600 mt-1">{n.source} — {n.published_at?.slice(0, 10)}</p>
+                  </div>
+                ))}
+                {news.length === 0 && <p className="text-xs text-gray-600">Новости не загружены</p>}
+              </div>
+            </div>
+          </aside>
+        </div>
       </div>
-    </main>
+      <style jsx global>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+        input[type="number"]::-webkit-inner-spin-button { opacity: 0.3; }
+      `}</style>
+    </div>
   );
 }
