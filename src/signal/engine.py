@@ -64,6 +64,7 @@ class SignalFusionEngine:
         ml_prediction: Optional[dict] = None,
         volatility_regime: Optional[dict] = None,
         risk_metrics: Optional[dict] = None,
+        macro_context: Optional[dict] = None,
     ) -> dict:
         reasons = []
         weights = dict(BASE_WEIGHTS)
@@ -79,6 +80,67 @@ class SignalFusionEngine:
                 for key in weights:
                     weights[key] /= total
             reasons.append(f"Волатильность: {volatility_regime.get('regime', 'NORMAL')}")
+
+        macro_adjustment = 0.0
+        macro_reasons = []
+        if macro_context:
+            imoex = macro_context.get("imoex")
+            cpi = macro_context.get("cpi")
+            key_rate = macro_context.get("key_rate")
+            ofz = macro_context.get("ofz_10y")
+            m2 = macro_context.get("m2")
+
+            brent = macro_context.get("brent")
+            if brent:
+                if brent > 80:
+                    macro_adjustment += 0.03
+                    macro_reasons.append(f"Brent>{80}")
+                elif brent < 50:
+                    macro_adjustment -= 0.05
+                    macro_reasons.append(f"Brent<{50}")
+
+            if key_rate:
+                if key_rate > 15:
+                    macro_adjustment -= 0.05
+                    macro_reasons.append(f"Ключевая>{15}%")
+                elif key_rate < 7:
+                    macro_adjustment += 0.03
+                    macro_reasons.append(f"Ключевая<{7}%")
+
+            if cpi:
+                if cpi > 8:
+                    macro_adjustment -= 0.04
+                    macro_reasons.append(f"Инфляция>{8}%")
+                elif cpi < 4:
+                    macro_adjustment += 0.02
+                    macro_reasons.append(f"Инфляция<{4}%")
+
+            if ofz:
+                if ofz > 12:
+                    macro_adjustment -= 0.03
+                    macro_reasons.append(f"ОФЗ>{12}%")
+                elif ofz < 6:
+                    macro_adjustment += 0.02
+                    macro_reasons.append(f"ОФЗ<{6}%")
+
+            if m2:
+                if m2 > 70000:
+                    macro_adjustment += 0.02
+                    macro_reasons.append("M2 расширяется")
+                elif m2 < 50000:
+                    macro_adjustment -= 0.02
+                    macro_reasons.append("M2 сужается")
+
+            if imoex:
+                if imoex > 3500:
+                    macro_adjustment += 0.02
+                    macro_reasons.append("IMOEX сильно")
+                elif imoex < 2500:
+                    macro_adjustment -= 0.03
+                    macro_reasons.append("IMOEX слабый")
+
+            if macro_reasons:
+                reasons.append(f"Макро: {', '.join(macro_reasons)}")
 
         tech_action = technical.get("action", "NEUTRAL")
         tech_conf = technical.get("confidence", 0.0)
@@ -108,14 +170,13 @@ class SignalFusionEngine:
             + fund_signal * weights["fundamental"]
             + geo_signal * weights["geo"]
             + ml_signal * weights["ml"]
+            + macro_adjustment * 0.10
         )
 
-        max_positive = (
-            1.0 * weights["technical"] + 1.0 * weights["fundamental"] + 0.0 * weights["geo"] + 1.0 * weights["ml"]
-        )
-        max_negative = (
-            1.0 * weights["technical"] + 1.0 * weights["fundamental"] + 1.0 * weights["geo"] + 1.0 * weights["ml"]
-        )
+        macro_max = 0.10
+        w = weights
+        max_positive = 1.0 * w["technical"] + 1.0 * w["fundamental"] + 0.0 * w["geo"] + 1.0 * w["ml"] + macro_max
+        max_negative = 1.0 * w["technical"] + 1.0 * w["fundamental"] + 1.0 * w["geo"] + 1.0 * w["ml"] + macro_max
         max_possible = max_positive if weighted_score >= 0 else max_negative
 
         confidence = abs(weighted_score) / max_possible if max_possible > 0 else 0.0

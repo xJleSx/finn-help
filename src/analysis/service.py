@@ -84,6 +84,11 @@ class AnalysisService:
         geo = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
         return {"score": geo.score} if geo else {"score": 0.0}
 
+    def _load_macro(self, db: Session) -> dict:
+        from src.collectors.macro import MacroCollector
+
+        return MacroCollector.latest_values(db)
+
     def analyze_single(self, db: Session, inst: Instrument, ticker: str, with_ml: bool = True) -> dict:
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
         if len(prices) < 50:
@@ -104,6 +109,7 @@ class AnalysisService:
 
         ml = self._compute_ml(df, ind_df) if with_ml else None
         geo = self._load_geo(db)
+        macro_context = self._load_macro(db)
 
         volatility_regime = self.volatility.detect(df, ind_df)
 
@@ -117,6 +123,7 @@ class AnalysisService:
             ml_prediction=ml,
             volatility_regime=volatility_regime,
             risk_metrics=risk_metrics,
+            macro_context=macro_context,
         )
         return fused
 

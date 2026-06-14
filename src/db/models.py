@@ -221,7 +221,7 @@ class MacroIndicator(Base):
 
     id = Column(Integer, primary_key=True)
     date = Column(Date, nullable=False)
-    indicator_type = Column(String(20), nullable=False)
+    indicator_type = Column(String(50), nullable=False)
     value = Column(Float, nullable=False)
     source = Column(String(50))
 

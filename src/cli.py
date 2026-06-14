@@ -298,7 +298,7 @@ def rates():
 
 @app.command()
 def macro():
-    """Показать последние макро-индикаторы (Brent, ключевая ставка, USD/RUB)"""
+    """Показать последние макро-индикаторы (Brent, ключевая ставка, USD/RUB, IMOEX, CPI, ОФЗ, M2)"""
     from src.db.models import MacroIndicator
 
     db = get_session()
@@ -307,7 +307,16 @@ def macro():
         table.add_column("Индикатор", style="cyan")
         table.add_column("Значение", style="yellow")
         table.add_column("Дата", style="white")
-        for indicator_type in ("brent", "key_rate", "usd_rate"):
+        labels = {
+            "brent": "Brent ($/bbl)",
+            "key_rate": "Ключевая ставка ЦБ (%)",
+            "usd_rate": "USD/RUB",
+            "imoex": "IMOEX (пункты)",
+            "cpi": "Инфляция CPI (%)",
+            "ofz_10y": "ОФЗ 10Y (%)",
+            "m2": "M2 (млрд руб)",
+        }
+        for indicator_type in labels:
             row = (
                 db.query(MacroIndicator)
                 .filter_by(indicator_type=indicator_type)
@@ -315,10 +324,9 @@ def macro():
                 .first()
             )
             if row:
-                label = {"brent": "Brent", "key_rate": "Ключевая ставка ЦБ", "usd_rate": "USD/RUB"}
-                table.add_row(label.get(indicator_type, indicator_type), str(row.value), str(row.date))
+                table.add_row(labels[indicator_type], str(row.value), str(row.date))
             else:
-                table.add_row(indicator_type, "—", "—")
+                table.add_row(labels[indicator_type], "—", "—")
         console.print(table)
     finally:
         db.close()
