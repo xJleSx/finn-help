@@ -262,9 +262,54 @@ async def _reply_with_allocation(update: Update, capital: float):
 
         for chunk in _chunk_text(text, 4096):
             await update.message.reply_markdown(chunk)
+
+        allocation_text = _format_allocation_plan(picks, capital)
+        for chunk in _chunk_text(allocation_text, 4096):
+            await update.message.reply_markdown(chunk)
     except Exception as e:
         logger.warning("Recommendation error", exc_info=True)
         await update.message.reply_text(f"\u274c Ошибка: {e}. Убедитесь, что запущен `finn update`.")
+
+
+def _format_allocation_plan(picks: list[dict], capital: float) -> str:
+    top = []
+    total_score = 0.0
+    for p in picks:
+        score = p.get("score", 0)
+        price = p.get("last_price")
+        if score <= 0 or not price or price <= 0:
+            continue
+        amount = round(capital * score / 100, 2)
+        if amount >= price:
+            shares = int(amount / price)
+            top.append({**p, "amount": amount, "shares": shares, "score": score})
+            total_score += score
+        if len(top) >= 5:
+            break
+
+    if not top or total_score <= 0:
+        return ""
+
+    text = "\U0001f4ca *Как бы я распределил эти деньги:*\n\n"
+    allocated = 0.0
+    for item in top:
+        pct = item["score"] / total_score
+        amt = round(capital * pct, 2)
+        allocated += amt
+        shares = int(amt / item["last_price"])
+        text += (
+            f"\u2022 *{item['ticker']}* ({item.get('name', '')}): "
+            f"{amt:,.0f} ₽ ({pct*100:.0f}%)"
+        )
+        if shares > 0:
+            text += f" \u2192 ~{shares} \u0448\u0442. \u043f\u043e {item['last_price']:.0f} \u20bd"
+        text += "\n"
+
+    leftover = round(capital - allocated, 2)
+    text += f"\n\U0001f4b5 *Итого:* {allocated:,.0f} \u0438\u0437 {capital:,.0f} \u20bd"
+    if leftover > 0:
+        text += f"\n\U0001f4a4 *Остаток:* {leftover:,.0f} \u20bd"
+    return text
 
 
 def _simplify_reasons(reasons: list[str]) -> str:
