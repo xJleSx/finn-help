@@ -119,6 +119,7 @@ class PortfolioAllocator:
                             "reason": item.get("reason", ""),
                             "expected_yield": item.get("yield", 0),
                             "sector": sector,
+                            "last_price": item.get("last_price"),
                             "risk": risk,
                         }
                     )

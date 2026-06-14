@@ -254,9 +254,11 @@ async def _reply_with_allocation(update: Update, capital: float):
                 name = item.get("name") or item["ticker"]
                 shares_info = ""
                 risk = item.get("risk", {})
-                if risk.get("suggested_shares", 0) > 0:
-                    shares_info = f" ≈ {risk['suggested_shares']} шт."
-                text += f"  \u2022 *{item['ticker']}* ({name}): {item['amount']:,.0f} ₽{shares_info}\n"
+                last_price = item.get("last_price")
+                suggested = int(risk.get("suggested_shares", 0))
+                if suggested > 0 and last_price and last_price > 0:
+                    shares_info = f" ≈ {suggested} шт. × {last_price:.0f} ₽"
+                text += f"  \u2022 *{item['ticker']}* ({name}): выделено {item['amount']:,.0f} ₽{shares_info}\n"
                 if item.get("reason"):
                     text += f"    ({item['reason']})\n"
             text += "\n"
