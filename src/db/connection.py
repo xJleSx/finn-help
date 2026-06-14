@@ -35,6 +35,10 @@ def get_session():
     return SessionLocal()
 
 
+def close_session():
+    SessionLocal.remove()
+
+
 def _add_missing_columns():
     inspector = inspect(engine)
     model_tables = Base.metadata.tables

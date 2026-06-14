@@ -11,7 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from src.analysis.service import analysis_service
 from src.config import settings
-from src.db.connection import get_session
+from src.db.connection import close_session, get_session
 from src.db.models import GeoRiskScore, Indicator, Instrument, News, Price, Signal
 from src.llm.router import llm
 
@@ -41,6 +41,7 @@ def get_db():
         yield db
     finally:
         db.close()
+        close_session()
 
 
 @app.get("/api/health")
@@ -288,6 +289,7 @@ async def event_stream():
                 }
             finally:
                 db.close()
+                close_session()
             await asyncio.sleep(60)
 
     return EventSourceResponse(generate())
