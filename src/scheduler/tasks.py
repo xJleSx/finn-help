@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 from sqlalchemy import func
@@ -57,7 +57,7 @@ async def _collect_prices(db: Session) -> set[int]:
         instruments = db.query(Instrument).all()
         for inst in instruments:
             last = db.query(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-            from_date = last[0].isoformat() if last else (date.today() - __import__("datetime").timedelta(days=365)).isoformat()
+            from_date = last[0].isoformat() if last else (date.today() - timedelta(days=365)).isoformat()
             board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(inst.instrument_type, "shares")
             history = await moex.get_history(inst.ticker, from_date=from_date, board=board)
             new_count = 0

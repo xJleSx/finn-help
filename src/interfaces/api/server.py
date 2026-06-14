@@ -17,11 +17,14 @@ from src.llm.router import llm
 from src.analysis.ml.prophet_model import ProphetPredictor
 from src.analysis.ml.xgboost_model import XGBoostClassifier
 
+import os
+
 app = FastAPI(title="FinAdvisor API", version="0.1.0")
 
+origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
