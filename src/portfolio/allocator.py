@@ -206,6 +206,7 @@ class PortfolioAllocator:
         db,
     ) -> list[dict]:
         existing_tickers = set(e["ticker"] for e in existing)
+        existing_tickers_list = list(existing_tickers)
 
         if category == "etf":
             candidates = [i for i in instruments if i["type"] == "etf" and i["last_price"]]
@@ -218,6 +219,8 @@ class PortfolioAllocator:
         else:
             return []
 
+        from src.analysis.correlation import correlation as corr_analyzer
+
         for c in candidates:
             score = 0.0
             reason_parts = []
@@ -225,6 +228,11 @@ class PortfolioAllocator:
             if c["ticker"] in existing_tickers:
                 score += 1.0
                 reason_parts.append("уже в портфеле")
+
+            penalty = corr_analyzer.diversification_penalty(c["ticker"], existing_tickers_list, db)
+            if penalty > 0:
+                score -= penalty
+                reason_parts.append("высокая корреляция с портфелем")
 
             if c["div_yield"] > 5:
                 score += 2.0
