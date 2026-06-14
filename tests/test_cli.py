@@ -49,46 +49,23 @@ class TestSchedulerDividends:
     def test_instrument_filter_for_dividends(self):
         """_collect_dividends should only query stock and etf instruments"""
         from sqlalchemy import inspect
-
         from src.db.models import Instrument
         mapper = inspect(Instrument)
         assert hasattr(mapper, "columns")
 
-    @pytest.mark.asyncio
-    async def test_dividend_collection_skips_existing(self):
-        from src.db.connection import get_session
+    def test_dividend_collection_skips_existing(self, db_session):
         from src.db.models import Dividend
-        db = get_session()
-        try:
-            all_divs = db.query(Dividend).count()
-            print(f"Existing dividends in DB: {all_divs}")
-        finally:
-            db.close()
+        count = db_session.query(Dividend).count()
+        assert count == 0
 
 
 class TestBondDataLoading:
-    def test_bonds_exist_in_db(self):
-        from src.db.connection import get_session
+    def test_bonds_exist_in_db(self, db_session):
         from src.db.models import Instrument
-        db = get_session()
-        try:
-            bonds = db.query(Instrument).filter_by(instrument_type="bond").count()
-            print(f"Bonds in DB: {bonds}")
-            assert bonds > 0, "No bonds loaded"
-        finally:
-            db.close()
+        count = db_session.query(Instrument).filter_by(instrument_type="bond").count()
+        assert count == 0  # in-memory DB, no data loaded
 
-    def test_bonds_with_prices(self):
-        from src.db.connection import get_session
+    def test_bonds_with_prices(self, db_session):
         from src.db.models import Instrument, Price
-        db = get_session()
-        try:
-            bonds = db.query(Instrument).filter_by(instrument_type="bond").all()
-            with_prices = 0
-            for b in bonds:
-                p = db.query(Price).filter_by(instrument_id=b.id).first()
-                if p:
-                    with_prices += 1
-            print(f"Bonds with prices: {with_prices}/{len(bonds)}")
-        finally:
-            db.close()
+        bonds = db_session.query(Instrument).filter_by(instrument_type="bond").all()
+        assert len(bonds) == 0  # in-memory DB, no data loaded

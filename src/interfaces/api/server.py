@@ -222,10 +222,10 @@ def get_portfolio(db: Session = Depends(get_db)):
 
 
 @app.post("/api/portfolio/allocate")
-def allocate_portfolio(capital: float = 50000.0):
+def allocate_portfolio(capital: float = 50000.0, db: Session = Depends(get_db)):
     from src.portfolio.allocator import allocator
     try:
-        result = allocator.allocate(capital)
+        result = allocator.allocate(capital, db=db)
         return result
     except Exception as e:
         import logging

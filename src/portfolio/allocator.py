@@ -61,8 +61,10 @@ class PortfolioAllocator:
         "growth": {"weight": 0.10, "label": "Акции роста", "max": 2},
     }
 
-    def allocate(self, capital: float) -> dict:
-        db = get_session()
+    def allocate(self, capital: float, db=None) -> dict:
+        should_close = db is None
+        if db is None:
+            db = get_session()
         try:
             existing = self._get_current_portfolio(db)
             instruments_data = self._load_instruments(db)
@@ -70,6 +72,8 @@ class PortfolioAllocator:
             plan = {}
             total_allocated = 0.0
             sector_allocation: dict[str, float] = {}
+            if should_close:
+                db.close()
 
             for category, cfg in self.TARGET_WEIGHTS.items():
                 budget = capital * cfg["weight"]
@@ -139,7 +143,8 @@ class PortfolioAllocator:
                 "sector_allocation": sector_allocation,
             }
         finally:
-            db.close()
+            if should_close:
+                db.close()
 
     def _get_current_portfolio(self, db) -> list[dict]:
         from src.db.models import Portfolio as PortModel
