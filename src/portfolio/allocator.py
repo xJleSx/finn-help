@@ -110,7 +110,7 @@ class PortfolioAllocator:
 
                     sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
 
-                    risk = _item_risk(item, db)
+                    risk = _item_risk(item, db, capital)
                     category_items.append(
                         {
                             "ticker": item["ticker"],
@@ -295,7 +295,7 @@ class PortfolioAllocator:
 allocator = PortfolioAllocator()
 
 
-def _item_risk(item: dict, db) -> dict:
+def _item_risk(item: dict, db, capital: float = 100_000) -> dict:
     prices = db.query(Price).filter_by(instrument_id=item["id"]).order_by(Price.date.desc()).limit(60).all()
     if len(prices) < 10:
         return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
@@ -327,7 +327,7 @@ def _item_risk(item: dict, db) -> dict:
 
     stop = compute_stop_loss(last_price, atr_val)
     sizing = compute_position_size(
-        capital=100_000,
+        capital=capital,
         price=last_price,
         risk_per_trade_pct=2.0,
         stop_loss_pct=stop["stop_loss_pct"] if stop else None,
