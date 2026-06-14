@@ -317,6 +317,26 @@ class PortfolioAllocator:
                 monthly += ann / 12
         return monthly
 
+    def recommend(self, capital: float = 0, db=None) -> list[dict]:
+        should_close = db is None
+        if db is None:
+            db = get_session()
+        try:
+            instruments = self._load_instruments(db)
+            existing = self._get_current_portfolio(db)
+            all_picks = []
+            for cat, cfg in self.TARGET_WEIGHTS.items():
+                candidates = self._score_candidates(instruments, cat, capital or 100_000, existing, db)
+                for c in candidates:
+                    c["category"] = cfg["label"]
+                    c["score"] = round(c.get("score", 0), 2)
+                    all_picks.append(c)
+            all_picks.sort(key=lambda x: x["score"], reverse=True)
+            return all_picks[:15]
+        finally:
+            if should_close:
+                db.close()
+
 
 allocator = PortfolioAllocator()
 

@@ -84,7 +84,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Команды:\n"
         "/analyze TICKER — анализ инструмента\n"
         "/ask вопрос — совет в свободной форме\n"
-        "/allocate СУММА — распределение капитала\n"
+        "/allocate СУММА — куда вложить деньги\n"
         "/portfolio — портфель\n"
         "/rates — курсы валют\n"
         "/geo — геополитический риск\n"
@@ -237,47 +237,33 @@ def _extract_allocation_amount(text: str) -> float | None:
 
 
 async def _reply_with_allocation(update: Update, capital: float):
-    await update.message.reply_text(f"\U0001f50d Распределяю {capital:,.0f} ₽...")
+    await update.message.reply_text(f"\U0001f50d Анализирую рынок для {capital:,.0f} ₽...")
 
     try:
         from src.portfolio.allocator import allocator
 
-        plan = allocator.allocate(capital)
-        if not plan or not plan.get("plan"):
-            await update.message.reply_text("Не удалось составить план. Запустите `finn update` для загрузки данных.")
+        picks = allocator.recommend(capital=capital)
+        if not picks:
+            msg = "Не удалось подобрать варианты. Запустите `finn update` для загрузки данных."
+            await update.message.reply_text(msg)
             return
 
-        text = f"\U0001f4b0 Распределение {capital:,.0f} ₽\n\n"
-        for cat, data in plan["plan"].items():
-            text += f"*{data['label']}* — {data['budget']:,.0f} ₽\n"
-            for item in data.get("items", []):
-                name = item.get("name") or item["ticker"]
-                shares_info = ""
-                risk = item.get("risk", {})
-                last_price = item.get("last_price")
-                suggested = int(risk.get("suggested_shares", 0))
-                if suggested > 0 and last_price and last_price > 0:
-                    shares_info = f" ≈ {suggested} шт. × {last_price:.0f} ₽"
-                text += f"  \u2022 *{item['ticker']}* ({name}): выделено {item['amount']:,.0f} ₽{shares_info}\n"
-                if item.get("reason"):
-                    text += f"    ({item['reason']})\n"
+        text = f"\U0001f4b0 *Рекомендации для {capital:,.0f} ₽*\n\n"
+        for i, p in enumerate(picks[:10], 1):
+            name = p.get("name") or p["ticker"]
+            reason = p.get("reason", "")
+            last_price = p.get("last_price")
+            price_str = f"цена {last_price:.0f} ₽" if last_price else ""
+            text += f"{i}. *{p['ticker']}* ({name}) — {p['category']}\n"
+            text += f"   {price_str}\n"
+            if reason:
+                text += f"   \u2192 {reason}\n"
             text += "\n"
-
-        total = plan.get("total_allocated", 0)
-        text += f"\U0001f4b5 *Итого распределено:* {total:,.0f} ₽"
-        reserve = plan.get("reserve", 0)
-        if reserve > 0:
-            text += f"\n\U0001f4a4 *Резерв:* {reserve:,.0f} ₽"
-
-        monthly = plan.get("projected_monthly_yield", 0)
-        if monthly > 0:
-            pct = plan.get("projected_monthly_pct", 0)
-            text += f"\n\U0001f4c8 *Прогноз доходности:* {monthly:,.0f} ₽/мес ({pct:.1f}%)"
 
         for chunk in _chunk_text(text, 4096):
             await update.message.reply_markdown(chunk)
     except Exception as e:
-        logger.warning("Allocation error", exc_info=True)
+        logger.warning("Recommendation error", exc_info=True)
         await update.message.reply_text(f"\u274c Ошибка: {e}. Убедитесь, что запущен `finn update`.")
 
 
