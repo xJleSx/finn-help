@@ -86,7 +86,7 @@ async def _collect_dividends(db: Session):
             try:
                 dividends = await moex.get_dividends(inst.ticker)
                 for row in dividends:
-                    d = row.get("recordDate") or row.get("recorddate")
+                    d = row.get("registryclosedate") or row.get("recordDate") or row.get("recorddate")
                     amt = row.get("value") or row.get("dividendGross")
                     if not d or not amt:
                         continue

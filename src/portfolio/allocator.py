@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 
 import numpy as np
 
@@ -251,6 +252,11 @@ class PortfolioAllocator:
                 score += 1.0
                 reason_parts.append(f"див. доходность {c['div_yield']:.1f}%")
 
+            upcoming = self._upcoming_dividend_score(c, db)
+            if upcoming["bonus"]:
+                score += upcoming["bonus"]
+                reason_parts.append(upcoming["reason"])
+
             if category == "etf":
                 volume_score = self._volume_score(c, db)
                 score += volume_score
@@ -272,6 +278,21 @@ class PortfolioAllocator:
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates
+
+    def _upcoming_dividend_score(self, inst: dict, db) -> dict:
+        try:
+            div = db.query(Dividend).filter_by(instrument_id=inst["id"]).order_by(Dividend.date.desc()).first()
+            if not div:
+                return {"bonus": 0.0, "reason": ""}
+            days_since = (date.today() - div.date).days
+            if 300 < days_since < 400:
+                est_yield = div.amount / inst["last_price"] * 100 if inst.get("last_price") else 0
+                return {"bonus": 2.0, "reason": f"ожидаются дивиденды ~{div.amount:.0f} ₽/акц ({est_yield:.1f}%)"}
+            if days_since <= 90:
+                return {"bonus": 0.5, "reason": "недавние дивиденды"}
+            return {"bonus": 0.0, "reason": ""}
+        except Exception:
+            return {"bonus": 0.0, "reason": ""}
 
     def _volume_score(self, inst: dict, db) -> float:
         try:

@@ -137,7 +137,7 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock"):
         if inst.instrument_type in ("stock", "etf"):
             dividends = await moex.get_dividends(tk)
             for row in dividends:
-                d = row.get("recordDate") or row.get("recorddate")
+                d = row.get("registryclosedate") or row.get("recordDate") or row.get("recorddate")
                 amt = row.get("value") or row.get("dividendGross")
                 if not d or not amt:
                     continue
