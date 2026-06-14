@@ -124,6 +124,7 @@ class AnalysisService:
         if len(ind_rows) < 2:
             raise ValueError("Not enough indicator data for %s", ticker)
         ind_df = self._indicator_df(ind_rows)
+        ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
 
         tech_signal = self.analyzer.generate_signal(ind_df)
 
