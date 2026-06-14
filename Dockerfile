@@ -4,7 +4,7 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
-RUN uv venv && uv pip install hatchling && uv sync --no-dev --frozen --index-url https://download.pytorch.org/whl/cpu
+RUN uv venv && uv pip install hatchling --index-url https://pypi.org/simple && uv sync --no-dev --frozen --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
 
 FROM python:3.13-slim
 
