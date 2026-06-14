@@ -260,43 +260,55 @@ async def _reply_with_allocation(update: Update, capital: float):
 
 
 def _format_allocation_plan(picks: list[dict], capital: float) -> str:
-    top = []
-    total_score = 0.0
+    candidates = []
     for p in picks:
         score = p.get("score", 0)
         price = p.get("last_price")
-        if score <= 0 or not price or price <= 0:
-            continue
-        amount = round(capital * score / 100, 2)
-        if amount >= price:
-            shares = int(amount / price)
-            top.append({**p, "amount": amount, "shares": shares, "score": score})
-            total_score += score
-        if len(top) >= 5:
-            break
-
-    if not top or total_score <= 0:
+        if score > 0 and price and price > 0:
+            candidates.append(p)
+    if not candidates:
         return ""
 
-    text = "\U0001f4ca *Как бы я распределил эти деньги:*\n\n"
+    total_score = sum(c["score"] for c in candidates)
+    if total_score <= 0:
+        return ""
+
+    used = []
+    remaining = capital
+    for p in candidates:
+        share = p["score"] / total_score
+        amt = round(capital * share, 2)
+        price = p["last_price"]
+        if amt >= price:
+            shares = int(amt / price)
+            used.append({**p, "amount": amt, "shares": shares, "pct": share})
+            remaining -= amt
+        if len(used) >= 5:
+            break
+
+    if remaining > 0 and used:
+        used[0]["amount"] = round(used[0]["amount"] + remaining, 2)
+        used[0]["shares"] = int(used[0]["amount"] / (used[0]["last_price"] or 1))
+
+    if not used:
+        return ""
+
+    text = "📊 *Как бы я распределил эти деньги:*\n\n"
     allocated = 0.0
-    for item in top:
-        pct = item["score"] / total_score
-        amt = round(capital * pct, 2)
-        allocated += amt
-        shares = int(amt / item["last_price"])
+    for item in used:
+        allocated += item["amount"]
         text += (
-            f"\u2022 *{item['ticker']}* ({item.get('name', '')}): "
-            f"{amt:,.0f} ₽ ({pct*100:.0f}%)"
+            f"• *{item['ticker']}* ({item.get('name', '')}): "
+            f"{item['amount']:,.0f} ₽ ({item['pct']*100:.0f}%)"
         )
-        if shares > 0:
-            text += f" \u2192 ~{shares} \u0448\u0442. \u043f\u043e {item['last_price']:.0f} \u20bd"
+        if item["shares"] > 0:
+            text += f" → ~{item['shares']} шт. по {item['last_price']:.0f} ₽"
         text += "\n"
 
     leftover = round(capital - allocated, 2)
-    text += f"\n\U0001f4b5 *Итого:* {allocated:,.0f} \u0438\u0437 {capital:,.0f} \u20bd"
+    text += f"\n💰 *Итого:* {allocated:,.0f} из {capital:,.0f} ₽"
     if leftover > 0:
-        text += f"\n\U0001f4a4 *Остаток:* {leftover:,.0f} \u20bd"
+        text += f"\n💤 *Остаток:* {leftover:,.0f} ₽"
     return text
 
 
