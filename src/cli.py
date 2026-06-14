@@ -39,6 +39,7 @@ def init():
 @app.command()
 def update(ticker: Optional[str] = typer.Argument(None, help="Тикер (например, SBER)")):
     """Обновить данные с MOEX"""
+
     async def _run():
         async with MOEXCollector() as moex:
             with Progress(
@@ -103,7 +104,11 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock"):
 
         board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(inst.instrument_type, "shares")
         last_date = db.query(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-        from_date = (last_date[0] + timedelta(days=1)).isoformat() if last_date else (date.today() - timedelta(days=365)).isoformat()
+        from_date = (
+            (last_date[0] + timedelta(days=1)).isoformat()
+            if last_date
+            else (date.today() - timedelta(days=365)).isoformat()
+        )
 
         history = await moex.get_history(tk, from_date=from_date, board=board)
         if not history:
@@ -138,9 +143,7 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock"):
                     continue
                 if isinstance(d, str):
                     d = date.fromisoformat(d)
-                exists = db.query(Dividend).filter_by(
-                    instrument_id=inst.id, date=d, amount=float(amt)
-                ).first()
+                exists = db.query(Dividend).filter_by(instrument_id=inst.id, date=d, amount=float(amt)).first()
                 if not exists:
                     div = Dividend(
                         instrument_id=inst.id,
@@ -175,6 +178,7 @@ def analyze(
     with_llm: bool = typer.Option(True, "--llm/--no-llm", help="Использовать LLM для совета"),
 ):
     """Проанализировать инструмент"""
+
     async def _run():
         db = get_session()
         try:
@@ -195,10 +199,19 @@ def analyze(
             if not fused:
                 return
 
-            df = pd.DataFrame([{
-                "date": p.date, "open": p.open, "high": p.high,
-                "low": p.low, "close": p.close, "volume": p.volume,
-            } for p in prices_q])
+            df = pd.DataFrame(
+                [
+                    {
+                        "date": p.date,
+                        "open": p.open,
+                        "high": p.high,
+                        "low": p.low,
+                        "close": p.close,
+                        "volume": p.volume,
+                    }
+                    for p in prices_q
+                ]
+            )
             df_ind = analysis_service.analyzer.compute_all(df)
             last = df_ind.iloc[-1] if not df_ind.empty else None
 
@@ -217,7 +230,10 @@ def analyze(
                     val = last.get(col)
                     if val is not None and not pd.isna(val):
                         table.add_row(col.upper(), f"{val:.2f}")
-                table.add_row("Сигнал", f"[bold]{fused['action']}[/bold] (уверенность: {fused['confidence']:.0%})")
+                table.add_row(
+                    "Сигнал",
+                    f"[bold]{fused['action']}[/bold] (уверенность: {fused['confidence']:.0%})",
+                )
                 table.add_row("Макс. доля", f"до {fused['max_portfolio_pct']}% портфеля")
 
             console.print(table)
@@ -261,6 +277,7 @@ def list_instruments(
 @app.command()
 def rates():
     """Получить курсы валют ЦБ РФ"""
+
     async def _run():
         console.print("[bold]🏦 Курсы валют (ЦБ РФ):[/bold]")
         try:
@@ -283,6 +300,7 @@ def rates():
 def macro():
     """Показать последние макро-индикаторы (Brent, ключевая ставка, USD/RUB)"""
     from src.db.models import MacroIndicator
+
     db = get_session()
     try:
         table = Table(title="📈 Макро-индикаторы")
@@ -310,6 +328,7 @@ def macro():
 def sectors():
     """Показать распределение инструментов по секторам"""
     from src.portfolio.allocator import SECTOR_NAMES
+
     db = get_session()
     try:
         instruments = db.query(Instrument).all()
@@ -334,6 +353,7 @@ def sectors():
 @app.command()
 def auto():
     """Запустить полный цикл: обновить ВСЕ MOEX + анализ + сигналы"""
+
     async def _run():
         from src.scheduler.tasks import daily_update
 
@@ -347,6 +367,7 @@ def auto():
 @app.command()
 def scan(ticker: str = typer.Argument(..., help="Тикер для массового поиска")):
     """Найти и добавить все тикеры, содержащие строку (например: SBER, GAZP, VTBR)"""
+
     async def _run():
         async with MOEXCollector() as moex:
             with console.status("Поиск инструментов..."):
@@ -354,9 +375,12 @@ def scan(ticker: str = typer.Argument(..., help="Тикер для массов�
                 etfs = await moex.get_etfs()
                 bonds = await moex.get_bonds()
 
-            matches = [s for s in stocks + etfs + bonds
-                       if ticker.upper() in str(s.get("SECID", "")).upper()
-                       or ticker.upper() in str(s.get("SHORTNAME", "")).upper()]
+            matches = [
+                s
+                for s in stocks + etfs + bonds
+                if ticker.upper() in str(s.get("SECID", "")).upper()
+                or ticker.upper() in str(s.get("SHORTNAME", "")).upper()
+            ]
 
             if not matches:
                 console.print(f"Ничего не найдено по запросу '{ticker}'")

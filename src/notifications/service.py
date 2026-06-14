@@ -54,19 +54,11 @@ class NotificationService:
         try:
             daily = date.today()
             recent = (
-                db.query(SignalModel)
-                .filter(SignalModel.date >= daily)
-                .order_by(SignalModel.confidence.desc())
-                .all()
+                db.query(SignalModel).filter(SignalModel.date >= daily).order_by(SignalModel.confidence.desc()).all()
             )
 
             yesterday = date.today()
-            prev = (
-                db.query(SignalModel)
-                .filter(SignalModel.date < yesterday)
-                .order_by(SignalModel.date.desc())
-                .first()
-            )
+            prev = db.query(SignalModel).filter(SignalModel.date < yesterday).order_by(SignalModel.date.desc()).first()
 
             changes = []
             for s in recent:
@@ -131,11 +123,7 @@ class NotificationService:
         db = get_session()
         try:
             daily = date.today()
-            signals = (
-                db.query(SignalModel)
-                .filter(SignalModel.date >= daily)
-                .all()
-            )
+            signals = db.query(SignalModel).filter(SignalModel.date >= daily).all()
             buy = sum(1 for s in signals if s.action in ("BUY", "CAUTIOUS_BUY"))
             sell = sum(1 for s in signals if s.action == "SELL")
 
@@ -158,12 +146,7 @@ class NotificationService:
             total_value = 0.0
             positions = db.query(Portfolio).all()
             for p in positions:
-                price = (
-                    db.query(Price)
-                    .filter_by(instrument_id=p.instrument_id)
-                    .order_by(Price.date.desc())
-                    .first()
-                )
+                price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
                 if price and price.close:
                     total_value += price.close * p.quantity
 

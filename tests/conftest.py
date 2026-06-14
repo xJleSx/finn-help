@@ -1,10 +1,12 @@
 """Test configuration: temporary SQLite file with all tables"""
+
 from __future__ import annotations
+
 import os
 import tempfile
 
 import pytest
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.db.models import Base
@@ -27,8 +29,8 @@ def in_memory_db():
 
 @pytest.fixture
 def db_session(in_memory_db):
-    Session = sessionmaker(bind=in_memory_db)
-    session = Session()
+    session_class = sessionmaker(bind=in_memory_db)
+    session = session_class()
     try:
         yield session
     finally:

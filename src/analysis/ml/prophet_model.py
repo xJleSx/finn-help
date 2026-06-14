@@ -58,8 +58,6 @@ class ProphetPredictor:
 
         signal_score = np.tanh(price_change_pct / 15.0)
 
-        prediction_window = (predictions["ds"].max() - predictions["ds"].min()).days
-
         n_observations = len(trend_df)
         data_quality = min(1.0, n_observations / 250)
         confidence *= data_quality

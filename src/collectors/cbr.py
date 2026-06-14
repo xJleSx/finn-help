@@ -26,13 +26,15 @@ class CBRCollector:
         rates = []
         for valute in root.findall("Valute"):
             try:
-                rates.append({
-                    "code": valute.find("CharCode").text,
-                    "num_code": valute.find("NumCode").text,
-                    "name": valute.find("Name").text,
-                    "value": float(valute.find("VunitRate").text.replace(",", ".")),
-                    "nominal": int(valute.find("Nominal").text),
-                })
+                rates.append(
+                    {
+                        "code": valute.find("CharCode").text,
+                        "num_code": valute.find("NumCode").text,
+                        "name": valute.find("Name").text,
+                        "value": float(valute.find("VunitRate").text.replace(",", ".")),
+                        "nominal": int(valute.find("Nominal").text),
+                    }
+                )
             except (AttributeError, ValueError, TypeError) as e:
                 logger.warning(f"Error parsing rate: {e}")
         return rates

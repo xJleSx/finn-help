@@ -15,6 +15,7 @@ def parametric_var(returns: np.ndarray, confidence: float = 0.95) -> float:
     if len(returns) < 10:
         return 0.0
     from scipy import stats
+
     mu = np.mean(returns)
     sigma = np.std(returns)
     z = stats.norm.ppf(1 - confidence)

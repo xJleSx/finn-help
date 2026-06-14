@@ -27,20 +27,41 @@ class AnalysisService:
         self.volatility = VolatilityRegimeDetector()
 
     def _price_df(self, prices: list[Price]) -> pd.DataFrame:
-        return pd.DataFrame([{
-            "date": p.date, "open": p.open, "high": p.high,
-            "low": p.low, "close": p.close, "volume": p.volume,
-        } for p in prices])
+        return pd.DataFrame(
+            [
+                {
+                    "date": p.date,
+                    "open": p.open,
+                    "high": p.high,
+                    "low": p.low,
+                    "close": p.close,
+                    "volume": p.volume,
+                }
+                for p in prices
+            ]
+        )
 
     def _indicator_df(self, rows: list[Indicator]) -> pd.DataFrame:
-        return pd.DataFrame([{
-            "date": r.date,
-            "rsi": r.rsi, "macd_line": r.macd_line,
-            "macd_signal": r.macd_signal, "macd_hist": r.macd_hist,
-            "sma_20": r.sma_20, "sma_50": r.sma_50, "sma_200": r.sma_200,
-            "bb_upper": r.bb_upper, "bb_lower": r.bb_lower, "bb_mid": r.bb_mid,
-            "volume_sma_20": r.volume_sma_20, "atr": r.atr,
-        } for r in rows])
+        return pd.DataFrame(
+            [
+                {
+                    "date": r.date,
+                    "rsi": r.rsi,
+                    "macd_line": r.macd_line,
+                    "macd_signal": r.macd_signal,
+                    "macd_hist": r.macd_hist,
+                    "sma_20": r.sma_20,
+                    "sma_50": r.sma_50,
+                    "sma_200": r.sma_200,
+                    "bb_upper": r.bb_upper,
+                    "bb_lower": r.bb_lower,
+                    "bb_mid": r.bb_mid,
+                    "volume_sma_20": r.volume_sma_20,
+                    "atr": r.atr,
+                }
+                for r in rows
+            ]
+        )
 
     def _dividend_df(self, divs: list[Dividend]) -> pd.DataFrame:
         return pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
@@ -107,10 +128,14 @@ class AnalysisService:
 
         signals = []
         for inst in instruments:
-            cached = db.query(Signal).filter(
-                Signal.instrument_id == inst.id,
-                func.date(Signal.date) == date.today(),
-            ).first()
+            cached = (
+                db.query(Signal)
+                .filter(
+                    Signal.instrument_id == inst.id,
+                    func.date(Signal.date) == date.today(),
+                )
+                .first()
+            )
             if cached and cached.fused_json:
                 signals.append(cached.fused_json)
                 continue
@@ -123,7 +148,9 @@ class AnalysisService:
                 continue
         return signals
 
-    async def analyze_with_advice(self, db: Session, inst: Instrument, ticker: str, with_ml: bool = True) -> tuple[dict, str]:
+    async def analyze_with_advice(
+        self, db: Session, inst: Instrument, ticker: str, with_ml: bool = True
+    ) -> tuple[dict, str]:
         fused = self.analyze_single(db, inst, ticker, with_ml=with_ml)
         advice = await llm.advise(fused)
         return fused, advice

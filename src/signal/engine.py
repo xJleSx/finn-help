@@ -111,16 +111,10 @@ class SignalFusionEngine:
         )
 
         max_positive = (
-            1.0 * weights["technical"]
-            + 1.0 * weights["fundamental"]
-            + 0.0 * weights["geo"]
-            + 1.0 * weights["ml"]
+            1.0 * weights["technical"] + 1.0 * weights["fundamental"] + 0.0 * weights["geo"] + 1.0 * weights["ml"]
         )
         max_negative = (
-            1.0 * weights["technical"]
-            + 1.0 * weights["fundamental"]
-            + 1.0 * weights["geo"]
-            + 1.0 * weights["ml"]
+            1.0 * weights["technical"] + 1.0 * weights["fundamental"] + 1.0 * weights["geo"] + 1.0 * weights["ml"]
         )
         max_possible = max_positive if weighted_score >= 0 else max_negative
 

@@ -69,7 +69,7 @@ class XGBoostClassifier:
             threshold = 0.03
 
             future_returns = df["close"].shift(-lookahead) / df["close"] - 1
-            aligned = features.iloc[: -lookahead].copy()
+            aligned = features.iloc[:-lookahead].copy()
             labels = future_returns.iloc[: len(aligned)].values
 
             y = np.where(labels > threshold, 1, np.where(labels < -threshold, 0, np.nan))
@@ -77,7 +77,7 @@ class XGBoostClassifier:
             if mask.sum() < 30:
                 return None
 
-            X_train = aligned[mask].values
+            x_train = aligned[mask].values
             y_train = y[mask].astype(int)
 
             model = xgb.XGBClassifier(
@@ -87,7 +87,7 @@ class XGBoostClassifier:
                 eval_metric="logloss",
                 verbosity=0,
             )
-            model.fit(X_train, y_train)
+            model.fit(x_train, y_train)
             return model
         except Exception as e:
             logger.warning(f"XGBoost training failed: {e}")

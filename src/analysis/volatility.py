@@ -43,7 +43,10 @@ class VolatilityRegimeDetector:
     def _classify(self, atr_ratio: float, hv: float) -> str:
         if atr_ratio < VOLATILITY_REGIMES["LOW"]["threshold_atr"] and hv < VOLATILITY_REGIMES["LOW"]["threshold_hv"]:
             return "LOW"
-        elif atr_ratio < VOLATILITY_REGIMES["NORMAL"]["threshold_atr"] or hv < VOLATILITY_REGIMES["NORMAL"]["threshold_hv"]:
+        elif (
+            atr_ratio < VOLATILITY_REGIMES["NORMAL"]["threshold_atr"]
+            or hv < VOLATILITY_REGIMES["NORMAL"]["threshold_hv"]
+        ):
             return "NORMAL"
         return "HIGH"
 

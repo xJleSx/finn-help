@@ -73,9 +73,7 @@ class Dividend(Base):
 
     instrument = relationship("Instrument", back_populates="dividends")
 
-    __table_args__ = (
-        UniqueConstraint("instrument_id", "date", "amount", name="uq_dividend"),
-    )
+    __table_args__ = (UniqueConstraint("instrument_id", "date", "amount", name="uq_dividend"),)
 
 
 class Indicator(Base):

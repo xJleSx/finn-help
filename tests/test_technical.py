@@ -1,4 +1,5 @@
 """Tests for TechnicalAnalyzer"""
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -10,6 +11,7 @@ import pytest
 @pytest.fixture
 def analyzer():
     from src.analysis.technical import TechnicalAnalyzer
+
     return TechnicalAnalyzer()
 
 
@@ -19,14 +21,16 @@ def sample_df():
     close = 100.0
     rows = []
     for i, d in enumerate(dates):
-        rows.append({
-            "date": d,
-            "open": close,
-            "high": close * 1.02,
-            "low": close * 0.98,
-            "close": close,
-            "volume": 1_000_000,
-        })
+        rows.append(
+            {
+                "date": d,
+                "open": close,
+                "high": close * 1.02,
+                "low": close * 0.98,
+                "close": close,
+                "volume": 1_000_000,
+            }
+        )
         close += (i % 10 - 5) * 0.5
     return pd.DataFrame(rows)
 
@@ -72,10 +76,23 @@ class TestComputeAll:
 
     def test_sorts_by_date(self, analyzer):
         import random
+
         dates = [date.today() - timedelta(days=i) for i in range(100)]
         shuffled = list(dates)
         random.shuffle(shuffled)
-        df = pd.DataFrame([{"date": d, "close": 100.0, "open": 99.0, "high": 101.0, "low": 98.0, "volume": 1000} for d in shuffled])
+        df = pd.DataFrame(
+            [
+                {
+                    "date": d,
+                    "close": 100.0,
+                    "open": 99.0,
+                    "high": 101.0,
+                    "low": 98.0,
+                    "volume": 1000,
+                }
+                for d in shuffled
+            ]
+        )
         result = analyzer.compute_all(df)
         assert result["date"].is_monotonic_increasing
 
@@ -94,7 +111,19 @@ class TestGenerateSignal:
         assert signal["action"] in ("SELL", "HOLD")
 
     def test_neutral_on_insufficient_data(self, analyzer):
-        small = pd.DataFrame([{"date": date.today(), "close": 100.0, "open": 99.0, "high": 101.0, "low": 98.0, "volume": 1000} for _ in range(10)])
+        small = pd.DataFrame(
+            [
+                {
+                    "date": date.today(),
+                    "close": 100.0,
+                    "open": 99.0,
+                    "high": 101.0,
+                    "low": 98.0,
+                    "volume": 1000,
+                }
+                for _ in range(10)
+            ]
+        )
         signal = analyzer.generate_signal(small)
         assert signal["action"] == "NEUTRAL"
         assert signal["confidence"] == 0.0

@@ -58,9 +58,13 @@ class MacroCollector:
 
     async def _fetch_key_rate(self) -> dict | None:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get("https://www.cbr.ru/hd_base/KeyRate/XML", params={"date_req": date.today().strftime("%d.%m.%Y")})
+            resp = await client.get(
+                "https://www.cbr.ru/hd_base/KeyRate/XML",
+                params={"date_req": date.today().strftime("%d.%m.%Y")},
+            )
             resp.raise_for_status()
         import xml.etree.ElementTree as ET
+
         root = ET.fromstring(resp.content)
         for rate in root.findall(".//Rate"):
             try:
@@ -78,6 +82,7 @@ class MacroCollector:
 
     async def _fetch_usd_rate(self) -> dict | None:
         from src.collectors.cbr import CBRCollector
+
         cbr = CBRCollector()
         rates = await cbr.get_rates()
         usd = next((r for r in rates if r["code"] == "USD"), None)
@@ -93,6 +98,7 @@ class MacroCollector:
     @staticmethod
     def latest_values(db) -> dict:
         from src.db.models import MacroIndicator
+
         today = date.today()
         result = {}
         for indicator_type in ("brent", "key_rate", "usd_rate"):

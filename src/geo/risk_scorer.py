@@ -6,12 +6,23 @@ logger = logging.getLogger(__name__)
 class GeoRiskScorer:
     def __init__(self):
         self.sanctions_keywords = [
-            "санкции", "sanctions", "ограничения", "блокировка",
-            "эмбарго", "заморозка", "активов",
+            "санкции",
+            "sanctions",
+            "ограничения",
+            "блокировка",
+            "эмбарго",
+            "заморозка",
+            "активов",
         ]
         self.instability_keywords = [
-            "дефолт", "кризис", "обвал", "падение", "шок",
-            "нестабильность", "отток", "капитала",
+            "дефолт",
+            "кризис",
+            "обвал",
+            "падение",
+            "шок",
+            "нестабильность",
+            "отток",
+            "капитала",
         ]
 
     def score(self, news_list: list[dict], currency_volatility: float = 0.0) -> dict:

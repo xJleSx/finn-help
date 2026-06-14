@@ -34,11 +34,18 @@ SECTOR_NAMES = {
 }
 
 SAFE_ETFS = [
-    "FXRL", "SBMX", "TMOS", "AKIM", "RUSB", "TRUR",
+    "FXRL",
+    "SBMX",
+    "TMOS",
+    "AKIM",
+    "RUSB",
+    "TRUR",
 ]
 
 SAFE_BONDS = [
-    "SU26238RMFS5", "SU26243RMFS2", "SU26248RMFS1",
+    "SU26238RMFS5",
+    "SU26243RMFS2",
+    "SU26248RMFS1",
 ]
 
 
@@ -77,9 +84,7 @@ class PortfolioAllocator:
 
             for category, cfg in self.TARGET_WEIGHTS.items():
                 budget = capital * cfg["weight"]
-                candidates = self._score_candidates(
-                    instruments_data, category, budget, existing, db
-                )
+                candidates = self._score_candidates(instruments_data, category, budget, existing, db)
 
                 selected = candidates[: cfg["max"]]
                 if not selected:
@@ -102,15 +107,17 @@ class PortfolioAllocator:
                     sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
 
                     risk = _item_risk(item, db)
-                    category_items.append({
-                        "ticker": item["ticker"],
-                        "name": item["name"],
-                        "amount": amount,
-                        "reason": item.get("reason", ""),
-                        "expected_yield": item.get("yield", 0),
-                        "sector": sector,
-                        "risk": risk,
-                    })
+                    category_items.append(
+                        {
+                            "ticker": item["ticker"],
+                            "name": item["name"],
+                            "amount": amount,
+                            "reason": item.get("reason", ""),
+                            "expected_yield": item.get("yield", 0),
+                            "sector": sector,
+                            "risk": risk,
+                        }
+                    )
                     total_allocated += amount
 
                 plan[category] = {
@@ -123,9 +130,7 @@ class PortfolioAllocator:
             if leftover > 500:
                 for cat_name in ["etf", "dividend"]:
                     if cat_name in plan and plan[cat_name]["items"]:
-                        plan[cat_name]["items"][0]["amount"] = round(
-                            plan[cat_name]["items"][0]["amount"] + leftover, 2
-                        )
+                        plan[cat_name]["items"][0]["amount"] = round(plan[cat_name]["items"][0]["amount"] + leftover, 2)
                         break
 
             projected_monthly = self._calc_projected_yield(plan, capital)
@@ -136,9 +141,7 @@ class PortfolioAllocator:
                 "reserve": round(capital - total_allocated, 2),
                 "plan": plan,
                 "projected_monthly_yield": round(projected_monthly, 2),
-                "projected_monthly_pct": round(
-                    (projected_monthly / capital) * 100 if capital > 0 else 0, 2
-                ),
+                "projected_monthly_pct": round((projected_monthly / capital) * 100 if capital > 0 else 0, 2),
                 "existing_portfolio": existing,
                 "sector_allocation": sector_allocation,
             }
@@ -153,57 +156,45 @@ class PortfolioAllocator:
         result = []
         for p in positions:
             inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
-            price = (
-                db.query(Price)
-                .filter_by(instrument_id=p.instrument_id)
-                .order_by(Price.date.desc())
-                .first()
-            )
+            price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
             current_price = price.close if price else 0
             value = current_price * p.quantity if current_price else 0
-            result.append({
-                "ticker": inst.ticker if inst else "?",
-                "quantity": float(p.quantity),
-                "avg_price": float(p.avg_price) if p.avg_price else 0,
-                "current_value": round(float(value), 2),
-            })
+            result.append(
+                {
+                    "ticker": inst.ticker if inst else "?",
+                    "quantity": float(p.quantity),
+                    "avg_price": float(p.avg_price) if p.avg_price else 0,
+                    "current_value": round(float(value), 2),
+                }
+            )
         return result
 
     def _load_instruments(self, db) -> list[dict]:
         instruments = db.query(Instrument).all()
         result = []
         for inst in instruments:
-            price = (
-                db.query(Price)
-                .filter_by(instrument_id=inst.id)
-                .order_by(Price.date.desc())
-                .first()
-            )
+            price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
             last_price = price.close if price else None
             sector = SECTOR_NAMES.get(inst.ticker, inst.sector or "")
 
             div_yield = 0.0
-            divs = (
-                db.query(Dividend)
-                .filter_by(instrument_id=inst.id)
-                .order_by(Dividend.date.desc())
-                .limit(4)
-                .all()
-            )
+            divs = db.query(Dividend).filter_by(instrument_id=inst.id).order_by(Dividend.date.desc()).limit(4).all()
             if divs and last_price and last_price > 0:
                 div_yield = sum(d.amount for d in divs) / last_price * 100
 
-            result.append({
-                "id": inst.id,
-                "ticker": inst.ticker,
-                "name": inst.full_name or inst.ticker,
-                "type": inst.instrument_type,
-                "sector": sector,
-                "last_price": float(last_price) if last_price else None,
-                "div_yield": round(div_yield, 2),
-                "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "dividend",
-                "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "growth",
-            })
+            result.append(
+                {
+                    "id": inst.id,
+                    "ticker": inst.ticker,
+                    "name": inst.full_name or inst.ticker,
+                    "type": inst.instrument_type,
+                    "sector": sector,
+                    "last_price": float(last_price) if last_price else None,
+                    "div_yield": round(div_yield, 2),
+                    "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "dividend",
+                    "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "growth",
+                }
+            )
         return result
 
     def _score_candidates(
@@ -266,13 +257,7 @@ class PortfolioAllocator:
 
     def _volume_score(self, inst: dict, db) -> float:
         try:
-            prices = (
-                db.query(Price)
-                .filter_by(instrument_id=inst["id"])
-                .order_by(Price.date.desc())
-                .limit(20)
-                .all()
-            )
+            prices = db.query(Price).filter_by(instrument_id=inst["id"]).order_by(Price.date.desc()).limit(20).all()
             if not prices:
                 return 0.0
             avg_vol = sum(p.volume or 0 for p in prices) / len(prices)
@@ -298,13 +283,7 @@ allocator = PortfolioAllocator()
 
 
 def _item_risk(item: dict, db) -> dict:
-    prices = (
-        db.query(Price)
-        .filter_by(instrument_id=item["id"])
-        .order_by(Price.date.desc())
-        .limit(60)
-        .all()
-    )
+    prices = db.query(Price).filter_by(instrument_id=item["id"]).order_by(Price.date.desc()).limit(60).all()
     if len(prices) < 10:
         return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
 
@@ -318,13 +297,7 @@ def _item_risk(item: dict, db) -> dict:
     last_price = close_vals[0]
 
     atr_val = None
-    atr_rows = (
-        db.query(Price)
-        .filter_by(instrument_id=item["id"])
-        .order_by(Price.date.desc())
-        .limit(14)
-        .all()
-    )
+    atr_rows = db.query(Price).filter_by(instrument_id=item["id"]).order_by(Price.date.desc()).limit(14).all()
     if len(atr_rows) >= 14:
         highs = np.array([r.high for r in atr_rows if r.high])
         lows = np.array([r.low for r in atr_rows if r.low])
@@ -341,7 +314,9 @@ def _item_risk(item: dict, db) -> dict:
 
     stop = compute_stop_loss(last_price, atr_val)
     sizing = compute_position_size(
-        capital=100_000, price=last_price, risk_per_trade_pct=2.0,
+        capital=100_000,
+        price=last_price,
+        risk_per_trade_pct=2.0,
         stop_loss_pct=stop["stop_loss_pct"] if stop else None,
     )
 

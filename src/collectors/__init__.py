@@ -1,1 +1,1 @@
-from src.collectors.moex import MOEXCollector
+from src.collectors.moex import MOEXCollector as MOEXCollector

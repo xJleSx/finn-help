@@ -60,7 +60,8 @@ async def _collect_prices(db: Session) -> set[int]:
                 exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
                 if not exists:
                     p = Price(
-                        instrument_id=inst.id, date=d,
+                        instrument_id=inst.id,
+                        date=d,
                         open=row.get("OPEN") or row.get("open"),
                         high=row.get("HIGH") or row.get("high"),
                         low=row.get("LOW") or row.get("low"),
@@ -77,9 +78,7 @@ async def _collect_prices(db: Session) -> set[int]:
 
 async def _collect_dividends(db: Session):
     async with MOEXCollector() as moex:
-        instruments = db.query(Instrument).filter(
-            Instrument.instrument_type.in_(["stock", "etf"])
-        ).all()
+        instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
         for inst in instruments:
             last = db.query(Dividend.date).filter_by(instrument_id=inst.id).order_by(Dividend.date.desc()).first()
             if last:
@@ -93,9 +92,7 @@ async def _collect_dividends(db: Session):
                         continue
                     if isinstance(d, str):
                         d = date.fromisoformat(d)
-                    exists = db.query(Dividend).filter_by(
-                        instrument_id=inst.id, date=d, amount=float(amt)
-                    ).first()
+                    exists = db.query(Dividend).filter_by(instrument_id=inst.id, date=d, amount=float(amt)).first()
                     if not exists:
                         div = Dividend(
                             instrument_id=inst.id,
@@ -111,6 +108,7 @@ async def _collect_dividends(db: Session):
 
 def _compute_indicators(db: Session, instrument_ids: set[int] | None = None):
     from src.analysis.technical import TechnicalAnalyzer
+
     analyzer = TechnicalAnalyzer()
     q = db.query(Instrument)
     if instrument_ids is not None:
@@ -120,25 +118,38 @@ def _compute_indicators(db: Session, instrument_ids: set[int] | None = None):
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
         if len(prices) < 50:
             continue
-        df = pd.DataFrame([{
-            "date": p.date, "open": p.open, "high": p.high,
-            "low": p.low, "close": p.close, "volume": p.volume,
-        } for p in prices])
+        df = pd.DataFrame(
+            [
+                {
+                    "date": p.date,
+                    "open": p.open,
+                    "high": p.high,
+                    "low": p.low,
+                    "close": p.close,
+                    "volume": p.volume,
+                }
+                for p in prices
+            ]
+        )
         df = analyzer.compute_all(df)
         for _, row in df.iterrows():
-            exists = db.query(Indicator).filter_by(
-                instrument_id=inst.id, date=row["date"]
-            ).first()
+            exists = db.query(Indicator).filter_by(instrument_id=inst.id, date=row["date"]).first()
             if exists:
                 continue
             ind = Indicator(
-                instrument_id=inst.id, date=row["date"],
-                rsi=row.get("rsi"), macd_line=row.get("macd_line"),
-                macd_signal=row.get("macd_signal"), macd_hist=row.get("macd_hist"),
-                sma_20=row.get("sma_20"), sma_50=row.get("sma_50"),
+                instrument_id=inst.id,
+                date=row["date"],
+                rsi=row.get("rsi"),
+                macd_line=row.get("macd_line"),
+                macd_signal=row.get("macd_signal"),
+                macd_hist=row.get("macd_hist"),
+                sma_20=row.get("sma_20"),
+                sma_50=row.get("sma_50"),
                 sma_200=row.get("sma_200"),
-                bb_upper=row.get("bb_upper"), bb_lower=row.get("bb_lower"),
-                bb_mid=row.get("bb_mid"), volume_sma_20=row.get("volume_sma_20"),
+                bb_upper=row.get("bb_upper"),
+                bb_lower=row.get("bb_lower"),
+                bb_mid=row.get("bb_mid"),
+                volume_sma_20=row.get("volume_sma_20"),
                 atr=row.get("atr"),
             )
             db.add(ind)
@@ -204,12 +215,14 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
 
 async def _generate_signals(db: Session, updated_ids: set[int] | None = None) -> list[dict]:
     from src.analysis.service import analysis_service
+
     return analysis_service.analyze_all(db, updated_ids=updated_ids)
 
 
 async def _collect_macro(db: Session):
     from src.collectors.macro import MacroCollector
     from src.db.models import MacroIndicator
+
     collector = MacroCollector()
     items = await collector.fetch_all()
     today = date.today()
@@ -238,6 +251,7 @@ async def _notify_signals(signals: list[dict]):
 
 def _to_signal_notification(fused: dict):
     from src.notifications import SignalNotification
+
     return SignalNotification(
         ticker=fused["ticker"],
         action=fused["action"],
