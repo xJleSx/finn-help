@@ -150,22 +150,15 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     amount = _extract_allocation_amount(text)
     if amount is not None:
         await _reply_with_allocation(update, amount)
-    else:
-        tickers = _find_tickers(text)
-        if tickers:
-            ticker = tickers[0]
-            if len(tickers) > 1:
-                await update.message.reply_text(f"Нашёл несколько, анализирую {ticker}")
-            await _reply_with_analysis(update, ticker)
-        else:
-            await update.message.reply_text(
-                "Не нашёл тикер в вашем сообщении.\n"
-                "Попробуйте:\n"
-                "• «анализ сбер»\n"
-                "• «куда вложить 50000»\n"
-                "• «распредели 100000 рублей»\n"
-                "• /allocate 100000"
-            )
+        return
+    tickers = _find_tickers(text)
+    if tickers:
+        ticker = tickers[0]
+        if len(tickers) > 1:
+            await update.message.reply_text(f"Нашёл несколько, анализирую {ticker}")
+        await _reply_with_analysis(update, ticker)
+        return
+    await _ask_llm_general(update, text)
 
 
 async def _handle_text(update: Update, text: str):
@@ -180,14 +173,9 @@ async def _handle_text(update: Update, text: str):
         if len(tickers) > 1:
             await update.message.reply_text(f"Нашёл несколько, анализирую {ticker}")
         await _reply_with_analysis(update, ticker)
-    else:
-        await update.message.reply_text(
-            "Не нашёл тикер в вашем сообщении.\n"
-            "Попробуйте:\n"
-            "• «анализ сбер»\n"
-            "• «куда вложить 50000»\n"
-            "• «распредели 100000 рублей»"
-        )
+        return
+
+    await _ask_llm_general(update, text)
 
 
 async def _reply_with_analysis(update: Update, ticker: str):
@@ -310,6 +298,60 @@ def _format_allocation_plan(picks: list[dict], capital: float) -> str:
     if leftover > 0:
         text += f"\n\U0001f4a4 *Остаток:* {leftover:,.0f} \u20bd"
     return text
+
+
+async def _ask_llm_general(update: Update, text: str):
+    await update.message.reply_text("🤔 Думаю...")
+    try:
+        from src.llm.prompts import SYSTEM_PROMPT
+        from src.settings import settings
+
+        prompt = (
+            f"Пользователь задал вопрос: {text}\n\n"
+            "Ответь коротко и полезно — что купить, зачем, какие риски. "
+            "Если вопрос про дивиденды — посоветуй конкретные российские акции "
+            "с текущими ценами и дивидендной доходностью. "
+            "Если про небольшие суммы — подскажи, какие акции/БПИФ доступны для покупки от 500–1000 ₽. "
+            "Не давай инвестиционных рекомендаций без оговорки о рисках."
+        )
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+
+        if settings.groq_api_key:
+            from groq import AsyncGroq
+            client = AsyncGroq(api_key=settings.groq_api_key)
+            response = await client.chat.completions.create(
+                model=settings.groq_model,
+                messages=messages,
+                temperature=0.3,
+                max_tokens=512,
+            )
+            answer = response.choices[0].message.content
+        else:
+            import httpx
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{settings.ollama_url}/api/chat",
+                    json={"model": settings.ollama_model, "messages": messages,
+                          "temperature": 0.3, "max_tokens": 512, "stream": False},
+                )
+                data = resp.json()
+                answer = data.get("message", {}).get("content", "")
+
+        if not answer:
+            answer = "Не могу сформулировать ответ. Попробуйте уточнить вопрос или указать тикер через /analyze"
+
+        for chunk in _chunk_text(answer, 4096):
+            await update.message.reply_markdown(chunk)
+    except Exception:
+        logger.warning("LLM error", exc_info=True)
+        await update.message.reply_text(
+            "Не смог ответить на вопрос. Попробуйте:\n"
+            "• /analyze SBER — анализ конкретной акции\n"
+            "• /allocate 50000 — куда вложить деньги"
+        )
 
 
 def _simplify_reasons(reasons: list[str]) -> str:
