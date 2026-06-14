@@ -31,6 +31,7 @@ async def daily_update():
         _compute_indicators(db, instrument_ids=updated_ids)
         news_list = await _collect_news(db)
         await _compute_geo_risk(db, news_list)
+        await _collect_macro(db)
         signals = await _generate_signals(db, updated_ids=updated_ids)
         await _notify_signals(signals)
         logger.info("Daily update cycle completed")
@@ -204,6 +205,19 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
 async def _generate_signals(db: Session, updated_ids: set[int] | None = None) -> list[dict]:
     from src.analysis.service import analysis_service
     return analysis_service.analyze_all(db, updated_ids=updated_ids)
+
+
+async def _collect_macro(db: Session):
+    from src.collectors.macro import MacroCollector
+    from src.db.models import MacroIndicator
+    collector = MacroCollector()
+    items = await collector.fetch_all()
+    today = date.today()
+    for item in items:
+        exists = db.query(MacroIndicator).filter_by(date=today, indicator_type=item["indicator_type"]).first()
+        if not exists:
+            db.add(MacroIndicator(**item))
+    db.commit()
 
 
 async def _notify_signals(signals: list[dict]):

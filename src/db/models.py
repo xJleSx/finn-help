@@ -218,6 +218,21 @@ class Relation(Base):
     )
 
 
+class MacroIndicator(Base):
+    __tablename__ = "macro_indicators"
+
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False)
+    indicator_type = Column(String(20), nullable=False)
+    value = Column(Float, nullable=False)
+    source = Column(String(50))
+
+    __table_args__ = (
+        UniqueConstraint("date", "indicator_type", name="uq_macro_date_type"),
+        Index("ix_macro_type_date", "indicator_type", "date"),
+    )
+
+
 class UserSetting(Base):
     __tablename__ = "user_settings"
 

@@ -1,5 +1,7 @@
 import logging
 
+import numpy as np
+
 from src.db.connection import get_session
 from src.db.models import Dividend, Instrument, Price
 
@@ -40,6 +42,17 @@ SAFE_BONDS = [
 ]
 
 
+SECTOR_LIMITS = {
+    "Нефть и газ": 0.35,
+    "Банки": 0.25,
+    "Финансы": 0.20,
+    "Металлы": 0.20,
+    "Телеком": 0.15,
+    "IT": 0.15,
+    "Потреб": 0.20,
+}
+
+
 class PortfolioAllocator:
     TARGET_WEIGHTS = {
         "etf": {"weight": 0.40, "label": "БПИФ (ETF)", "max": 3},
@@ -56,12 +69,14 @@ class PortfolioAllocator:
 
             plan = {}
             total_allocated = 0.0
+            sector_allocation: dict[str, float] = {}
 
             for category, cfg in self.TARGET_WEIGHTS.items():
                 budget = capital * cfg["weight"]
                 candidates = self._score_candidates(
                     instruments_data, category, budget, existing, db
                 )
+
                 selected = candidates[: cfg["max"]]
                 if not selected:
                     continue
@@ -73,12 +88,24 @@ class PortfolioAllocator:
                     amount = round(budget * share, 2)
                     if amount < 500:
                         amount = 500.0
+
+                    sector = item.get("sector", "Прочее")
+                    limit = SECTOR_LIMITS.get(sector, 0.30)
+                    current_sector_weight = (sector_allocation.get(sector, 0.0) + amount) / capital
+                    if current_sector_weight > limit:
+                        continue
+
+                    sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
+
+                    risk = _item_risk(item, db)
                     category_items.append({
                         "ticker": item["ticker"],
                         "name": item["name"],
                         "amount": amount,
                         "reason": item.get("reason", ""),
                         "expected_yield": item.get("yield", 0),
+                        "sector": sector,
+                        "risk": risk,
                     })
                     total_allocated += amount
 
@@ -109,6 +136,7 @@ class PortfolioAllocator:
                     (projected_monthly / capital) * 100 if capital > 0 else 0, 2
                 ),
                 "existing_portfolio": existing,
+                "sector_allocation": sector_allocation,
             }
         finally:
             db.close()
@@ -262,3 +290,61 @@ class PortfolioAllocator:
 
 
 allocator = PortfolioAllocator()
+
+
+def _item_risk(item: dict, db) -> dict:
+    prices = (
+        db.query(Price)
+        .filter_by(instrument_id=item["id"])
+        .order_by(Price.date.desc())
+        .limit(60)
+        .all()
+    )
+    if len(prices) < 10:
+        return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
+
+    close_vals = [p.close for p in prices if p.close]
+    if len(close_vals) < 10:
+        return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
+
+    from src.risk.manager import compute_position_size, compute_stop_loss, compute_var
+
+    var = compute_var(close_vals)
+    last_price = close_vals[0]
+
+    atr_val = None
+    atr_rows = (
+        db.query(Price)
+        .filter_by(instrument_id=item["id"])
+        .order_by(Price.date.desc())
+        .limit(14)
+        .all()
+    )
+    if len(atr_rows) >= 14:
+        highs = np.array([r.high for r in atr_rows if r.high])
+        lows = np.array([r.low for r in atr_rows if r.low])
+        closes = np.array([r.close for r in atr_rows if r.close])
+        if len(highs) >= 14 and len(lows) >= 14 and len(closes) >= 14:
+            tr = np.maximum(
+                highs[:-1] - lows[:-1],
+                np.maximum(
+                    abs(highs[:-1] - closes[1:]),
+                    abs(lows[:-1] - closes[1:]),
+                ),
+            )
+            atr_val = float(np.mean(tr))
+
+    stop = compute_stop_loss(last_price, atr_val)
+    sizing = compute_position_size(
+        capital=100_000, price=last_price, risk_per_trade_pct=2.0,
+        stop_loss_pct=stop["stop_loss_pct"] if stop else None,
+    )
+
+    return {
+        "var_95": var.get("var_95", 0.0),
+        "var_99": var.get("var_99", 0.0),
+        "stop_loss": stop["stop_loss"] if stop else None,
+        "stop_loss_pct": stop["stop_loss_pct"] if stop else 0.0,
+        "suggested_shares": sizing.get("shares", 0),
+        "risk_per_trade_pct": 2.0,
+    }

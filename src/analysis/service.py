@@ -9,9 +9,10 @@ from src.analysis.fundamental import FundamentalAnalyzer
 from src.analysis.ml.prophet_model import ProphetPredictor
 from src.analysis.ml.xgboost_model import XGBoostClassifier
 from src.analysis.technical import TechnicalAnalyzer
+from src.analysis.volatility import VolatilityRegimeDetector
 from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, Price, Signal
 from src.llm.router import llm
-from src.signal.engine import SignalFusionEngine
+from src.signal.engine import SignalFusionEngine, compute_risk_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class AnalysisService:
         self.fusion = SignalFusionEngine()
         self.prophet = ProphetPredictor()
         self.xgb = XGBoostClassifier()
+        self.volatility = VolatilityRegimeDetector()
 
     def _price_df(self, prices: list[Price]) -> pd.DataFrame:
         return pd.DataFrame([{
@@ -82,12 +84,18 @@ class AnalysisService:
         ml = self._compute_ml(df, ind_df) if with_ml else None
         geo = self._load_geo(db)
 
+        volatility_regime = self.volatility.detect(df, ind_df)
+
+        risk_metrics = compute_risk_metrics(df["close"].tolist())
+
         fused = self.fusion.fuse(
             ticker=ticker.upper(),
             technical=tech_signal,
             fundamental=fund,
             geo=geo,
             ml_prediction=ml,
+            volatility_regime=volatility_regime,
+            risk_metrics=risk_metrics,
         )
         return fused
 

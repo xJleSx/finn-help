@@ -280,6 +280,58 @@ def rates():
 
 
 @app.command()
+def macro():
+    """Показать последние макро-индикаторы (Brent, ключевая ставка, USD/RUB)"""
+    from src.db.models import MacroIndicator
+    db = get_session()
+    try:
+        table = Table(title="📈 Макро-индикаторы")
+        table.add_column("Индикатор", style="cyan")
+        table.add_column("Значение", style="yellow")
+        table.add_column("Дата", style="white")
+        for indicator_type in ("brent", "key_rate", "usd_rate"):
+            row = (
+                db.query(MacroIndicator)
+                .filter_by(indicator_type=indicator_type)
+                .order_by(MacroIndicator.date.desc())
+                .first()
+            )
+            if row:
+                label = {"brent": "Brent", "key_rate": "Ключевая ставка ЦБ", "usd_rate": "USD/RUB"}
+                table.add_row(label.get(indicator_type, indicator_type), str(row.value), str(row.date))
+            else:
+                table.add_row(indicator_type, "—", "—")
+        console.print(table)
+    finally:
+        db.close()
+
+
+@app.command()
+def sectors():
+    """Показать распределение инструментов по секторам"""
+    from src.portfolio.allocator import SECTOR_NAMES
+    db = get_session()
+    try:
+        instruments = db.query(Instrument).all()
+        sector_map: dict[str, int] = {}
+        for inst in instruments:
+            sector = SECTOR_NAMES.get(inst.ticker, inst.sector or "Прочее")
+            sector_map[sector] = sector_map.get(sector, 0) + 1
+
+        table = Table(title="🏭 Распределение по секторам")
+        table.add_column("Сектор", style="cyan")
+        table.add_column("Количество", style="yellow")
+        total = 0
+        for sector, count in sorted(sector_map.items(), key=lambda x: -x[1]):
+            table.add_row(sector, str(count))
+            total += count
+        table.add_row("[bold]Итого[/bold]", str(total))
+        console.print(table)
+    finally:
+        db.close()
+
+
+@app.command()
 def auto():
     """Запустить полный цикл: обновить ВСЕ MOEX + анализ + сигналы"""
     async def _run():
