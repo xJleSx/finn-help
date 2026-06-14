@@ -161,14 +161,21 @@ async def _reply_with_analysis(update: Update, ticker: str):
             await update.message.reply_text(f"\u274c {advice}")
             return
 
-        emoji = ACTION_EMOJI.get(fused["action"], "\u26aa")
-        text = f"{emoji} *{ticker}* — {fused['action']} (уверенность: {fused['confidence']:.0%})\n"
-        for r in fused.get("reasons", []):
-            text += f"\u2022 {r}\n"
+        action = fused["action"]
+        confidence = fused["confidence"]
+        emoji = ACTION_EMOJI.get(action, "\u26aa")
+
+        action_labels = {"BUY": "рекомендуется к покупке", "CAUTIOUS_BUY": "можно рассмотреть для покупки",
+                         "HOLD": "рекомендуется держать", "SELL": "рекомендуется продать", "NEUTRAL": "нейтрально"}
+        label = action_labels.get(action, action)
+
+        text = f"{emoji} *{ticker}* — {label}\n"
+        text += f"Уверенность: {confidence:.0%}\n"
+        text += "\n" + _simplify_reasons(fused.get("reasons", []))
 
         if advice:
-            text += f"\n{advice}"
-        text += f"\n\U0001f4a1 Доля: до {fused['max_portfolio_pct']}% портфеля"
+            text += f"\n\n{advice}"
+        text += f"\n\n\U0001f4a1 Рекомендуемая доля в портфеле: до {fused['max_portfolio_pct']}%"
 
         for chunk in _chunk_text(text, 4096):
             await update.message.reply_markdown(chunk)
@@ -177,6 +184,69 @@ async def _reply_with_analysis(update: Update, ticker: str):
         await update.message.reply_text(
             f"\u274c Ошибка: {e}\nУбедитесь, что запущен `finn update` и данные загружены."
         )
+
+
+def _simplify_reasons(reasons: list[str]) -> str:
+    if not reasons:
+        return ""
+
+    simple = []
+    for r in reasons:
+        r_lower = r.lower()
+
+        if "RSI" in r:
+            if "перепроданность" in r_lower:
+                simple.append("📉 Акция недооценена — потенциальный разворот вверх")
+            elif "перекупленность" in r_lower:
+                simple.append("📈 Акция переоценена — возможна коррекция")
+            else:
+                simple.append("📊 Нейтральный баланс спроса и предложения")
+        elif "macd" in r_lower:
+            if "положитель" in r_lower:
+                simple.append("🟢 Краткосрочный тренд восходящий")
+            elif "отрицатель" in r_lower:
+                simple.append("🔴 Краткосрочный тренд нисходящий")
+        elif "цена ниже" in r_lower:
+            simple.append("📉 Цена ниже средних значений — потенциальная зона для покупки")
+        elif "цена выше" in r_lower:
+            simple.append("📈 Цена выше средних значений — позитивный сигнал")
+        elif "bollinger" in r_lower:
+            if "отскок" in r_lower:
+                simple.append("🎯 Цена у нижней границы — возможен отскок вверх")
+            elif "коррекция" in r_lower:
+                simple.append("⚠️ Цена у верхней границы — возможна коррекция вниз")
+        elif "волатильность" in r_lower:
+            if "high" in r_lower:
+                simple.append("🌊 Высокая волатильность — повышенный риск")
+            elif "low" in r_lower:
+                simple.append("🌊 Низкая волатильность — рынок спокоен")
+            else:
+                simple.append("🌊 Нормальная волатильность")
+        elif "risk:" in r_lower or "sharpe" in r_lower:
+            continue
+        elif "ml-прогноз" in r_lower or "ml" in r_lower:
+            if "+" in r:
+                simple.append("🤖 Прогноз модели: умеренный рост")
+            elif "-" in r:
+                simple.append("🤖 Прогноз модели: возможное снижение")
+            else:
+                simple.append("🤖 Прогноз модели: без изменений")
+        elif "аномалии" in r_lower:
+            simple.append("⚠️ Обнаружены аномалии в фундаментальных показателях")
+        elif "геополитический" in r_lower:
+            simple.append("🌍 Повышенные геополитические риски")
+        elif "news" in r_lower or "новости" in r_lower:
+            if "позитив" in r_lower or ">" in r:
+                simple.append("📰 Новости положительные")
+            elif "негатив" in r_lower:
+                simple.append("📰 Новости негативные")
+        elif "макро:" in r_lower or "brent" in r_lower or "ключевая" in r_lower:
+            simple.append("🏛️ Макроэкономическая ситуация учитывается")
+
+    if not simple:
+        simple.append("↔️ Нейтральный сигнал")
+
+    return "\n".join("• " + s for s in simple[:4])
 
 
 def _find_tickers(text: str) -> list[str]:
