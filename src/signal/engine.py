@@ -20,10 +20,10 @@ class SignalFusionEngine:
     ) -> dict:
         reasons = []
         weights = {
-            "technical": 0.35,
-            "fundamental": 0.2,
-            "geo": 0.2,
-            "ml": 0.25,
+            "technical": 0.45,
+            "fundamental": 0.20,
+            "geo": 0.20,
+            "ml": 0.15,
         }
 
         tech_action = technical.get("action", "NEUTRAL")
@@ -46,19 +46,29 @@ class SignalFusionEngine:
             ml_target = ml_prediction.get("target_price")
             ml_change = ml_prediction.get("price_change_pct")
 
+        fund_signal = (1 - fund_risk) * 2 - 1
+        geo_signal = -(geo_score / 10)
+
         weighted_score = (
             tech_score * weights["technical"]
-            + (-fund_risk) * weights["fundamental"]
-            + (-geo_score / 10) * weights["geo"]
+            + fund_signal * weights["fundamental"]
+            + geo_signal * weights["geo"]
             + ml_signal * weights["ml"]
         )
 
-        max_possible = (
+        max_positive = (
+            1.0 * weights["technical"]
+            + 1.0 * weights["fundamental"]
+            + 0.0 * weights["geo"]
+            + 1.0 * weights["ml"]
+        )
+        max_negative = (
             1.0 * weights["technical"]
             + 1.0 * weights["fundamental"]
             + 1.0 * weights["geo"]
             + 1.0 * weights["ml"]
         )
+        max_possible = max_positive if weighted_score >= 0 else max_negative
 
         confidence = abs(weighted_score) / max_possible if max_possible > 0 else 0.0
         confidence = min(confidence, 1.0)

@@ -8,12 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from src.db.connection import get_session
-from src.db.models import Instrument, Price, Indicator, Signal, News, GeoRiskScore
+from src.db.models import Instrument, Price, Indicator, Signal, News, GeoRiskScore, Dividend as DivModel
 from src.collectors.moex import MOEXCollector
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.fundamental import FundamentalAnalyzer
 from src.signal.engine import SignalFusionEngine
 from src.llm.router import llm
+from src.analysis.ml.prophet_model import ProphetPredictor
+from src.analysis.ml.xgboost_model import XGBoostClassifier
 
 app = FastAPI(title="FinAdvisor API", version="0.1.0")
 
@@ -159,7 +161,6 @@ def get_signal(ticker: str):
         df_ind = analyzer.compute_all(df)
         tech_signal = analyzer.generate_signal(df_ind)
 
-        from src.db.models import Dividend as DivModel
         divs = db.query(DivModel).filter_by(instrument_id=inst.id).all()
         div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs]) if divs else pd.DataFrame()
         fund = fundamental.analyze(df, div_df)
@@ -167,8 +168,6 @@ def get_signal(ticker: str):
         geo = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
         geo_dict = {"score": geo.score} if geo else {"score": 0.0}
 
-        from src.analysis.ml.prophet_model import ProphetPredictor
-        from src.analysis.ml.xgboost_model import XGBoostClassifier
         ml_prediction = None
         if len(df) >= 60:
             try:
@@ -291,15 +290,27 @@ def get_portfolio():
             last_price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
             result.append({
                 "ticker": inst.ticker if inst else "?",
-                "quantity": p.quantity,
-                "avg_price": p.avg_price,
-                "current_price": last_price.close if last_price else None,
-                "value": (last_price.close * p.quantity) if last_price and p.quantity else 0,
-                "profit_pct": ((last_price.close / p.avg_price) - 1) * 100 if last_price and p.avg_price else 0,
+                "quantity": float(p.quantity),
+                "avg_price": float(p.avg_price) if p.avg_price else 0,
+                "current_price": float(last_price.close) if last_price and last_price.close else 0,
+                "value": float(last_price.close * p.quantity) if last_price and last_price.close and p.quantity else 0,
+                "profit_pct": round(((last_price.close / p.avg_price) - 1) * 100, 2) if last_price and last_price.close and p.avg_price else 0,
             })
         return result
     finally:
         db.close()
+
+
+@app.post("/api/portfolio/allocate")
+def allocate_portfolio(capital: float = 50000.0):
+    from src.portfolio.allocator import allocator
+    try:
+        result = allocator.allocate(capital)
+        return result
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Allocation failed")
+        raise HTTPException(500, f"Allocation failed: {e}")
 
 
 @app.get("/api/events")

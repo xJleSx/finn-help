@@ -119,6 +119,7 @@ async def _collect_news(db: Session) -> list[dict]:
                 source_type=item["source_type"],
                 source_name=item["source_name"],
                 published_at=item["published_at"],
+                sentiment_score=item.get("sentiment_score"),
             )
             db.add(n)
     db.commit()
@@ -135,10 +136,13 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
     usd_rate = next((r for r in rates if r["code"] == "USD"), None)
     currency_vol = 0.0
     if usd_rate:
-        today = date.today()
-        old = db.query(GeoRiskScore).filter_by(date=today).first()
-        if old and old.components_json:
-            currency_vol = old.components_json.get("currency_stress", 0)
+        from src.collectors.cbr import CBRCollector as C
+        prev = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
+        if prev and prev.components_json:
+            prev_stress = prev.components_json.get("currency_stress", 0)
+            currency_vol = prev_stress * 0.7 + min(usd_rate.get("change_pct", 0) * 5, 2.0) * 0.3
+        else:
+            currency_vol = min(abs(usd_rate.get("change_pct", 0)) * 5, 2.0)
 
     risk = geo_risk.score(news_list, currency_volatility=currency_vol)
 
@@ -162,6 +166,7 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
 async def _generate_signals(db: Session) -> list[dict]:
     instruments = db.query(Instrument).all()
     signals = []
+    changes = []
 
     for inst in instruments:
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
@@ -211,10 +216,32 @@ async def _generate_signals(db: Session) -> list[dict]:
 
 
 async def _notify_signals(signals: list[dict]):
-    top_signals = sorted(signals, key=lambda s: abs(s["weighted_score"]), reverse=True)[:5]
-    for s in top_signals:
-        advice = await llm.advise(s)
-        logger.info(f"Signal for {s['ticker']}: {advice[:200]}")
+    from src.interfaces.telegram import broadcast_signal, broadcast_daily_summary
+
+    for s in signals:
+        n = _to_signal_notification(s)
+        try:
+            await broadcast_signal(n)
+        except Exception as e:
+            logger.warning(f"Broadcast failed for {s['ticker']}: {e}")
+
+    try:
+        await broadcast_daily_summary()
+    except Exception as e:
+        logger.warning(f"Daily summary broadcast failed: {e}")
+
+
+def _to_signal_notification(fused: dict):
+    from src.notifications import SignalNotification
+    return SignalNotification(
+        ticker=fused["ticker"],
+        action=fused["action"],
+        prev_action=None,
+        confidence=fused["confidence"],
+        weighted_score=fused["weighted_score"],
+        reasons=fused.get("reasons", []),
+        max_portfolio_pct=fused["max_portfolio_pct"],
+    )
 
 
 def run_daily_sync():

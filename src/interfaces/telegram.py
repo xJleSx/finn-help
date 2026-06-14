@@ -1,5 +1,7 @@
 import asyncio
 import logging
+from datetime import date
+from typing import Optional
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -9,17 +11,51 @@ from src.cli import run_analysis
 
 logger = logging.getLogger(__name__)
 
+ACTION_EMOJI = {
+    "BUY": "\U0001F7E2",
+    "CAUTIOUS_BUY": "\U0001F7E1",
+    "HOLD": "\u26AA",
+    "SELL": "\U0001F534",
+    "NEUTRAL": "\u26AA",
+}
+
+subscribers: set[int] = set()
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 FinAdvisor — финансовый ассистент\n\n"
+        "\U0001F916 FinAdvisor — финансовый ассистент\n\n"
         "Команды:\n"
         "/analyze TICKER — анализ инструмента\n"
         "/portfolio — портфель\n"
         "/rates — курсы валют\n"
         "/geo — геополитический риск\n"
+        "/subscribe — подписаться на уведомления\n"
+        "/unsubscribe — отписаться\n"
+        "/daily — ежедневная сводка\n"
         "/help — справка"
     )
+
+
+async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    subscribers.add(uid)
+    await update.message.reply_text("\u2705 Вы подписаны на уведомления о новых сигналах")
+
+
+async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    subscribers.discard(uid)
+    await update.message.reply_text("\u274c Подписка отменена")
+
+
+async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from src.notifications.service import NotificationService, format_daily_summary_text
+
+    ns = NotificationService()
+    summary = ns.get_daily_summary()
+    text = format_daily_summary_text(summary)
+    await update.message.reply_markdown(text)
 
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -28,22 +64,23 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     ticker = context.args[0].upper()
-    await update.message.reply_text(f"🔍 Анализирую {ticker}...")
+    await update.message.reply_text(f"\U0001F50D Анализирую {ticker}...")
 
     try:
         fused, advice = await run_analysis(ticker, with_llm=True)
         if not fused:
-            await update.message.reply_text(f"❌ {advice}")
+            await update.message.reply_text(f"\u274C {advice}")
             return
-        text = f"📊 {ticker} — {fused['action']} (уверенность: {fused['confidence']:.0%})\n"
+        emoji = ACTION_EMOJI.get(fused["action"], "\u26AA")
+        text = f"{emoji} *{ticker}* — {fused['action']} (уверенность: {fused['confidence']:.0%})\n"
         for r in fused.get("reasons", []):
-            text += f"• {r}\n"
+            text += f"\u2022 {r}\n"
         if advice:
             text += f"\n{advice}"
-        text += f"\n💡 Доля: до {fused['max_portfolio_pct']}% портфеля"
-        await update.message.reply_text(text)
+        text += f"\n\U0001F4A1 Доля: до {fused['max_portfolio_pct']}% портфеля"
+        await update.message.reply_markdown(text)
     except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+        await update.message.reply_text(f"\u274C Ошибка: {e}")
 
 
 async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -57,7 +94,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Портфель пуст")
             return
 
-        lines = ["📊 Портфель:\n"]
+        lines = ["\U0001F4CA Портфель:\n"]
         total = 0
         for p in positions:
             inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
@@ -65,11 +102,11 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current = price.close if price else 0
             value = current * p.quantity if current else 0
             profit = ((current / p.avg_price) - 1) * 100 if current and p.avg_price else 0
-            emoji = "🟢" if profit > 0 else "🔴"
-            lines.append(f"{emoji} {inst.ticker if inst else '?'}: {p.quantity:.1f} × {current:.2f} = {value:.2f}₽ ({profit:+.1f}%)")
+            emoji = "\U0001F7E2" if profit > 0 else "\U0001F534"
+            lines.append(f"{emoji} {inst.ticker if inst else '?'}: {p.quantity:.1f} \u00d7 {current:.2f} = {value:.2f}\u20bd ({profit:+.1f}%)")
             total += value
 
-        lines.append(f"\n💵 Всего: {total:.2f} ₽")
+        lines.append(f"\n\U0001F4B5 Всего: {total:.2f} \u20bd")
         await update.message.reply_text("\n".join(lines))
     finally:
         db.close()
@@ -82,13 +119,13 @@ async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         rates = await cbr.get_rates()
         majors = ["USD", "EUR", "CNY", "GBP", "KZT", "TRY"]
-        lines = ["🏦 Курсы ЦБ РФ:\n"]
+        lines = ["\U0001F3E6 Курсы ЦБ РФ:\n"]
         for r in rates:
             if r["code"] in majors:
-                lines.append(f"  {r['code']}: {r['value']:.2f} ₽")
+                lines.append(f"  {r['code']}: {r['value']:.2f} \u20bd")
         await update.message.reply_text("\n".join(lines))
     except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+        await update.message.reply_text(f"\u274C Ошибка: {e}")
 
 
 async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -99,9 +136,9 @@ async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         score = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
         if score:
-            level = "КРИТИЧЕСКИЙ" if score.score > 7 else "ВЫСОКИЙ" if score.score > 5 else "УМЕРЕННЫЙ" if score.score > 3 else "НИЗКИЙ"
+            level = "\u26A1\uFE0F КРИТИЧЕСКИЙ" if score.score > 7 else "\u26A1 ВЫСОКИЙ" if score.score > 5 else "\U0001F7E1 УМЕРЕННЫЙ" if score.score > 3 else "\U0001F7E2 НИЗКИЙ"
             await update.message.reply_text(
-                f"🌍 Геополитический риск: {score.score}/10 ({level})\n"
+                f"\U0001F30D Геополитический риск: {score.score}/10 ({level})\n"
                 f"Дата: {score.date}"
             )
         else:
@@ -110,7 +147,37 @@ async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
+async def broadcast_signal(n):
+    if not subscribers:
+        return
+    from src.notifications.service import format_signal_text
+    text = format_signal_text(n)
+    for uid in subscribers:
+        try:
+            await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"Failed to send to {uid}: {e}")
+
+
+async def broadcast_daily_summary():
+    if not subscribers:
+        return
+    from src.notifications.service import NotificationService, format_daily_summary_text
+    ns = NotificationService()
+    summary = ns.get_daily_summary()
+    text = format_daily_summary_text(summary)
+    for uid in subscribers:
+        try:
+            await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"Failed to send daily to {uid}: {e}")
+
+
+app: Optional[Application] = None
+
+
 async def run_bot():
+    global app
     if not settings.telegram_bot_token:
         logger.warning("TELEGRAM_BOT_TOKEN not set in .env")
         return
@@ -123,6 +190,14 @@ async def run_bot():
     app.add_handler(CommandHandler("portfolio", portfolio))
     app.add_handler(CommandHandler("rates", rates))
     app.add_handler(CommandHandler("geo", geo))
+    app.add_handler(CommandHandler("subscribe", subscribe))
+    app.add_handler(CommandHandler("unsubscribe", unsubscribe))
+    app.add_handler(CommandHandler("daily", daily))
 
     logger.info("Bot started polling...")
-    await app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    while True:
+        await asyncio.sleep(60)

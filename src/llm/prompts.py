@@ -1,3 +1,6 @@
+import json
+
+
 SYSTEM_PROMPT = """Ты — финансовый ассистент FinAdvisor. Твоя задача — переформулировать структурированный сигнал от аналитического движка в понятный текст на русском языке.
 
 ПРАВИЛА:
@@ -19,4 +22,4 @@ USER_TEMPLATE = """Сигнал (JSON):
 
 
 def build_user_message(signal: dict) -> str:
-    return USER_TEMPLATE.format(signal_json=signal)
+    return USER_TEMPLATE.format(signal_json=json.dumps(signal, ensure_ascii=False, indent=2))

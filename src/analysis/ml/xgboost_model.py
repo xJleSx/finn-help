@@ -86,7 +86,6 @@ class XGBoostClassifier:
                 learning_rate=0.1,
                 eval_metric="logloss",
                 verbosity=0,
-                use_label_encoder=False,
             )
             model.fit(X_train, y_train)
             return model

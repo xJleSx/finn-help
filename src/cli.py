@@ -12,7 +12,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from src.config import settings
 from src.db.connection import get_session, init_db
-from src.db.models import Instrument, Price, Dividend
+from src.db.models import Instrument, Price, Dividend, Portfolio
 from src.collectors.moex import MOEXCollector
 from src.collectors.cbr import CBRCollector
 from src.analysis.technical import TechnicalAnalyzer
@@ -362,6 +362,36 @@ def scan(ticker: str = typer.Argument(..., help="Тикер для массов�
             console.print(f"\nЧтобы загрузить: finn update {matches[0].get('SECID', 'TICKER')}")
 
     asyncio.run(_run())
+
+
+@app.command()
+def seed_portfolio(
+    reset: bool = typer.Option(False, "--reset", help="Сбросить и пересоздать"),
+):
+    """Создать тестовый портфель (SBER, GAZP, LKOH)"""
+    db = get_session()
+    try:
+        if reset:
+            db.query(Portfolio).delete()
+            db.commit()
+        existing = db.query(Portfolio).count()
+        if existing > 0:
+            console.print(f"[yellow]Портфель уже содержит {existing} позиций[/yellow]")
+            return
+
+        data = [("SBER", 100, 287.50), ("GAZP", 50, 165.30), ("LKOH", 10, 7100.00)]
+        for ticker, qty, price in data:
+            inst = db.query(Instrument).filter_by(ticker=ticker).first()
+            if not inst:
+                console.print(f"[red]Инструмент {ticker} не найден[/red]")
+                continue
+            db.add(Portfolio(instrument_id=inst.id, quantity=qty, avg_price=price))
+        db.commit()
+        console.print("[green]Тестовый портфель создан:[/green]")
+        for ticker, qty, price in data:
+            console.print(f"  {ticker}: {qty} шт. × {price} ₽")
+    finally:
+        db.close()
 
 
 def main():
