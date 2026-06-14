@@ -6,8 +6,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.analysis.fundamental import FundamentalAnalyzer
+from src.analysis.ml.ensemble import EnsemblePredictor
 from src.analysis.ml.prophet_model import ProphetPredictor
-from src.analysis.ml.xgboost_model import XGBoostClassifier
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.volatility import VolatilityRegimeDetector
 from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, Price, Signal
@@ -23,7 +23,7 @@ class AnalysisService:
         self.fundamental = FundamentalAnalyzer()
         self.fusion = SignalFusionEngine()
         self.prophet = ProphetPredictor()
-        self.xgb = XGBoostClassifier()
+        self.ensemble = EnsemblePredictor()
         self.volatility = VolatilityRegimeDetector()
 
     def _price_df(self, prices: list[Price]) -> pd.DataFrame:
@@ -71,10 +71,15 @@ class AnalysisService:
             return None
         try:
             pr = self.prophet.predict(df)
-            xr = self.xgb.predict(ind_df)
+            ensemble = self.ensemble.predict(ind_df)
             ml = pr
-            ml["ml_confidence"] = max(pr.get("confidence", 0), xr.get("confidence", 0))
-            ml["xgb_action"] = xr.get("action", "NEUTRAL")
+            ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble.get("confidence", 0))
+            ml["xgb_action"] = ensemble.get("xgb_action", "NEUTRAL")
+            ml["ensemble"] = {
+                "lgb_action": ensemble.get("lgb_action", "NEUTRAL"),
+                "cat_action": ensemble.get("cat_action", "NEUTRAL"),
+                "model_votes": ensemble.get("model_votes", {}),
+            }
             return ml
         except Exception:
             logger.warning("ML prediction failed", exc_info=True)
