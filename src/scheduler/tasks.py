@@ -179,6 +179,7 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
     try:
         rates = await cbr.get_rates()
     except Exception:
+        logger.warning("Failed to fetch CBR rates", exc_info=True)
         rates = []
     usd_rate = next((r for r in rates if r["code"] == "USD"), None)
     currency_vol = 0.0
@@ -263,8 +264,8 @@ async def _generate_signals(db: Session, updated_ids: set[int] | None = None) ->
                     xgb_result.get("confidence", 0),
                 )
                 ml_prediction["xgb_action"] = xgb_result.get("action", "NEUTRAL")
-            except Exception as e:
-                logger.warning(f"ML failed for {inst.ticker}: {e}")
+            except Exception:
+                logger.warning("ML failed for %s", inst.ticker, exc_info=True)
 
         geo = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
         geo_dict = {"score": geo.score} if geo else {"score": 0.0}

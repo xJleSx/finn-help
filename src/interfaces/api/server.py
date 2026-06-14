@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from datetime import date, timedelta
 from typing import Optional
@@ -18,6 +19,8 @@ from src.signal.engine import SignalFusionEngine
 from src.llm.router import llm
 from src.analysis.ml.prophet_model import ProphetPredictor
 from src.analysis.ml.xgboost_model import XGBoostClassifier
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="FinAdvisor API", version="0.1.0")
 
@@ -190,7 +193,7 @@ def get_signal(ticker: str, db: Session = Depends(get_db)):
             ml_prediction = pr
             ml_prediction["ml_confidence"] = max(pr.get("confidence", 0), xr.get("confidence", 0))
         except Exception:
-            pass
+            logger.warning("ML prediction failed for %s", ticker, exc_info=True)
 
     fused = fusion.fuse(
         ticker=ticker.upper(),
@@ -256,7 +259,7 @@ async def get_advice(ticker: str, db: Session = Depends(get_db)):
             ml_prediction = pr
             ml_prediction["ml_confidence"] = max(pr.get("confidence", 0), xr.get("confidence", 0))
         except Exception:
-            pass
+            logger.warning("ML prediction failed for %s", ticker, exc_info=True)
 
     fused = fusion.fuse(
         ticker=ticker.upper(),

@@ -253,6 +253,7 @@ class PortfolioAllocator:
                 return 1.0
             return 0.5
         except Exception:
+            logger.warning("Failed to get liquidity score", exc_info=True)
             return 0.0
 
     def _calc_projected_yield(self, plan: dict, total: float) -> float:
