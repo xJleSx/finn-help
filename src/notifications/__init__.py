@@ -43,3 +43,34 @@ class DailySummaryNotification:
     portfolio_value: Optional[float]
     top_picks: list[str]
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class PriceTargetAlert:
+    ticker: str
+    current_price: float
+    target_price: float
+    target_type: str  # take_profit, stop_loss
+    triggered_pct: float
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class DivergenceAlert:
+    ticker: str
+    divergence_type: str  # bullish, bearish
+    indicator: str  # rsi, macd
+    price_direction: str
+    indicator_direction: str
+    strength: float
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class RebalanceAlert:
+    ticker: str
+    current_pct: float
+    target_pct: float
+    deviation_pct: float
+    reason: str
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

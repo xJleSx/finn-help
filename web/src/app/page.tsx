@@ -556,14 +556,24 @@ export default function Home() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [instRes, newsRes, geoRes] = await Promise.all([
+        const [instRes, newsRes, geoRes, macroRes] = await Promise.all([
           fetch(`${API}/api/instruments?type=stock`),
           fetch(`${API}/api/news?limit=5`),
           fetch(`${API}/api/geo-risk?days=14`),
+          fetch(`${API}/api/macro`).catch(() => null),
         ]);
         setInstruments(await instRes.json());
         setNews(await newsRes.json());
         setGeoHistory(await geoRes.json());
+        if (macroRes?.ok) {
+          const m = await macroRes.json();
+          const el = (id: string, v: string) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+          el("macro-brent", m.brent?.toFixed(1) ?? "—");
+          el("macro-usd", m.usd_rate?.toFixed(2) ?? "—");
+          el("macro-imoex", m.imoex?.toFixed(0) ?? "—");
+          el("macro-rate", m.key_rate != null ? `${m.key_rate}%` : "—");
+          el("macro-cpi", m.cpi != null ? `${m.cpi}%` : "—");
+        }
       } catch (e) {
         console.error("Failed to fetch data", e);
       }
@@ -880,6 +890,17 @@ export default function Home() {
             </div>
 
             <PortfolioSimulator />
+
+            <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
+              <h3 className="text-sm font-light text-white mb-3">Макро</h3>
+              <div className="text-xs text-gray-400 space-y-1.5" id="macro-panel">
+                <div className="flex justify-between"><span>Brent</span><span className="font-mono text-white" id="macro-brent">—</span></div>
+                <div className="flex justify-between"><span>USD/RUB</span><span className="font-mono text-white" id="macro-usd">—</span></div>
+                <div className="flex justify-between"><span>IMOEX</span><span className="font-mono text-white" id="macro-imoex">—</span></div>
+                <div className="flex justify-between"><span>Ключевая ставка</span><span className="font-mono text-white" id="macro-rate">—</span></div>
+                <div className="flex justify-between"><span>Инфляция</span><span className="font-mono text-white" id="macro-cpi">—</span></div>
+              </div>
+            </section>
           </aside>
         </div>
       </div>

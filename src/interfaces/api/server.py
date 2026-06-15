@@ -3,10 +3,13 @@ import logging
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
@@ -27,7 +30,10 @@ from src.llm.router import llm
 
 logger = logging.getLogger(__name__)
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="FinAdvisor API", version="0.1.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.exception_handler(Exception)
@@ -37,12 +43,13 @@ async def global_exception_handler(request, exc):
 
 
 origins = [o.strip() for o in settings.cors_origins.split(",")]
-if "*" in origins and origins != ["*"]:
-    origins = [o for o in origins if o != "*"]
-allow_creds = False if "*" in origins else settings.cors_credentials
-if "*" in origins and settings.cors_credentials:
-    logger.warning("CORS: allow_origins=* and allow_credentials=True is not allowed by spec, disabling credentials")
-    allow_creds = False
+if "*" in origins:
+    if len(origins) > 1:
+        origins = [o for o in origins if o != "*"]
+    else:
+        allow_creds = False
+else:
+    allow_creds = settings.cors_credentials
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -74,7 +81,8 @@ class RegisterBody(BaseModel):
 
 
 @app.post("/api/auth/register")
-def register(body: RegisterBody, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, body: RegisterBody, db: Session = Depends(get_db)):
     existing = db.query(User).filter((User.username == body.username) | ((body.email and User.email == body.email))).first()
     if existing:
         raise HTTPException(400, "Username or email already taken")
@@ -97,7 +105,8 @@ class LoginBody(BaseModel):
 
 
 @app.post("/api/auth/login")
-def login(body: LoginBody, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, body: LoginBody, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == body.username).first()
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(401, "Invalid credentials")
@@ -283,6 +292,34 @@ def get_geo_risk(days: int = Query(30), db: Session = Depends(get_db)):
     ]
 
 
+@app.get("/api/macro")
+def get_macro(db: Session = Depends(get_db)):
+    from src.collectors.macro import MacroCollector
+
+    return MacroCollector.latest_values(db)
+
+
+@app.get("/api/sectors/performance")
+def get_sector_performance(days: int = Query(30, le=365), db: Session = Depends(get_db)):
+    from src.analysis.sector import sector_analyzer
+
+    return sector_analyzer.compute_sector_performance(db, days=days)
+
+
+@app.get("/api/sectors/correlation")
+def get_sector_correlation(days: int = Query(90, le=365), db: Session = Depends(get_db)):
+    from src.analysis.sector import sector_analyzer
+
+    return sector_analyzer.compute_sector_correlation(db, days=days)
+
+
+@app.get("/api/sectors/volatility")
+def get_sector_volatility(days: int = Query(30, le=365), db: Session = Depends(get_db)):
+    from src.analysis.sector import sector_analyzer
+
+    return sector_analyzer.compute_sector_volatility(db, days=days)
+
+
 @app.get("/api/portfolio")
 def get_portfolio(db: Session = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
     from src.db.models import Portfolio
@@ -348,6 +385,48 @@ def allocate_portfolio(capital: float = 50000.0, db: Session = Depends(get_db), 
         raise HTTPException(500, f"Allocation failed: {e}")
 
 
+@app.get("/api/alerts/price-targets")
+def get_price_target_alerts(db: Session = Depends(get_db)):
+    from src.notifications.service import notification_service
+
+    return [
+        {"ticker": a.ticker, "current_price": a.current_price, "target_price": a.target_price, "target_type": a.target_type, "triggered_pct": a.triggered_pct}
+        for a in notification_service.check_price_targets()
+    ]
+
+
+@app.get("/api/alerts/divergence/{ticker}")
+def get_divergence_alerts(ticker: str, db: Session = Depends(get_db)):
+    from src.notifications.service import notification_service
+
+    inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+    if not inst:
+        raise HTTPException(404, "Instrument not found")
+    from datetime import date, timedelta
+    cutoff = date.today() - timedelta(days=90)
+    prices = db.query(Price).filter(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date).all()
+    closes = [p.close for p in prices if p.close]
+    indicators = db.query(Indicator).filter(Indicator.instrument_id == inst.id, Indicator.date >= cutoff).order_by(Indicator.date).all()
+    rsi_vals = [i.rsi for i in indicators if i.rsi is not None]
+    macd_vals = [i.macd_hist for i in indicators if i.macd_hist is not None]
+    alerts = notification_service.check_divergence(ticker, closes, rsi_vals, macd_vals)
+    return [
+        {"ticker": a.ticker, "divergence_type": a.divergence_type, "indicator": a.indicator, "strength": a.strength}
+        for a in alerts
+    ]
+
+
+@app.get("/api/alerts/rebalance")
+def get_rebalance_alerts(db: Session = Depends(get_db)):
+    from src.notifications.service import notification_service
+
+    alerts = notification_service.check_rebalance(db)
+    return [
+        {"ticker": a.ticker, "current_pct": a.current_pct, "target_pct": a.target_pct, "deviation_pct": a.deviation_pct, "reason": a.reason}
+        for a in alerts
+    ]
+
+
 @app.get("/api/events")
 async def event_stream():
     async def generate():
@@ -365,6 +444,8 @@ async def event_stream():
                         "timestamp": date.today().isoformat(),
                     }
                 }
+            except Exception:
+                logger.exception("SSE event error")
             finally:
                 db.close()
                 close_session()

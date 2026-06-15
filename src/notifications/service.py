@@ -325,3 +325,82 @@ class NotificationService:
             )
         finally:
             db.close()
+
+    def check_price_targets(self) -> list["PriceTargetAlert"]:
+        alerts = []
+        db = get_session()
+        try:
+            positions = db.query(Portfolio).all()
+            for p in positions:
+                inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
+                if not inst:
+                    continue
+                price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
+                if not price or not price.close or not p.avg_price or p.avg_price <= 0:
+                    continue
+                current = price.close
+                change_pct = (current - p.avg_price) / p.avg_price
+                if change_pct > 0.20:
+                    from src.notifications import PriceTargetAlert
+                    alerts.append(
+                        PriceTargetAlert(
+                            ticker=inst.ticker, current_price=current, target_price=p.avg_price * 1.20,
+                            target_type="take_profit", triggered_pct=round(change_pct * 100, 1),
+                        )
+                    )
+                elif change_pct < -0.15:
+                    from src.notifications import PriceTargetAlert
+                    alerts.append(
+                        PriceTargetAlert(
+                            ticker=inst.ticker, current_price=current, target_price=p.avg_price * 0.85,
+                            target_type="stop_loss", triggered_pct=round(change_pct * 100, 1),
+                        )
+                    )
+        finally:
+            db.close()
+        return alerts
+
+    def check_divergence(self, ticker: str, prices: list[float], rsi_values: list[float], macd_values: list[float]) -> list["DivergenceAlert"]:
+        from src.notifications import DivergenceAlert
+        alerts = []
+        if len(prices) < 20 or len(rsi_values) < 20 or len(macd_values) < 10:
+            return alerts
+        import numpy as np
+        price_trend = np.polyfit(range(min(len(prices), 14)), prices[-14:], 1)[0]
+        rsi_trend = np.polyfit(range(min(len(rsi_values), 14)), rsi_values[-14:], 1)[0]
+        macd_trend = np.polyfit(range(min(len(macd_values), 10)), macd_values[-10:], 1)[0]
+        if price_trend > 0 and rsi_trend < 0 and abs(rsi_trend) > 0.1:
+            alerts.append(DivergenceAlert(ticker=ticker, divergence_type="bearish", indicator="rsi", price_direction="up", indicator_direction="down", strength=round(abs(rsi_trend), 3)))
+        elif price_trend < 0 and rsi_trend > 0 and abs(rsi_trend) > 0.1:
+            alerts.append(DivergenceAlert(ticker=ticker, divergence_type="bullish", indicator="rsi", price_direction="down", indicator_direction="up", strength=round(abs(rsi_trend), 3)))
+        if price_trend > 0 and macd_trend < 0 and abs(macd_trend) > 0.05:
+            alerts.append(DivergenceAlert(ticker=ticker, divergence_type="bearish", indicator="macd", price_direction="up", indicator_direction="down", strength=round(abs(macd_trend), 3)))
+        elif price_trend < 0 and macd_trend > 0 and abs(macd_trend) > 0.05:
+            alerts.append(DivergenceAlert(ticker=ticker, divergence_type="bullish", indicator="macd", price_direction="down", indicator_direction="up", strength=round(abs(macd_trend), 3)))
+        return alerts
+
+    def check_rebalance(self, db: Session) -> list["RebalanceAlert"]:
+        from src.notifications import RebalanceAlert
+        alerts = []
+        from src.analysis.sector import sector_analyzer
+        instruments = db.query(Instrument).all()
+        positions = db.query(Portfolio).all()
+        if not positions:
+            return alerts
+        total_value = 0.0
+        pos_map: dict[int, float] = {}
+        for p in positions:
+            price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
+            val = (price.close if price and price.close else 0) * p.quantity
+            pos_map[p.instrument_id] = val
+            total_value += val
+        if total_value <= 0:
+            return alerts
+        for inst in instruments:
+            val = pos_map.get(inst.id, 0)
+            pct = val / total_value * 100
+            from src.user_profile import profile_manager
+            max_pct = profile_manager.get_max_position("default")
+            if pct > max_pct * 1.3:
+                alerts.append(RebalanceAlert(ticker=inst.ticker, current_pct=round(pct, 1), target_pct=float(max_pct), deviation_pct=round(pct - max_pct, 1), reason=f"Позиция {pct:.1f}% превышает лимит {max_pct}%"))
+        return alerts
