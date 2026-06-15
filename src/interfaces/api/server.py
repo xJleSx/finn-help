@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
@@ -13,7 +14,15 @@ from sse_starlette.sse import EventSourceResponse
 from src.analysis.service import analysis_service
 from src.config import settings
 from src.db.connection import close_session, get_session
-from src.db.models import GeoRiskScore, Indicator, Instrument, News, Price, Signal
+from src.db.models import GeoRiskScore, Indicator, Instrument, News, Price, Signal, User
+from src.interfaces.api.auth import (
+    create_token,
+    get_current_user,
+    get_db,
+    hash_password,
+    require_user,
+    verify_password,
+)
 from src.llm.router import llm
 
 logger = logging.getLogger(__name__)
@@ -55,6 +64,57 @@ def get_db():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+class RegisterBody(BaseModel):
+    username: str
+    password: str
+    email: Optional[str] = None
+    risk_profile: str = "balanced"
+
+
+@app.post("/api/auth/register")
+def register(body: RegisterBody, db: Session = Depends(get_db)):
+    existing = db.query(User).filter((User.username == body.username) | ((body.email and User.email == body.email))).first()
+    if existing:
+        raise HTTPException(400, "Username or email already taken")
+    user = User(
+        username=body.username,
+        email=body.email,
+        hashed_password=hash_password(body.password),
+        risk_profile=body.risk_profile or "balanced",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = create_token(user.id, user.username)
+    return {"access_token": token, "token_type": "bearer", "user_id": user.id, "username": user.username}
+
+
+class LoginBody(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/login")
+def login(body: LoginBody, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == body.username).first()
+    if not user or not verify_password(body.password, user.hashed_password):
+        raise HTTPException(401, "Invalid credentials")
+    token = create_token(user.id, user.username)
+    return {"access_token": token, "token_type": "bearer", "user_id": user.id, "username": user.username}
+
+
+@app.get("/api/auth/me")
+def get_me(user: User = Depends(require_user)):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "role": user.role,
+        "risk_profile": user.risk_profile,
+        "is_active": user.is_active,
+    }
 
 
 @app.get("/api/instruments")
@@ -187,10 +247,10 @@ def get_signal(ticker: str, db: Session = Depends(get_db)):
 
 
 @app.get("/api/instruments/{ticker}/advice")
-async def get_advice(ticker: str, db: Session = Depends(get_db)):
+async def get_advice(ticker: str, db: Session = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
     _, fused = _resolve_signal(ticker, db)
     advice = await llm.advise(fused)
-    return {"signal": fused, "advice": advice}
+    return {"signal": fused, "advice": advice, "user_id": user.id if user else None}
 
 
 @app.get("/api/news")
@@ -224,16 +284,20 @@ def get_geo_risk(days: int = Query(30), db: Session = Depends(get_db)):
 
 
 @app.get("/api/portfolio")
-def get_portfolio(db: Session = Depends(get_db)):
+def get_portfolio(db: Session = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
     from src.db.models import Portfolio
 
-    positions = db.query(Portfolio).all()
+    q = db.query(Portfolio)
+    if user:
+        q = q.filter(Portfolio.user_id == user.id)
+    positions = q.all()
     result = []
     for p in positions:
         inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
         last_price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
         result.append(
             {
+                "id": p.id,
                 "ticker": inst.ticker if inst else "?",
                 "quantity": float(p.quantity),
                 "avg_price": float(p.avg_price) if p.avg_price else 0,
@@ -247,8 +311,33 @@ def get_portfolio(db: Session = Depends(get_db)):
     return result
 
 
+@app.post("/api/portfolio/add")
+def add_portfolio_position(
+    ticker: str = Query(...),
+    quantity: float = Query(...),
+    avg_price: Optional[float] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    from src.db.models import Portfolio
+
+    inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+    if not inst:
+        raise HTTPException(404, "Instrument not found")
+    existing = db.query(Portfolio).filter(Portfolio.user_id == user.id, Portfolio.instrument_id == inst.id).first()
+    if existing:
+        existing.quantity += quantity
+        if avg_price:
+            existing.avg_price = avg_price
+    else:
+        pos = Portfolio(user_id=user.id, instrument_id=inst.id, quantity=quantity, avg_price=avg_price)
+        db.add(pos)
+    db.commit()
+    return {"status": "ok"}
+
+
 @app.post("/api/portfolio/allocate")
-def allocate_portfolio(capital: float = 50000.0, db: Session = Depends(get_db)):
+def allocate_portfolio(capital: float = 50000.0, db: Session = Depends(get_db), user: User = Depends(require_user)):
     from src.portfolio.allocator import allocator
 
     try:

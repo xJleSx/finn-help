@@ -176,22 +176,41 @@ class GeoRiskScore(Base):
     created_at = Column(DateTime, default=func.now())
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=True)
+    hashed_password = Column(String(255), nullable=False)
+    role = Column(String(20), default="user")
+    is_active = Column(Boolean, default=True)
+    risk_profile = Column(String(20), default="balanced")
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
 class Portfolio(Base):
     __tablename__ = "portfolio"
 
     id = Column(Integer, primary_key=True)
-    instrument_id = Column(Integer, ForeignKey("instruments.id"), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, default=0)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
     quantity = Column(Float, nullable=False, default=0)
     avg_price = Column(Float)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     instrument = relationship("Instrument")
+    user = relationship("User")
+
+    __table_args__ = (UniqueConstraint("user_id", "instrument_id", name="uq_user_portfolio"),)
 
 
 class Transaction(Base):
     __tablename__ = "transactions"
 
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, default=0)
     instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
     tx_type = Column("type", String(4), nullable=False)
     quantity = Column(Float, nullable=False)

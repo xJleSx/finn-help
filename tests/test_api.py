@@ -15,12 +15,24 @@ def mock_db():
 
 @pytest.fixture
 def mock_client(mock_db):
+    from src.db.models import User
+    from src.interfaces.api.auth import get_current_user, require_user
     from src.interfaces.api.server import app, get_db
 
     def override_get_db():
         yield mock_db
 
+    mock_user = User(id=1, username="test", hashed_password="x", role="user", is_active=True, risk_profile="balanced")
+
+    async def override_user():
+        return mock_user
+
+    async def override_anon():
+        return None
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_anon
+    app.dependency_overrides[require_user] = override_user
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -70,8 +82,9 @@ class TestGeoRisk:
 
 
 class TestAllocate:
-    def test_allocate_returns_dict(self, client):
-        resp = client.post("/api/portfolio/allocate", json={"capital": 50000})
+    def test_allocate_returns_dict(self, mock_client, mock_db):
+        mock_db.query.return_value.filter.return_value.all.return_value = []
+        resp = mock_client.post("/api/portfolio/allocate", json={"capital": 50000})
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, dict)
