@@ -1,5 +1,5 @@
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 
@@ -189,7 +189,14 @@ class PortfolioAllocator:
             sector = SECTOR_NAMES.get(inst.ticker, inst.sector or "")
 
             div_yield = 0.0
-            divs = db.query(Dividend).filter_by(instrument_id=inst.id).order_by(Dividend.date.desc()).limit(4).all()
+            one_year_ago = date.today() - timedelta(days=365)
+            divs = (
+                db.query(Dividend)
+                .filter_by(instrument_id=inst.id)
+                .filter(Dividend.date >= one_year_ago)
+                .order_by(Dividend.date.desc())
+                .all()
+            )
             if divs and last_price and last_price > 0:
                 div_yield = sum(d.amount for d in divs) / last_price * 100
 
@@ -350,13 +357,21 @@ class PortfolioAllocator:
                 for c in candidates:
                     if exclude and c["ticker"] in exclude:
                         continue
+                    last_price = c.get("last_price")
+                    if last_price and capital > 0 and last_price > capital * 0.8:
+                        continue
                     c["category"] = cfg["label"]
                     c["score"] = round(c.get("score", 0), 2)
                     risk = _item_risk(c, db, capital)
                     c["risk"] = risk
                     all_picks.append(c)
             all_picks.sort(key=lambda x: x["score"], reverse=True)
-            return all_picks[:15]
+            max_picks = 15
+            if capital < 5000:
+                max_picks = 8
+            if capital < 1000:
+                max_picks = 4
+            return all_picks[:max_picks]
         finally:
             if should_close:
                 db.close()

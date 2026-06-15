@@ -117,7 +117,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/stress — стресс-тест портфеля\n"
         "/stress СУММА — стресс-тест на сумму\n"
         "/backtest — история стратегии\n"
-        "/backtest СУММА — бэктест на сумму"
+        "/backtest СУММА — бэктест на сумму\n"
+        "/add SBER 10 — добавить в портфель\n"
+        "/remove SBER — удалить из портфеля\n"
+        "/portfolio — мой портфель\n"
+        "/history SBER — история сигналов"
     )
 
 
@@ -255,6 +259,41 @@ async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🕰 Прогоняю стратегию для {amount:,.0f} ₽ за последний год...")
     result = backtest_allocation(capital=amount)
     await update.message.reply_markdown(result.summary())
+
+
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Укажите тикер: /history SBER")
+        return
+    ticker = context.args[0].upper()
+
+    from src.db.models import Signal as SignalModel
+
+    db = get_session()
+    try:
+        inst = db.query(Instrument).filter_by(ticker=ticker).first()
+        if not inst:
+            await update.message.reply_text(f"{ticker} не найден")
+            return
+        signals = (
+            db.query(SignalModel)
+            .filter_by(instrument_id=inst.id)
+            .order_by(SignalModel.date.desc())
+            .limit(60)
+            .all()
+        )
+        if not signals:
+            await update.message.reply_text(f"Нет истории сигналов для {ticker}")
+            return
+
+        lines = [f"📈 *История сигналов — {ticker}*\n"]
+        for s in reversed(signals):
+            emoji = "🟢" if s.action in ("BUY", "CAUTIOUS_BUY") else "🔴" if s.action == "SELL" else "⚪"
+            conf = s.confidence or 0
+            lines.append(f"{emoji} {s.date}  **{s.action}** _{conf:.0%}_")
+        await update.message.reply_markdown("\n".join(lines))
+    finally:
+        db.close()
 
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -465,25 +504,42 @@ def _format_allocation_plan(picks: list[dict], capital: float) -> str:
     if total_score <= 0:
         return ""
 
-    used = []
-    remaining = capital
-    for p in candidates:
-        share = p["score"] / total_score
-        amt = round(capital * share, 2)
-        price = p["last_price"]
-        if amt >= price:
-            shares = int(amt / price)
-            used.append({**p, "amount": amt, "shares": shares, "pct": share})
-            remaining -= amt
-        if len(used) >= 5:
-            break
+    max_positions = 7
+    if capital < 1000:
+        max_positions = 2
+    elif capital < 5000:
+        max_positions = 4
 
-    if remaining > 0 and used:
-        used[0]["amount"] = round(used[0]["amount"] + remaining, 2)
-        used[0]["shares"] = int(used[0]["amount"] / (used[0]["last_price"] or 1))
+    used = []
+    for p in candidates:
+        if len(used) >= max_positions:
+            break
+        share = p["score"] / total_score
+        amt = capital * share
+        price = p["last_price"]
+        if amt < price:
+            continue
+        shares = int(amt / price)
+        if shares < 1:
+            continue
+        used.append({**p, "amount": amt, "shares": shares, "pct": amt / capital})
+        total_score -= p["score"]
 
     if not used:
         return ""
+
+    allocated = sum(u["amount"] for u in used)
+    leftover = capital - allocated
+    if leftover > 0:
+        weights = [u["amount"] for u in used]
+        total_w = sum(weights) or 1
+        for i, u in enumerate(used):
+            extra = leftover * weights[i] / total_w
+            extra_shares = int(extra / (u["last_price"] or 1))
+            if extra_shares > 0:
+                u["shares"] += extra_shares
+                u["amount"] = u["shares"] * (u["last_price"] or 1)
+            u["pct"] = u["amount"] / capital
 
     text = "📊 *Как бы я распределил эти деньги:*\n\n"
     allocated = 0.0
@@ -491,7 +547,7 @@ def _format_allocation_plan(picks: list[dict], capital: float) -> str:
         allocated += item["amount"]
         text += f"• *{item['ticker']}* ({item.get('name', '')}): {item['amount']:,.0f} ₽ ({item['pct'] * 100:.0f}%)"
         if item["shares"] > 0:
-            text += f" → ~{item['shares']} шт. по {item['last_price']:.0f} ₽"
+            text += f" → {item['shares']} шт. по {item['last_price']:.0f} ₽"
         risk = item.get("risk", {})
         if risk:
             sl = risk.get("stop_loss")
@@ -705,6 +761,89 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
+async def add_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("Укажите тикер и количество: /add SBER 10")
+        return
+    ticker = context.args[0].upper()
+    try:
+        qty = float(context.args[1].replace(",", "."))
+    except ValueError:
+        await update.message.reply_text("Количество должно быть числом: /add SBER 10")
+        return
+
+    from src.db.models import Instrument, Price
+    from src.db.models import Portfolio as PortModel
+
+    db = get_session()
+    try:
+        inst = db.query(Instrument).filter_by(ticker=ticker).first()
+        if not inst:
+            await update.message.reply_text(f"Инструмент {ticker} не найден в базе. Запустите `finn update {ticker}`.")
+            return
+        price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
+        avg_price = price.close if price else 0
+
+        existing = db.query(PortModel).filter_by(instrument_id=inst.id).first()
+        if existing:
+            existing.quantity += qty
+            if existing.avg_price and avg_price:
+                total_qty = existing.quantity
+                existing.avg_price = (existing.avg_price * (total_qty - qty) + avg_price * qty) / total_qty
+            db.commit()
+            await update.message.reply_text(f"✅ {ticker}: добавлено {qty} шт. (всего {existing.quantity:.1f} шт.)")
+        else:
+            pos = PortModel(instrument_id=inst.id, quantity=qty, avg_price=avg_price)
+            db.add(pos)
+            db.commit()
+            await update.message.reply_text(f"✅ {ticker}: {qty} шт. добавлено в портфель")
+    except Exception as e:
+        db.rollback()
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+    finally:
+        db.close()
+
+
+async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 1:
+        await update.message.reply_text("Укажите тикер: /remove SBER")
+        return
+    ticker = context.args[0].upper()
+    qty = None
+    if len(context.args) >= 2:
+        try:
+            qty = float(context.args[1].replace(",", "."))
+        except ValueError:
+            pass
+
+    from src.db.models import Instrument
+    from src.db.models import Portfolio as PortModel
+
+    db = get_session()
+    try:
+        inst = db.query(Instrument).filter_by(ticker=ticker).first()
+        if not inst:
+            await update.message.reply_text(f"Инструмент {ticker} не найден")
+            return
+        existing = db.query(PortModel).filter_by(instrument_id=inst.id).first()
+        if not existing:
+            await update.message.reply_text(f"{ticker} нет в портфеле")
+            return
+        if qty and qty < existing.quantity:
+            existing.quantity -= qty
+            db.commit()
+            await update.message.reply_text(f"✅ {ticker}: продано {qty} шт. (осталось {existing.quantity:.1f} шт.)")
+        else:
+            db.delete(existing)
+            db.commit()
+            await update.message.reply_text(f"✅ {ticker}: полностью удалён из портфеля")
+    except Exception as e:
+        db.rollback()
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+    finally:
+        db.close()
+
+
 async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from src.collectors.cbr import CBRCollector
 
@@ -818,6 +957,9 @@ async def run_bot():
     app.add_handler(CommandHandler("daily", daily))
     app.add_handler(CommandHandler("stress", stress))
     app.add_handler(CommandHandler("backtest", backtest))
+    app.add_handler(CommandHandler("add", add_position))
+    app.add_handler(CommandHandler("remove", remove_position))
+    app.add_handler(CommandHandler("history", history))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 
