@@ -97,15 +97,15 @@ class AnalysisService:
         return MacroCollector.latest_values(db)
 
     def _load_sentiment(self, db: Session) -> dict:
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         from src.db.models import News
 
-        cutoff = datetime.utcnow() - timedelta(days=3)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
         recent = db.query(News).filter(News.created_at >= cutoff).all()
         if not recent:
             return {"score": 0.0, "divergence": 0.0, "source": "none"}
-        scores = [n.sentiment_weighted or n.sentiment_score or 0.0 for n in recent]
+        scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
         mean = sum(scores) / len(scores)
         variance = sum((s - mean) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
         return {
@@ -118,13 +118,13 @@ class AnalysisService:
     def analyze_single(self, db: Session, inst: Instrument, ticker: str, with_ml: bool = True) -> dict:
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
         if len(prices) < 50:
-            raise ValueError("Not enough price data for %s", ticker)
+            raise ValueError(f"Not enough price data for {ticker}")
 
         df = self._price_df(prices)
 
         ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
         if len(ind_rows) < 2:
-            raise ValueError("Not enough indicator data for %s", ticker)
+            raise ValueError(f"Not enough indicator data for {ticker}")
         ind_df = self._indicator_df(ind_rows)
         ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
 
@@ -166,7 +166,7 @@ class AnalysisService:
             q = q.filter(Instrument.id.in_(updated_ids))
         instruments = q.all()
 
-        signals = []
+        signals: list[dict] = []
         for inst in instruments:
             cached = (
                 db.query(Signal)
@@ -177,11 +177,13 @@ class AnalysisService:
                 .first()
             )
             if cached and cached.fused_json:
-                signals.append(cached.fused_json)
+                fused_json = cached.fused_json
+                if isinstance(fused_json, dict):
+                    signals.append(fused_json)
                 continue
 
             try:
-                fused = self.analyze_single(db, inst, inst.ticker, with_ml=with_ml)
+                fused = self.analyze_single(db, inst, str(inst.ticker), with_ml=with_ml)
                 self.fusion.save_signal(db, inst.id, fused)
                 signals.append(fused)
             except ValueError:

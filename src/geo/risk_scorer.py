@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class GeoRiskScorer:
         components = {
             "sanctions_risk": self._count_keywords(news_list, self.sanctions_keywords),
             "instability": self._count_keywords(news_list, self.instability_keywords),
-            "currency_stress": min(currency_volatility * 10, 2.0),
+            "currency_stress": min(abs(currency_volatility) * 10, 2.0),
             "volume_anomaly": 0.0,
         }
 
@@ -40,9 +41,9 @@ class GeoRiskScorer:
             + components["volume_anomaly"]
         )
 
-        normalized_score = min(raw_score, 10.0)
+        normalized_score = max(0, min(raw_score, 10.0))
 
-        result = {
+        result: dict[str, Any] = {
             "score": round(normalized_score, 1),
             "level": self._level(normalized_score),
             "components": components,

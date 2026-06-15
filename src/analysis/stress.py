@@ -151,14 +151,21 @@ class StressTester:
         if len(arr) < window + 1:
             return {"max_drawdown": 0.0, "worst_period": "N/A"}
         max_dd = 0.0
-        peak = arr[0]
-        for val in arr:
-            if val > peak:
-                peak = val
-            dd = (val - peak) / peak
-            if dd < max_dd:
-                max_dd = dd
-        return {"max_drawdown": round(max_dd, 4), "worst_period": f"{window}-дневное окно"}
+        worst_start = 0
+        for i in range(len(arr) - window + 1):
+            segment = arr[i : i + window]
+            peak = segment[0]
+            for val in segment:
+                if val > peak:
+                    peak = val
+                dd = (val - peak) / peak
+                if dd < max_dd:
+                    max_dd = dd
+                    worst_start = i
+        return {
+            "max_drawdown": round(max_dd, 4),
+            "worst_period": f"{window}-дневное окно с {worst_start}",
+        }
 
     def format_results(self, results: list[dict]) -> str:
         text = ""

@@ -1,4 +1,5 @@
 import logging
+from typing import TypedDict
 
 import numpy as np
 import pandas as pd
@@ -6,7 +7,13 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-VOLATILITY_REGIMES = {
+class _VolatilityThresholds(TypedDict):
+    label: str
+    threshold_atr: float
+    threshold_hv: float
+
+
+VOLATILITY_REGIMES: dict[str, _VolatilityThresholds] = {
     "LOW": {"label": "Низкая", "threshold_atr": 0.012, "threshold_hv": 0.15},
     "NORMAL": {"label": "Нормальная", "threshold_atr": 0.025, "threshold_hv": 0.30},
     "HIGH": {"label": "Высокая", "threshold_atr": float("inf"), "threshold_hv": float("inf")},
@@ -41,12 +48,13 @@ class VolatilityRegimeDetector:
         }
 
     def _classify(self, atr_ratio: float, hv: float) -> str:
-        if atr_ratio < VOLATILITY_REGIMES["LOW"]["threshold_atr"] and hv < VOLATILITY_REGIMES["LOW"]["threshold_hv"]:
+        low_atr: float = VOLATILITY_REGIMES["LOW"]["threshold_atr"]
+        low_hv: float = VOLATILITY_REGIMES["LOW"]["threshold_hv"]
+        norm_atr: float = VOLATILITY_REGIMES["NORMAL"]["threshold_atr"]
+        norm_hv: float = VOLATILITY_REGIMES["NORMAL"]["threshold_hv"]
+        if atr_ratio < low_atr and hv < low_hv:
             return "LOW"
-        elif (
-            atr_ratio < VOLATILITY_REGIMES["NORMAL"]["threshold_atr"]
-            or hv < VOLATILITY_REGIMES["NORMAL"]["threshold_hv"]
-        ):
+        if atr_ratio < norm_atr or hv < norm_hv:
             return "NORMAL"
         return "HIGH"
 

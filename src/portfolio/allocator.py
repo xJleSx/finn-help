@@ -62,12 +62,51 @@ SECTOR_LIMITS = {
 
 
 class PortfolioAllocator:
-    TARGET_WEIGHTS = {
-        "etf": {"weight": 0.40, "label": "БПИФ (ETF)", "max": 3},
-        "dividend": {"weight": 0.30, "label": "Дивидендные акции", "max": 4},
-        "bond": {"weight": 0.20, "label": "Облигации / ОФЗ", "max": 3},
-        "growth": {"weight": 0.10, "label": "Акции роста", "max": 2},
+    PROFILES = {
+        "conservative": {
+            "etf": {"weight": 0.50, "label": "БПИФ (ETF)", "max": 4},
+            "dividend": {"weight": 0.20, "label": "Дивидендные акции", "max": 3},
+            "bond": {"weight": 0.25, "label": "Облигации / ОФЗ", "max": 4},
+            "growth": {"weight": 0.05, "label": "Акции роста", "max": 1},
+        },
+        "balanced": {
+            "etf": {"weight": 0.40, "label": "БПИФ (ETF)", "max": 3},
+            "dividend": {"weight": 0.30, "label": "Дивидендные акции", "max": 4},
+            "bond": {"weight": 0.20, "label": "Облигации / ОФЗ", "max": 3},
+            "growth": {"weight": 0.10, "label": "Акции роста", "max": 2},
+        },
+        "aggressive": {
+            "etf": {"weight": 0.25, "label": "БПИФ (ETF)", "max": 3},
+            "dividend": {"weight": 0.25, "label": "Дивидендные акции", "max": 3},
+            "bond": {"weight": 0.10, "label": "Облигации / ОФЗ", "max": 2},
+            "growth": {"weight": 0.40, "label": "Акции роста", "max": 4},
+        },
     }
+
+    def __init__(self):
+        self.profile = "balanced"
+
+    def set_profile(self, profile: str):
+        if profile in self.PROFILES:
+            self.profile = profile
+
+    def _load_profile_from_db(self):
+        try:
+            from src.db.connection import get_session
+            from src.db.models import UserSetting
+
+            db = get_session()
+            try:
+                row = db.query(UserSetting).filter_by(key="risk_profile").first()
+                if row and row.value in self.PROFILES:
+                    self.profile = row.value
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("Failed to load risk profile from DB: %s", e)
+
+    def _weights(self) -> dict:
+        return self.PROFILES.get(self.profile, self.PROFILES["balanced"])
 
     def allocate(self, capital: float, db=None) -> dict:
         should_close = db is None
@@ -80,10 +119,8 @@ class PortfolioAllocator:
             plan = {}
             total_allocated = 0.0
             sector_allocation: dict[str, float] = {}
-            if should_close:
-                db.close()
 
-            for category, cfg in self.TARGET_WEIGHTS.items():
+            for category, cfg in self._weights().items():
                 budget = capital * cfg["weight"]
                 candidates = self._score_candidates(instruments_data, category, budget, existing, db)
 
@@ -140,7 +177,11 @@ class PortfolioAllocator:
             if leftover > max(500, capital * 0.1):
                 for cat_name in ["etf", "dividend"]:
                     if cat_name in plan and plan[cat_name]["items"]:
-                        plan[cat_name]["items"][0]["amount"] = round(plan[cat_name]["items"][0]["amount"] + leftover, 2)
+                        items = plan[cat_name]["items"]
+                        total_score = sum(it.get("amount", 0) for it in items) or 1
+                        for it in items:
+                            frac = it["amount"] / total_score
+                            it["amount"] = round(it["amount"] + leftover * frac, 2)
                         total_allocated += leftover
                         break
 
@@ -318,7 +359,8 @@ class PortfolioAllocator:
             if days_since <= 90:
                 return {"bonus": 0.5, "reason": "недавние дивиденды"}
             return {"bonus": 0.0, "reason": ""}
-        except Exception:
+        except Exception as e:
+            logger.warning("Dividend score failed for %s: %s", inst.get("ticker", "?"), e)
             return {"bonus": 0.0, "reason": ""}
 
     def _volume_score(self, inst: dict, db) -> float:
@@ -345,6 +387,7 @@ class PortfolioAllocator:
         return monthly
 
     def recommend(self, capital: float = 0, db=None, exclude: set | None = None) -> list[dict]:
+        self._load_profile_from_db()
         should_close = db is None
         if db is None:
             db = get_session()
@@ -352,7 +395,7 @@ class PortfolioAllocator:
             instruments = self._load_instruments(db)
             existing = self._get_current_portfolio(db)
             all_picks = []
-            for cat, cfg in self.TARGET_WEIGHTS.items():
+            for cat, cfg in self._weights().items():
                 candidates = self._score_candidates(instruments, cat, capital or 100_000, existing, db)
                 for c in candidates:
                     if exclude and c["ticker"] in exclude:
@@ -408,10 +451,10 @@ def _item_risk(item: dict, db, capital: float = 100_000) -> dict:
         closes = np.array([r.close for r in atr_rows if r.close])
         if len(highs) >= 14 and len(lows) >= 14 and len(closes) >= 14:
             tr = np.maximum(
-                highs[:-1] - lows[:-1],
+                highs[1:] - lows[1:],
                 np.maximum(
-                    abs(highs[:-1] - closes[1:]),
-                    abs(lows[:-1] - closes[1:]),
+                    abs(highs[1:] - closes[:-1]),
+                    abs(lows[1:] - closes[:-1]),
                 ),
             )
             atr_val = float(np.mean(tr))

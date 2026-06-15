@@ -118,6 +118,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/stress СУММА — стресс-тест на сумму\n"
         "/backtest — история стратегии\n"
         "/backtest СУММА — бэктест на сумму\n"
+        "/profile — риск-профиль (conservative/balanced/aggressive)\n"
         "/add SBER 10 — добавить в портфель\n"
         "/remove SBER — удалить из портфеля\n"
         "/portfolio — мой портфель\n"
@@ -126,9 +127,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user is None or update.effective_chat is None:
+        return
     uid = update.effective_user.id
     cid = update.effective_chat.id
-    ntype = context.args[0] if context.args else "signal"
+    args = context.args or []
+    ntype = args[0] if args else "signal"
     if ntype not in ("signal", "daily", "geo", "dividend"):
         ntype = "signal"
     from src.notifications.service import NotificationService
@@ -140,8 +144,11 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user is None:
+        return
     uid = update.effective_user.id
-    ntype = context.args[0] if context.args else None
+    args = context.args or []
+    ntype = args[0] if args else None
     from src.notifications.service import NotificationService
 
     ns = NotificationService()
@@ -246,7 +253,7 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from src.analysis.backtest import backtest_allocation
 
-    amount = 100_000
+    amount: float = 100_000
     if context.args:
         try:
             amount = float(context.args[0].replace(" ", "").replace(",", "."))
@@ -261,11 +268,51 @@ async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_markdown(result.summary())
 
 
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from src.db.models import UserSetting
+
+    db = get_session()
+    try:
+        row = db.query(UserSetting).filter_by(key="risk_profile").first()
+        current = row.value if row else "balanced"
+
+        if context.args:
+            new_profile = context.args[0].lower()
+            if new_profile not in ("conservative", "balanced", "aggressive"):
+                await update.message.reply_text("Доступные профили: conservative, balanced, aggressive")
+                return
+            from src.portfolio.allocator import allocator
+
+            allocator.set_profile(new_profile)
+            if row:
+                row.value = new_profile
+            else:
+                db.add(UserSetting(key="risk_profile", value=new_profile))
+            db.commit()
+            names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
+            await update.message.reply_text(f"✅ Профиль изменён на *{names[new_profile]}*")
+        else:
+            names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
+            desc = {
+                "conservative": "50% ETF, 25% облигации, 20% дивидендные, 5% рост",
+                "balanced": "40% ETF, 30% дивидендные, 20% облигации, 10% рост",
+                "aggressive": "40% рост, 25% ETF, 25% дивидендные, 10% облигации",
+            }
+            text = f"📊 Текущий профиль: *{names.get(current, current)}*\n\n"
+            text += "*Возможные профили:*\n"
+            for k, name in names.items():
+                text += f"• `/profile {k}` — {name} ({desc[k]})\n"
+            await update.message.reply_markdown(text)
+    finally:
+        db.close()
+
+
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
+    args = context.args or []
+    if not args:
         await update.message.reply_text("Укажите тикер: /history SBER")
         return
-    ticker = context.args[0].upper()
+    ticker = args[0].upper()
 
     from src.db.models import Signal as SignalModel
 
@@ -297,10 +344,11 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
+    in_args = context.args or []
+    if not in_args:
         await update.message.reply_text("Укажите тикер: /analyze SBER")
         return
-    ticker = context.args[0].upper()
+    ticker = in_args[0].upper()
     await _reply_with_analysis(update, ticker)
 
 
@@ -386,7 +434,7 @@ async def _reply_with_analysis(update: Update, ticker: str):
 
 def _find_excluded_tickers(text: str) -> set[str]:
     text_lower = text.lower()
-    exclude = set()
+    exclude: set[str] = set()
 
     exclude_keywords = ["без ", "кроме ", "недоступ", "не учитывай", "исключ", "убери ",
                         "не рассматривай", "без учета", "без участия", "нет ", "нету ",
@@ -510,7 +558,7 @@ def _format_allocation_plan(picks: list[dict], capital: float) -> str:
     elif capital < 5000:
         max_positions = 4
 
-    used = []
+    used: list[dict] = []
     for p in candidates:
         if len(used) >= max_positions:
             break
@@ -762,12 +810,13 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 2:
+    args = context.args or []
+    if len(args) < 2:
         await update.message.reply_text("Укажите тикер и количество: /add SBER 10")
         return
-    ticker = context.args[0].upper()
+    ticker = args[0].upper()
     try:
-        qty = float(context.args[1].replace(",", "."))
+        qty = float(args[1].replace(",", "."))
     except ValueError:
         await update.message.reply_text("Количество должно быть числом: /add SBER 10")
         return
@@ -805,14 +854,15 @@ async def add_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 1:
+    args = context.args or []
+    if len(args) < 1:
         await update.message.reply_text("Укажите тикер: /remove SBER")
         return
-    ticker = context.args[0].upper()
+    ticker = args[0].upper()
     qty = None
-    if len(context.args) >= 2:
+    if len(args) >= 2:
         try:
-            qty = float(context.args[1].replace(",", "."))
+            qty = float(args[1].replace(",", "."))
         except ValueError:
             pass
 
@@ -886,6 +936,9 @@ async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def broadcast_signal(n):
+    if app is None:
+        logger.warning("Bot not running, skipping signal broadcast")
+        return
     from src.notifications.service import NotificationService, format_signal_text
 
     ns = NotificationService()
@@ -899,6 +952,9 @@ async def broadcast_signal(n):
 
 
 async def broadcast_dividends():
+    if app is None:
+        logger.warning("Bot not running, skipping dividend broadcast")
+        return
     from src.notifications.service import NotificationService
 
     ns = NotificationService()
@@ -920,6 +976,9 @@ async def broadcast_dividends():
 
 
 async def broadcast_daily_summary():
+    if app is None:
+        logger.warning("Bot not running, skipping daily summary broadcast")
+        return
     from src.notifications.service import NotificationService, format_daily_summary_text
 
     ns = NotificationService()
@@ -960,6 +1019,7 @@ async def run_bot():
     app.add_handler(CommandHandler("add", add_position))
     app.add_handler(CommandHandler("remove", remove_position))
     app.add_handler(CommandHandler("history", history))
+    app.add_handler(CommandHandler("profile", profile))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 

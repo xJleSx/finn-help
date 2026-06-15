@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
@@ -80,7 +80,7 @@ class SignalFusionEngine:
     def fuse(
         self,
         ticker: str,
-        technical: dict,
+        technical: Optional[dict] = None,
         fundamental: Optional[dict] = None,
         geo: Optional[dict] = None,
         ml_prediction: Optional[dict] = None,
@@ -179,10 +179,10 @@ class SignalFusionEngine:
             if macro_reasons:
                 reasons.append(f"Макро: {', '.join(macro_reasons)}")
 
-        tech_action = technical.get("action", "NEUTRAL")
-        tech_conf = technical.get("confidence", 0.0)
-        tech_score = technical.get("score", 0.0)
-        tech_reasons = technical.get("reasons", [])
+        tech_action = technical.get("action", "NEUTRAL") if technical else "NEUTRAL"
+        tech_conf = technical.get("confidence", 0.0) if technical else 0.0
+        tech_score = technical.get("score", 0.0) if technical else 0.0
+        tech_reasons = technical.get("reasons", []) if technical else []
 
         fund_risk = fundamental.get("risk", 0.5) if fundamental else 0.5
         fund_anomalies = fundamental.get("anomalies", []) if fundamental else []
@@ -343,7 +343,7 @@ class SignalFusionEngine:
         fused_clean = self._to_native(fused)
         signal = SignalModel(
             instrument_id=instrument_id,
-            date=datetime.utcnow(),
+            date=datetime.now(timezone.utc),
             action=fused["action"],
             confidence=fused_clean["confidence"],
             fused_json=fused_clean,

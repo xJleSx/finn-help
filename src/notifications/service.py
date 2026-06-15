@@ -62,7 +62,11 @@ def format_daily_summary_text(n: DailySummaryNotification) -> str:
 class NotificationService:
     # --- Subscriptions ---
 
+    VALID_NOTIFY_TYPES = frozenset({"signal", "daily", "geo", "dividend"})
+
     def subscribe(self, user_id: int, chat_id: int, notify_type: str = "daily") -> None:
+        if notify_type not in self.VALID_NOTIFY_TYPES:
+            raise ValueError(f"Invalid notify_type: {notify_type}")
         db = get_session()
         try:
             sub = db.query(Subscription).filter_by(user_id=user_id).first()
@@ -80,6 +84,8 @@ class NotificationService:
             db.close()
 
     def unsubscribe(self, user_id: int, notify_type: str | None = None) -> None:
+        if notify_type is not None and notify_type not in self.VALID_NOTIFY_TYPES:
+            raise ValueError(f"Invalid notify_type: {notify_type}")
         db = get_session()
         try:
             sub = db.query(Subscription).filter_by(user_id=user_id).first()

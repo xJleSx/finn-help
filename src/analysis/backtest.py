@@ -134,15 +134,15 @@ def backtest_allocation(
         weights = [p.get("score", 1) for p in result.positions if p["ticker"] in portfolio_prices]
         total_w = sum(weights) or 1
         weights = [w / total_w for w in weights]
+        tickers_with_prices = [p["ticker"] for p in result.positions if p["ticker"] in portfolio_prices]
 
         for i in range(1, min_len):
             port_ret = 0.0
-            idx = 0
-            for ticker, vals in portfolio_prices.items():
+            for idx, ticker in enumerate(tickers_with_prices):
+                vals = portfolio_prices[ticker]
                 if i < len(vals):
                     ret = (vals[i] - vals[i - 1]) / vals[i - 1]
                     port_ret += ret * weights[idx]
-                    idx += 1
 
             bench_ret = (imoex_vals[i] - imoex_vals[i - 1]) / imoex_vals[i - 1]
             result.add_snapshot(str(i), port_ret, bench_ret)

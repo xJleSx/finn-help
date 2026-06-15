@@ -55,7 +55,7 @@ def update(ticker: Optional[str] = typer.Argument(None, help="Тикер (нап
                     task = p.add_task("Загрузка списка акций...", total=None)
                     stocks = await moex.get_stocks()
                     p.update(task, description=f"Загружено {len(stocks)} акций")
-                    for s in stocks[:50]:
+                    for s in stocks[:300]:
                         secid = s.get("SECID") or s.get("secid")
                         if secid:
                             await _update_ticker(moex, tk=secid, itype="stock")
@@ -64,7 +64,7 @@ def update(ticker: Optional[str] = typer.Argument(None, help="Тикер (нап
                     task2 = p.add_task("Загрузка ETF...", total=None)
                     etfs = await moex.get_etfs()
                     p.update(task2, description=f"Загружено {len(etfs)} ETF")
-                    for e in etfs[:20]:
+                    for e in etfs[:50]:
                         secid = e.get("SECID") or e.get("secid")
                         if secid:
                             await _update_ticker(moex, tk=secid, itype="etf")
@@ -73,7 +73,7 @@ def update(ticker: Optional[str] = typer.Argument(None, help="Тикер (нап
                     task3 = p.add_task("Загрузка облигаций...", total=None)
                     bonds = await moex.get_bonds()
                     p.update(task3, description=f"Загружено {len(bonds)} облигаций")
-                    for b in bonds[:10]:
+                    for b in bonds[:50]:
                         secid = b.get("SECID") or b.get("secid")
                         if secid:
                             await _update_ticker(moex, tk=secid, itype="bond")
@@ -89,7 +89,7 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock"):
     try:
         inst = db.query(Instrument).filter_by(ticker=tk).first()
         if not inst:
-            market_data = await moex.get_marketdata(tk)
+            market_data = await moex.get_marketdata(tk, itype=itype)
             if not market_data:
                 logger.warning(f"Не удалось найти {tk} на MOEX")
                 return
@@ -166,7 +166,7 @@ async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True)
     try:
         inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
         if not inst:
-            return None, f"Инструмент {ticker} не найден"
+            return None, f"Инструмент {ticker} не найден"  # type: ignore[return-value]
         return await analysis_service.analyze_with_advice(db, inst, ticker, with_ml=with_ml)
     finally:
         db.close()

@@ -106,7 +106,7 @@ class TechnicalAnalyzer:
             if not pd.isna(latest.get(col)):
                 max_score += 0.5
                 price_col = "close"
-                price = latest[price_col]
+                price = latest.get(price_col, 0)
                 if price > latest[col]:
                     score += 0.5
                     reasons.append(f"Цена выше {col.upper()}={latest[col]:.2f}")

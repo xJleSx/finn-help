@@ -193,7 +193,7 @@ class Transaction(Base):
 
     id = Column(Integer, primary_key=True)
     instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
-    type = Column(String(4), nullable=False)
+    tx_type = Column("type", String(4), nullable=False)
     quantity = Column(Float, nullable=False)
     price = Column(Float, nullable=False)
     date = Column(DateTime, default=func.now())
@@ -274,4 +274,20 @@ class Notification(Base):
     __table_args__ = (
         Index("ix_notifications_user_read", "user_id", "read"),
         Index("ix_notifications_created", "created_at"),
+    )
+
+
+class FeatureCache(Base):
+    __tablename__ = "feature_cache"
+
+    id = Column(Integer, primary_key=True)
+    ticker = Column(String(20), nullable=False)
+    feature_type = Column(String(50), nullable=False)
+    date = Column(Date, nullable=False)
+    value_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("ticker", "feature_type", "date", name="uq_feature_cache"),
+        Index("ix_feature_ticker_type", "ticker", "feature_type"),
     )

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 import pandas as pd
@@ -49,7 +51,7 @@ class CorrelationAnalyzer:
                 index=pd.DatetimeIndex([r.date for r in rows]),
                 name=inst.ticker,
             )
-            price_dict[inst.ticker] = closes
+            price_dict[str(inst.ticker)] = closes
 
         if len(price_dict) < 2:
             return None

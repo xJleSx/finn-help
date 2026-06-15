@@ -16,6 +16,8 @@ BOARD_MAP = {
     "shares": "/history/engines/stock/markets/shares/securities/{ticker}.json",
 }
 
+BOND_BOARDS = ["TQCB", "TQBD", "TQOB"]
+
 
 class MOEXCollector:
     BASE = settings.moex_iss_url
@@ -74,6 +76,9 @@ class MOEXCollector:
         if to_date is None:
             to_date = date.today().isoformat()
 
+        if board == "bond":
+            return await self._get_bond_history(ticker, from_date, to_date)
+
         path = BOARD_MAP.get(board)
         if not path:
             path = BOARD_MAP["shares"]
@@ -87,6 +92,23 @@ class MOEXCollector:
         rows = history.get("data", [])
         return [dict(zip(cols, row)) for row in rows]
 
+    async def _get_bond_history(self, ticker: str, from_date: str, to_date: str) -> list[dict]:
+        for board_id in BOND_BOARDS:
+            path = f"/history/engines/stock/markets/bonds/boards/{board_id}/securities/{ticker}.json"
+            try:
+                data = await self._fetch_json(
+                    path,
+                    {"from": from_date, "till": to_date, "iss.meta": "off"},
+                )
+                history = data.get("history", {})
+                rows = history.get("data", [])
+                if rows:
+                    cols = history.get("columns", [])
+                    return [dict(zip(cols, row)) for row in rows]
+            except Exception:
+                continue
+        return []
+
     async def get_dividends(self, ticker: str) -> list[dict]:
         data = await self._fetch_json(
             f"/securities/{ticker}/dividends.json",
@@ -97,7 +119,22 @@ class MOEXCollector:
         rows = dividends.get("data", [])
         return [dict(zip(cols, row)) for row in rows]
 
-    async def get_marketdata(self, ticker: str) -> dict:
+    async def get_marketdata(self, ticker: str, itype: str = "stock") -> dict:
+        if itype == "bond":
+            for board_id in BOND_BOARDS:
+                try:
+                    data = await self._fetch_json(
+                        f"/engines/stock/markets/bonds/boards/{board_id}/securities/{ticker}.json",
+                        {"iss.meta": "off"},
+                    )
+                    marketdata = data.get("marketdata", {})
+                    cols = marketdata.get("columns", [])
+                    rows = marketdata.get("data", [])
+                    if rows:
+                        return dict(zip(cols, rows[0]))
+                except Exception:
+                    continue
+            return {}
         data = await self._fetch_json(
             f"/engines/stock/markets/shares/securities/{ticker}.json",
             {"iss.meta": "off"},
@@ -110,14 +147,26 @@ class MOEXCollector:
         return {}
 
     async def get_bonds(self) -> list[dict]:
-        data = await self._fetch_json(
-            "/engines/stock/markets/bonds/boards/TQCB/securities.json",
-            {"iss.meta": "off"},
-        )
-        securities = data.get("securities", {})
-        cols = securities.get("columns", [])
-        rows = securities.get("data", [])
-        return [dict(zip(cols, row)) for row in rows]
+        seen = set()
+        results = []
+        for board_id in BOND_BOARDS:
+            try:
+                data = await self._fetch_json(
+                    f"/engines/stock/markets/bonds/boards/{board_id}/securities.json",
+                    {"iss.meta": "off"},
+                )
+                securities = data.get("securities", {})
+                cols = securities.get("columns", [])
+                rows = securities.get("data", [])
+                for row in rows:
+                    entry = dict(zip(cols, row))
+                    secid = entry.get("SECID") or entry.get("secid")
+                    if secid and secid not in seen:
+                        seen.add(secid)
+                        results.append(entry)
+            except Exception:
+                continue
+        return results
 
     async def __aenter__(self):
         return self

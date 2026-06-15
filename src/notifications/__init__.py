@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -12,7 +12,7 @@ class SignalNotification:
     weighted_score: float
     reasons: list[str]
     max_portfolio_pct: int
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -21,7 +21,7 @@ class GeoRiskNotification:
     level: str
     signals: list[str]
     prev_score: Optional[float]
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -30,7 +30,7 @@ class DividendNotification:
     amount: float
     ex_date: Optional[str]
     yield_pct: Optional[float]
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -42,4 +42,4 @@ class DailySummaryNotification:
     geo_risk: float
     portfolio_value: Optional[float]
     top_picks: list[str]
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

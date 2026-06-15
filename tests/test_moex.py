@@ -114,7 +114,9 @@ class TestMOEXCollectorUnit:
     @pytest.mark.asyncio
     async def test_get_history_with_board_bond(self, collector, httpx_mock):
         httpx_mock.add_response(
-            url=re.compile(r".*/history/engines/stock/markets/bonds/boards/TQCB/securities/SU26238RMFS5.json.*"),
+            url=re.compile(
+                r".*/history/engines/stock/markets/bonds/boards/(TQCB|TQBD|TQOB)/securities/SU26238RMFS5.json.*"
+            ),
             json={
                 "history": {
                     "columns": ["TRADEDATE", "CLOSE"],
@@ -151,15 +153,17 @@ class TestMOEXCollectorUnit:
 
     @pytest.mark.asyncio
     async def test_get_bonds_parses_columns(self, collector, httpx_mock):
-        httpx_mock.add_response(
-            url="https://iss.moex.com/iss/engines/stock/markets/bonds/boards/TQCB/securities.json?iss.meta=off",
-            json={
-                "securities": {
-                    "columns": ["SECID", "SHORTNAME"],
-                    "data": [["SU26238RMFS5", "ОФЗ 26238"]],
-                }
-            },
-        )
+        for board in ["TQCB", "TQBD", "TQOB"]:
+            httpx_mock.add_response(
+                url=f"https://iss.moex.com/iss/engines/stock/markets/bonds/boards/{board}/securities.json?iss.meta=off",
+                json={
+                    "securities": {
+                        "columns": ["SECID", "SHORTNAME"],
+                        "data": [["SU26238RMFS5", "ОФЗ 26238"]] if board == "TQCB" else [],
+                    }
+                },
+                is_optional=board != "TQCB",
+            )
         result = await collector.get_bonds()
         assert len(result) == 1
         assert result[0]["SECID"] == "SU26238RMFS5"

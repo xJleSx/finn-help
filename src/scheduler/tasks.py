@@ -48,7 +48,7 @@ async def _collect_prices(db: Session) -> set[int]:
         for inst in instruments:
             last = db.query(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
             from_date = last[0].isoformat() if last else (date.today() - timedelta(days=365)).isoformat()
-            board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(inst.instrument_type, "shares")
+            board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
             history = await moex.get_history(inst.ticker, from_date=from_date, board=board)
             new_count = 0
             for row in history:
@@ -72,7 +72,7 @@ async def _collect_prices(db: Session) -> set[int]:
                     new_count += 1
             db.commit()
             if new_count > 0:
-                updated_ids.add(inst.id)
+                updated_ids.add(int(inst.id))
     return updated_ids
 
 
@@ -81,7 +81,7 @@ async def _collect_dividends(db: Session):
         instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
         for inst in instruments:
             last = db.query(Dividend.date).filter_by(instrument_id=inst.id).order_by(Dividend.date.desc()).first()
-            if last:
+            if last and (date.today() - last[0]).days < 365:
                 continue
             try:
                 dividends = await moex.get_dividends(inst.ticker)
@@ -158,7 +158,7 @@ def _compute_indicators(db: Session, instrument_ids: set[int] | None = None):
 
 async def _collect_news(db: Session) -> list[dict]:
     collector = NewsCollector()
-    news_list = collector.fetch_all(max_per_feed=5)
+    news_list = await collector.fetch_all(max_per_feed=5)
     for item in news_list:
         exists = db.query(News).filter_by(url=item["url"]).first()
         if not exists:
@@ -194,7 +194,7 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
         prev = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
         if prev and prev.components_json:
             prev_stress = prev.components_json.get("currency_stress", 0)
-            currency_vol = prev_stress * 0.7 + min(usd_rate.get("change_pct", 0) * 5, 2.0) * 0.3
+            currency_vol = prev_stress * 0.7 + min(abs(usd_rate.get("change_pct", 0)) * 5, 2.0) * 0.3
         else:
             currency_vol = min(abs(usd_rate.get("change_pct", 0)) * 5, 2.0)
 
@@ -204,7 +204,7 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
     existing = db.query(GeoRiskScore).filter_by(date=today).first()
     if existing:
         existing.score = risk["score"]
-        existing.components_json = risk.get("components")
+        existing.components_json = dict(risk.get("components") or {})
         existing.sources_json = {"sentiment_divergence": sent, "news_count": len(news_list)}
     else:
         score = GeoRiskScore(
