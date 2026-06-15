@@ -160,11 +160,13 @@ async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Укажите сумму: /allocate 100000")
         return
     try:
+        full_text = " ".join(context.args)
         amount = float(context.args[0].replace(" ", "").replace(",", "."))
         if amount < 500:
             await update.message.reply_text("Минимальная сумма — 500 ₽")
             return
-        await _reply_with_allocation(update, amount)
+        exclude = _find_excluded_tickers(full_text)
+        await _reply_with_allocation(update, amount, exclude=exclude)
     except ValueError:
         await update.message.reply_text("Укажите число: /allocate 100000")
 
@@ -271,7 +273,8 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _handle_text(update: Update, text: str):
     amount = _extract_allocation_amount(text)
     if amount is not None:
-        await _reply_with_allocation(update, amount)
+        exclude = _find_excluded_tickers(text)
+        await _reply_with_allocation(update, amount, exclude=exclude)
         return
 
     tickers = _find_tickers(text)
@@ -325,19 +328,28 @@ async def _reply_with_analysis(update: Update, ticker: str):
 def _find_excluded_tickers(text: str) -> set[str]:
     text_lower = text.lower()
     exclude = set()
-    exclude_keywords = ["без ", "кроме ", "недоступ", "не учитывай", "исключ", "убери ", "не рассматривай",
-                        "без учета", "без участия"]
-    if not any(k in text_lower for k in exclude_keywords):
+
+    exclude_keywords = ["без ", "кроме ", "недоступ", "не учитывай", "исключ", "убери ",
+                        "не рассматривай", "без учета", "без участия", "нет ", "нету ",
+                        "отсутств", "не им", "пока нет", "ещё нет", "нет в наличии",
+                        "не интересу", "не нужно", "не хочу", "не рассматрива"]
+
+    has_exclusion = any(k in text_lower for k in exclude_keywords)
+    if not has_exclusion:
         return exclude
 
-    rev_map = {v.lower(): v for v in RUSSIAN_NAMES.values()}
-    for phrase, ticker in RUSSIAN_NAMES.items():
-        if not any(kw + phrase in text_lower for kw in ["без ", "кроме "]):
-            continue
-        exclude.add(ticker)
+    all_tickers = _find_tickers(text)
 
+    for ticker in all_tickers:
+        t_lower = ticker.lower()
+        if any(re.search(rf'\b{kw}\s*{t_lower}\b', text_lower) for kw in ["без", "кроме", "нет", "нету",
+               "недоступ", "исключ", "убери", "отсутств", "не интересу", "не нужно"]):
+            exclude.add(ticker)
+            break
+
+    rev_map = {v.lower(): v for v in RUSSIAN_NAMES.values()}
     for t_lower, ticker in rev_map.items():
-        if f"без {t_lower}" in text_lower:
+        if any(kw + t_lower in text_lower for kw in ["без ", "кроме ", "нет "]):
             exclude.add(ticker)
         if t_lower in text_lower and any(kw in text_lower for kw in ["недоступ", "исключ",
                                                                      "не учитывай", "убери"]):
