@@ -115,7 +115,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/unsubscribe — отписаться\n"
         "/daily — ежедневная сводка\n"
         "/stress — стресс-тест портфеля\n"
-        "/stress СУММА — стресс-тест на сумму"
+        "/stress СУММА — стресс-тест на сумму\n"
+        "/backtest — история стратегии\n"
+        "/backtest СУММА — бэктест на сумму"
     )
 
 
@@ -235,6 +237,24 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for chunk in _chunk_text(text, 4096):
         await update.message.reply_markdown(chunk)
+
+
+async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from src.analysis.backtest import backtest_allocation
+
+    amount = 100_000
+    if context.args:
+        try:
+            amount = float(context.args[0].replace(" ", "").replace(",", "."))
+            if amount < 500:
+                await update.message.reply_text("Минимальная сумма — 500 ₽")
+                return
+        except ValueError:
+            pass
+
+    await update.message.reply_text(f"🕰 Прогоняю стратегию для {amount:,.0f} ₽ за последний год...")
+    result = backtest_allocation(capital=amount)
+    await update.message.reply_markdown(result.summary())
 
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -785,6 +805,7 @@ async def run_bot():
     app.add_handler(CommandHandler("unsubscribe", unsubscribe))
     app.add_handler(CommandHandler("daily", daily))
     app.add_handler(CommandHandler("stress", stress))
+    app.add_handler(CommandHandler("backtest", backtest))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 
