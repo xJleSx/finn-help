@@ -431,9 +431,9 @@ async def _reply_with_allocation(update: Update, capital: float, exclude: set[st
             if risk:
                 parts = []
                 if risk.get("var_95"):
-                    parts.append(f"VaR95={risk['var_95']:.1%}")
+                    parts.append(f"VaR95={risk['var_95']:.1f}%")
                 if risk.get("stop_loss_pct"):
-                    parts.append(f"SL={risk['stop_loss_pct']:.1%}")
+                    parts.append(f"SL={risk['stop_loss_pct']:.1f}%")
                 if risk.get("suggested_shares"):
                     parts.append(f"лимит {risk['suggested_shares']} шт")
                 if parts:
@@ -498,9 +498,9 @@ def _format_allocation_plan(picks: list[dict], capital: float) -> str:
             sl_pct = risk.get("stop_loss_pct")
             var = risk.get("var_95")
             if sl and sl_pct:
-                text += f"\n   ⛔️ Стоп-лосс: {sl:.0f} ₽ ({sl_pct:.1%})"
+                text += f"\n   ⛔️ Стоп-лосс: {sl:.0f} ₽ ({sl_pct:.1f}%)"
             if var:
-                text += f"\n   ⚠️ VaR(95%): {var:.1%}"
+                text += f"\n   ⚠️ VaR(95%): {var:.1f}%"
         text += "\n"
 
     leftover = round(capital - allocated, 2)
