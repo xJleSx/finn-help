@@ -6,8 +6,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.analysis.fundamental import FundamentalAnalyzer
-from src.analysis.ml.ensemble import EnsemblePredictor
-from src.analysis.ml.prophet_model import ProphetPredictor
 from src.analysis.multi_timeframe import MultiTimeframeAnalyzer
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.volatility import VolatilityRegimeDetector
@@ -23,10 +21,26 @@ class AnalysisService:
         self.analyzer = TechnicalAnalyzer()
         self.fundamental = FundamentalAnalyzer()
         self.fusion = SignalFusionEngine()
-        self.prophet = ProphetPredictor()
-        self.ensemble = EnsemblePredictor()
+        self._prophet = None
+        self._ensemble = None
         self.volatility = VolatilityRegimeDetector()
         self.mtf = MultiTimeframeAnalyzer()
+
+    @property
+    def prophet(self):
+        if self._prophet is None:
+            from src.analysis.ml.prophet_model import ProphetPredictor
+
+            self._prophet = ProphetPredictor()
+        return self._prophet
+
+    @property
+    def ensemble(self):
+        if self._ensemble is None:
+            from src.analysis.ml.ensemble import EnsemblePredictor
+
+            self._ensemble = EnsemblePredictor()
+        return self._ensemble
 
     def _price_df(self, prices: list[Price]) -> pd.DataFrame:
         return pd.DataFrame(

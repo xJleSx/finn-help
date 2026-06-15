@@ -185,3 +185,63 @@ class TestProphet:
         df = _make_df(10)
         result = prophet.predict(df)
         assert "target_price" in result
+
+    def test_predict_flat_price(self, prophet):
+        df = _make_df(100)
+        df["close"] = 100.0
+        result = prophet.predict(df)
+        assert result["current_price"] == 100.0
+
+    def test_predict_empty_df(self, prophet):
+        df = pd.DataFrame()
+        result = prophet.predict(df)
+        assert result["target_price"] is None
+
+
+class TestEdgeCases:
+    def test_xgboost_empty_features(self):
+        from src.analysis.ml.xgboost_model import XGBoostClassifier
+
+        model = XGBoostClassifier()
+        df = pd.DataFrame({"close": [100] * 10})
+        result = model.predict(df)
+        assert result["action"] == "NEUTRAL"
+
+    def test_xgboost_nan_close(self):
+        from src.analysis.ml.xgboost_model import XGBoostClassifier
+
+        model = XGBoostClassifier()
+        df = _make_df(100)
+        df["close"] = float("nan")
+        result = model.predict(df)
+        assert result["action"] in ("BUY", "SELL", "HOLD", "NEUTRAL")
+
+    def test_ensemble_missing_columns(self):
+        ensemble = EnsemblePredictor()
+        df = pd.DataFrame({"close": [100] * 50})
+        result = ensemble.predict(df)
+        assert isinstance(result, dict)
+        assert "action" in result
+
+    def test_prophet_zero_price(self):
+        from src.analysis.ml.prophet_model import ProphetPredictor
+
+        prophet = ProphetPredictor()
+        df = _make_df(100)
+        df["close"] = 0.0
+        result = prophet.predict(df)
+        assert isinstance(result, dict)
+        assert "target_price" in result
+
+    def test_walk_forward_minimal_data(self):
+        rng = np.random.default_rng(42)
+        x = rng.normal(0, 1, (30, 5))
+        y = (rng.normal(0, 1, 30) > 0).astype(int)
+
+        def factory():
+            from xgboost import XGBClassifier
+            return XGBClassifier(n_estimators=5, max_depth=2)
+
+        result = walk_forward_validate(x, y, factory, n_splits=2, min_train_size=25)
+        assert "folds_completed" in result
+        assert 0 <= result["oos_accuracy"] <= 1

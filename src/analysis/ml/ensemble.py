@@ -3,19 +3,40 @@ import logging
 import numpy as np
 import pandas as pd
 
-from src.analysis.ml.catboost_model import CatBoostClassifierModel
-from src.analysis.ml.lightgbm_model import LightGBMClassifier
 from src.analysis.ml.walk_forward import adjust_confidence_by_oos, walk_forward_validate
-from src.analysis.ml.xgboost_model import XGBoostClassifier
 
 logger = logging.getLogger(__name__)
 
 
 class EnsemblePredictor:
     def __init__(self):
-        self.xgb = XGBoostClassifier()
-        self.lgb = LightGBMClassifier()
-        self.cat = CatBoostClassifierModel()
+        self._xgb = None
+        self._lgb = None
+        self._cat = None
+
+    @property
+    def xgb(self):
+        if self._xgb is None:
+            from src.analysis.ml.xgboost_model import XGBoostClassifier
+
+            self._xgb = XGBoostClassifier()
+        return self._xgb
+
+    @property
+    def lgb(self):
+        if self._lgb is None:
+            from src.analysis.ml.lightgbm_model import LightGBMClassifier
+
+            self._lgb = LightGBMClassifier()
+        return self._lgb
+
+    @property
+    def cat(self):
+        if self._cat is None:
+            from src.analysis.ml.catboost_model import CatBoostClassifierModel
+
+            self._cat = CatBoostClassifierModel()
+        return self._cat
 
     def predict(self, df: pd.DataFrame) -> dict:
         results = []

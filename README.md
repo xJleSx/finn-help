@@ -47,12 +47,93 @@ uv run uvicorn src.interfaces.api.server:app
 | Команда | Описание |
 |---------|----------|
 | `finn init` | Инициализировать БД |
-| `finn update` | Загрузить данные с MOEX (50 акций + 20 ETF + 10 облигаций) |
+| `finn update` | Загрузить данные с MOEX (300 акций + 50 ETF + 50 облигаций) |
 | `finn analyze TICKER` | Полный анализ инструмента |
 | `finn list-instruments` | Список инструментов в БД |
 | `finn rates` | Курсы валют ЦБ РФ |
 | `finn auto` | Полный цикл: обновление + анализ + сигналы |
 | `finn seed-portfolio` | Тестовый портфель (SBER, GAZP, LKOH) |
+
+## Примеры ответов API
+
+### Сигнал по инструменту
+
+```json
+GET /api/instruments/SBER/signal
+
+{
+  "ticker": "SBER",
+  "action": "BUY",
+  "confidence": 0.78,
+  "weighted_score": 3.2,
+  "max_portfolio_pct": 15,
+  "reasons": [
+    "RSI=42 — зона перепроданности",
+    "MACD гистограмма положительная",
+    "Цена выше SMA(50)"
+  ],
+  "components": {
+    "technical": {"score": 1.5, "action": "BUY"},
+    "fundamental": {"score": 0.8, "action": "BUY"},
+    "ml": {"action": "BUY", "confidence": 0.65},
+    "prophet": {"target_price": 325.0, "confidence": 0.72},
+    "sentiment": {"score": 0.3, "divergence": 0.1}
+  },
+  "risk": {
+    "volatility_regime": "LOW",
+    "var_95": 2.3,
+    "stop_loss": 265.0
+  }
+}
+```
+
+### Сигнал + LLM совет
+
+```json
+GET /api/instruments/SBER/advice
+
+{
+  "signal": { "...": "..." },
+  "advice": "Сбер — сильный buy. RSI в зоне перепроданности, MACD дал сигнал на покупку.
+  Целевая цена по Prophet — 325₽ (+13% от текущей).
+  Рекомендуемая доля — до 15% портфеля.
+  Стоп-лосс: 265₽."
+}
+```
+
+### Список инструментов
+
+```json
+GET /api/instruments?type=stock
+
+[
+  {
+    "id": 1,
+    "ticker": "SBER",
+    "full_name": "Сбер Банк",
+    "sector": "finance",
+    "type": "stock",
+    "last_price": 287.50,
+    "last_date": "2025-06-13"
+  }
+]
+```
+
+### Аллокация портфеля
+
+```json
+POST /api/portfolio/allocate
+Body: {"capital": 100000}
+
+{
+  "positions": [
+    {"ticker": "SBER", "weight": 0.25, "amount": 25000, "shares": 87},
+    {"ticker": "LKOH", "weight": 0.20, "amount": 20000, "shares": 3}
+  ],
+  "total": 100000,
+  "remaining": 0
+}
+```
 
 ## API Endpoints
 

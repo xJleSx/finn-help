@@ -1,11 +1,10 @@
 import logging
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 from src.config import settings
-from src.db.models import Base
 
 logger = logging.getLogger(__name__)
 
@@ -39,22 +38,9 @@ def close_session():
     SessionLocal.remove()
 
 
-def _add_missing_columns():
-    inspector = inspect(engine)
-    model_tables = Base.metadata.tables
-    with engine.begin() as conn:
-        for table_name, table in model_tables.items():
-            if not inspector.has_table(table_name):
-                continue
-            existing = {c[1] for c in conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()}
-            for col in table.columns:
-                if col.name not in existing:
-                    col_type = col.type
-                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}"))
-                    logger.info("Added missing column %s.%s (%s)", table_name, col.name, col_type)
-
-
 def init_db():
+    from pathlib import Path
+
     from alembic.config import Config
 
     from alembic import command

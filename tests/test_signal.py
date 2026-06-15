@@ -152,3 +152,44 @@ class TestMaxPosition:
 
     def test_sell_max_5(self, engine):
         assert engine._calc_max_position("SELL", 0.0, 0.0) == 5
+
+    def test_neutral_max_10(self, engine):
+        assert engine._calc_max_position("HOLD", 0.0, 0.0) == 10
+
+
+class TestEdgeCases:
+    def test_fuse_none_technical(self, engine):
+        result = engine.fuse(ticker="TEST", technical=None)
+        assert result["action"] in ("HOLD", "NEUTRAL")
+
+    def test_fuse_empty_reasons(self, engine):
+        result = engine.fuse(
+            ticker="TEST",
+            technical={"action": "BUY", "confidence": 0.8, "score": 1.5, "reasons": []},
+        )
+        assert isinstance(result["reasons"], list)
+
+    def test_fuse_high_confidence_buy(self, engine):
+        result = engine.fuse(
+            ticker="TEST",
+            technical={"action": "BUY", "confidence": 0.95, "score": 2.0, "reasons": ["strong buy"]},
+        )
+        assert result["action"] == "BUY"
+        assert result["confidence"] > 0.5
+
+    def test_fuse_max_geo_risk(self, engine):
+        result = engine.fuse(
+            ticker="TEST",
+            technical={"action": "BUY", "confidence": 0.9, "score": 2.0, "reasons": []},
+            geo={"score": 10.0, "level": "CRITICAL", "signals": [], "components": {"sanctions_risk": 5, "instability": 3, "currency_stress": 2, "volume_anomaly": 0}},
+        )
+        assert result["confidence"] < 0.9
+
+    def test_risk_metrics_zero_returns(self, engine):
+        from src.signal.engine import compute_risk_metrics
+
+        metrics = compute_risk_metrics([100] * 50)
+        assert "sharpe" in metrics
+        assert "max_drawdown" in metrics
+        assert metrics["max_drawdown"] == 0.0
+        assert metrics["sharpe"] == 0.0

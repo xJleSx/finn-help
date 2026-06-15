@@ -3,7 +3,7 @@ name = "finn-help"
 version = "0.1.0"
 description = "AI financial advisor for MOEX markets"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "sqlalchemy>=2.0",
     "pandas>=2.0",

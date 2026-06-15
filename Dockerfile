@@ -17,11 +17,16 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1
 
 COPY src/ src/
+COPY alembic/ alembic/
+COPY alembic.ini .
 
 RUN mkdir -p /app/data && chown -R finn:finn /app/data
 VOLUME /app/data
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
+
 USER finn
 EXPOSE 8000
 
-CMD ["uvicorn", "src.interfaces.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uv run finn init && uvicorn src.interfaces.api.server:app --host 0.0.0.0 --port 8000"]
