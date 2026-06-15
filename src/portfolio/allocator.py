@@ -317,7 +317,7 @@ class PortfolioAllocator:
                 monthly += ann / 12
         return monthly
 
-    def recommend(self, capital: float = 0, db=None) -> list[dict]:
+    def recommend(self, capital: float = 0, db=None, exclude: set | None = None) -> list[dict]:
         should_close = db is None
         if db is None:
             db = get_session()
@@ -328,6 +328,8 @@ class PortfolioAllocator:
             for cat, cfg in self.TARGET_WEIGHTS.items():
                 candidates = self._score_candidates(instruments, cat, capital or 100_000, existing, db)
                 for c in candidates:
+                    if exclude and c["ticker"] in exclude:
+                        continue
                     c["category"] = cfg["label"]
                     c["score"] = round(c.get("score", 0), 2)
                     all_picks.append(c)

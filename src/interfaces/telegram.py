@@ -172,7 +172,8 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     amount = _extract_allocation_amount(text)
     if amount is not None:
-        await _reply_with_allocation(update, amount)
+        exclude = _find_excluded_tickers(text)
+        await _reply_with_allocation(update, amount, exclude=exclude)
         return
     tickers = _find_tickers(text)
     if tickers:
@@ -238,6 +239,30 @@ async def _reply_with_analysis(update: Update, ticker: str):
         await update.message.reply_text(f"\u274c Ошибка: {e}\nУбедитесь, что запущен `finn update` и данные загружены.")
 
 
+def _find_excluded_tickers(text: str) -> set[str]:
+    text_lower = text.lower()
+    exclude = set()
+    exclude_keywords = ["без ", "кроме ", "недоступ", "не учитывай", "исключ", "убери ", "не рассматривай",
+                        "без учета", "без участия"]
+    if not any(k in text_lower for k in exclude_keywords):
+        return exclude
+
+    rev_map = {v.lower(): v for v in RUSSIAN_NAMES.values()}
+    for phrase, ticker in RUSSIAN_NAMES.items():
+        if not any(kw + phrase in text_lower for kw in ["без ", "кроме "]):
+            continue
+        exclude.add(ticker)
+
+    for t_lower, ticker in rev_map.items():
+        if f"без {t_lower}" in text_lower:
+            exclude.add(ticker)
+        if t_lower in text_lower and any(kw in text_lower for kw in ["недоступ", "исключ",
+                                                                     "не учитывай", "убери"]):
+            exclude.add(ticker)
+
+    return exclude
+
+
 def _extract_allocation_amount(text: str) -> float | None:
     text_lower = text.lower().strip()
     alloc_keywords = ["вложить", "инвестировать", "распредели", "распределение", "allocate", "разложить", "разместить"]
@@ -249,19 +274,23 @@ def _extract_allocation_amount(text: str) -> float | None:
     return None
 
 
-async def _reply_with_allocation(update: Update, capital: float):
+async def _reply_with_allocation(update: Update, capital: float, exclude: set[str] | None = None):
     await update.message.reply_text(f"\U0001f50d Анализирую рынок для {capital:,.0f} ₽...")
 
     try:
         from src.portfolio.allocator import allocator
 
-        picks = allocator.recommend(capital=capital)
+        picks = allocator.recommend(capital=capital, exclude=exclude)
         if not picks:
             msg = "Не удалось подобрать варианты. Запустите `finn update` для загрузки данных."
             await update.message.reply_text(msg)
             return
 
-        text = f"\U0001f4b0 *Рекомендации для {capital:,.0f} ₽*\n\n"
+        text = f"\U0001f4b0 *Рекомендации для {capital:,.0f} ₽*"
+        if exclude:
+            text += f" (без {', '.join(sorted(exclude))})"
+        text += "\n\n"
+
         for i, p in enumerate(picks[:10], 1):
             name = p.get("name") or p["ticker"]
             reason = p.get("reason", "")
