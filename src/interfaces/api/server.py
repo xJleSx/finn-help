@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
@@ -19,6 +20,13 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="FinAdvisor API", version="0.1.0")
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
 origins = [o.strip() for o in settings.cors_origins.split(",")]
 if "*" in origins and origins != ["*"]:
     origins = [o for o in origins if o != "*"]
@@ -30,8 +38,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=allow_creds,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
@@ -146,8 +154,7 @@ def get_indicators(ticker: str, days: int = Query(90), db: Session = Depends(get
     ]
 
 
-@app.get("/api/instruments/{ticker}/signal")
-def get_signal(ticker: str, db: Session = Depends(get_db)):
+def _resolve_signal(ticker: str, db: Session) -> tuple[Instrument, dict]:
     inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
     if not inst:
         raise HTTPException(404, "Instrument not found")
@@ -162,7 +169,7 @@ def get_signal(ticker: str, db: Session = Depends(get_db)):
         .first()
     )
     if cached and cached.fused_json:
-        return cached.fused_json
+        return inst, cached.fused_json
 
     try:
         fused = analysis_service.analyze_single(db, inst, ticker)
@@ -170,34 +177,18 @@ def get_signal(ticker: str, db: Session = Depends(get_db)):
         raise HTTPException(400, str(e))
 
     analysis_service.fusion.save_signal(db, inst.id, fused)
+    return inst, fused
+
+
+@app.get("/api/instruments/{ticker}/signal")
+def get_signal(ticker: str, db: Session = Depends(get_db)):
+    _, fused = _resolve_signal(ticker, db)
     return fused
 
 
 @app.get("/api/instruments/{ticker}/advice")
 async def get_advice(ticker: str, db: Session = Depends(get_db)):
-    inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
-    if not inst:
-        raise HTTPException(404, "Instrument not found")
-
-    cached = (
-        db.query(Signal)
-        .filter(
-            Signal.instrument_id == inst.id,
-            func.date(Signal.date) == date.today(),
-        )
-        .order_by(Signal.date.desc())
-        .first()
-    )
-    if cached and cached.fused_json:
-        advice = await llm.advise(cached.fused_json)
-        return {"signal": cached.fused_json, "advice": advice}
-
-    try:
-        fused = analysis_service.analyze_single(db, inst, ticker)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-    analysis_service.fusion.save_signal(db, inst.id, fused)
+    _, fused = _resolve_signal(ticker, db)
     advice = await llm.advise(fused)
     return {"signal": fused, "advice": advice}
 
@@ -264,9 +255,7 @@ def allocate_portfolio(capital: float = 50000.0, db: Session = Depends(get_db)):
         result = allocator.allocate(capital, db=db)
         return result
     except Exception as e:
-        import logging
-
-        logging.getLogger(__name__).exception("Allocation failed")
+        logger.exception("Allocation failed for capital=%s", capital)
         raise HTTPException(500, f"Allocation failed: {e}")
 
 
