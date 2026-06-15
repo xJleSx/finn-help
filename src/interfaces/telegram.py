@@ -362,17 +362,29 @@ def _find_excluded_tickers(text: str) -> set[str]:
 
     for ticker in all_tickers:
         t_lower = ticker.lower()
-        if any(re.search(rf'\b{kw}\s*{t_lower}\b', text_lower) for kw in ["без", "кроме", "нет", "нету",
+        if any(re.search(rf'\b{kw}\s*{re.escape(t_lower)}\b', text_lower) for kw in ["без", "кроме", "нет", "нету",
                "недоступ", "исключ", "убери", "отсутств", "не интересу", "не нужно"]):
             exclude.add(ticker)
-            break
+        elif any(re.search(rf'\b{re.escape(t_lower)}\s*{kw}\b', text_lower) for kw in ["нет", "нету", "отсутств",
+               "недоступ", "исключ"]):
+            exclude.add(ticker)
 
     rev_map = {v.lower(): v for v in RUSSIAN_NAMES.values()}
     for t_lower, ticker in rev_map.items():
         if any(kw + t_lower in text_lower for kw in ["без ", "кроме ", "нет "]):
             exclude.add(ticker)
+        if any(t_lower + " " + kw in text_lower for kw in ["нет", "отсутств", "недоступ", "исключ"]):
+            exclude.add(ticker)
         if t_lower in text_lower and any(kw in text_lower for kw in ["недоступ", "исключ",
                                                                      "не учитывай", "убери"]):
+            exclude.add(ticker)
+
+    for phrase, ticker in RUSSIAN_NAMES.items():
+        if any(kw + phrase in text_lower for kw in ["без ", "кроме ", "нет ",
+                                                    "недоступ", "исключ", "убери "]):
+            exclude.add(ticker)
+        if any(phrase + " " + kw in text_lower for kw in ["нет", "нету", "отсутств",
+                                                          "недоступ", "исключ", "убери"]):
             exclude.add(ticker)
 
     return exclude
