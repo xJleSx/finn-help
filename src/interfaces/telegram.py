@@ -300,6 +300,17 @@ async def _reply_with_allocation(update: Update, capital: float, exclude: set[st
             text += f"   {price_str}\n"
             if reason:
                 text += f"   \u2192 {reason}\n"
+            risk = p.get("risk", {})
+            if risk:
+                parts = []
+                if risk.get("var_95"):
+                    parts.append(f"VaR95={risk['var_95']:.1%}")
+                if risk.get("stop_loss_pct"):
+                    parts.append(f"SL={risk['stop_loss_pct']:.1%}")
+                if risk.get("suggested_shares"):
+                    parts.append(f"лимит {risk['suggested_shares']} шт")
+                if parts:
+                    text += f"   📊 {' • '.join(parts)}\n"
             text += "\n"
 
         for chunk in _chunk_text(text, 4096):
@@ -354,6 +365,15 @@ def _format_allocation_plan(picks: list[dict], capital: float) -> str:
         text += f"• *{item['ticker']}* ({item.get('name', '')}): {item['amount']:,.0f} ₽ ({item['pct'] * 100:.0f}%)"
         if item["shares"] > 0:
             text += f" → ~{item['shares']} шт. по {item['last_price']:.0f} ₽"
+        risk = item.get("risk", {})
+        if risk:
+            sl = risk.get("stop_loss")
+            sl_pct = risk.get("stop_loss_pct")
+            var = risk.get("var_95")
+            if sl and sl_pct:
+                text += f"\n   ⛔️ Стоп-лосс: {sl:.0f} ₽ ({sl_pct:.1%})"
+            if var:
+                text += f"\n   ⚠️ VaR(95%): {var:.1%}"
         text += "\n"
 
     leftover = round(capital - allocated, 2)

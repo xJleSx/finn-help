@@ -52,6 +52,27 @@ def compute_stop_loss(price: float, atr: float | None, multiplier: float = 2.0) 
     }
 
 
+def compute_concentration_limit(capital: float, price: float, max_position_pct: float = 20.0) -> dict:
+    if price <= 0:
+        return {"shares": 0, "amount": 0.0, "max_pct": max_position_pct}
+    max_amount = capital * max_position_pct / 100
+    shares = int(max_amount / price)
+    return {
+        "shares": shares,
+        "amount": round(shares * price, 2),
+        "max_pct": max_position_pct,
+    }
+
+
+def compute_risk_score(var_95: float, stop_loss_pct: float, atr_ratio: float | None = None) -> float:
+    score = 0.0
+    score += min(var_95 / 5.0, 3.0)
+    score += min(abs(stop_loss_pct) / 5.0, 2.0)
+    if atr_ratio is not None:
+        score += min(atr_ratio / 3.0, 2.0)
+    return round(min(score / 7.0, 1.0), 3)
+
+
 def compute_position_size(
     capital: float,
     price: float,

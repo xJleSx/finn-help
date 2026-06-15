@@ -236,6 +236,26 @@ class PortfolioAllocator:
             score = 0.0
             reason_parts = []
 
+            risk = _item_risk(c, db, budget)
+            c["risk"] = risk
+
+            var_95 = risk.get("var_95", 0) or 0
+            if var_95 > 0.05:
+                score -= 1.0
+                reason_parts.append("высокий VaR (5%)")
+            elif var_95 > 0.03:
+                score -= 0.5
+                reason_parts.append("повышенный VaR")
+
+            max_pos_val = risk.get("suggested_shares", 999) * (c.get("last_price") or 1)
+            max_pos_pct = max_pos_val / budget if budget > 0 else 1
+            if max_pos_pct < 0.02:
+                score -= 0.5
+                reason_parts.append("низкий лимит позиции")
+            if max_pos_pct > 0.5:
+                score -= 1.0
+                reason_parts.append("высокая концентрация")
+
             if c["ticker"] in existing_tickers:
                 score += 1.0
                 reason_parts.append("уже в портфеле")
@@ -332,6 +352,8 @@ class PortfolioAllocator:
                         continue
                     c["category"] = cfg["label"]
                     c["score"] = round(c.get("score", 0), 2)
+                    risk = _item_risk(c, db, capital)
+                    c["risk"] = risk
                     all_picks.append(c)
             all_picks.sort(key=lambda x: x["score"], reverse=True)
             return all_picks[:15]
@@ -352,7 +374,13 @@ def _item_risk(item: dict, db, capital: float = 100_000) -> dict:
     if len(close_vals) < 10:
         return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
 
-    from src.risk.manager import compute_position_size, compute_stop_loss, compute_var
+    from src.risk.manager import (
+        compute_concentration_limit,
+        compute_position_size,
+        compute_risk_score,
+        compute_stop_loss,
+        compute_var,
+    )
 
     var = compute_var(close_vals)
     last_price = close_vals[0]
@@ -380,12 +408,22 @@ def _item_risk(item: dict, db, capital: float = 100_000) -> dict:
         risk_per_trade_pct=2.0,
         stop_loss_pct=stop["stop_loss_pct"] if stop else None,
     )
+    conc = compute_concentration_limit(capital, last_price, max_position_pct=20.0)
+    risk_score = compute_risk_score(
+        var.get("var_95", 0) or 0,
+        (abs(stop["stop_loss_pct"]) if stop else 5.0),
+    )
 
     return {
         "var_95": var.get("var_95", 0.0),
         "var_99": var.get("var_99", 0.0),
+        "cvar_95": var.get("cvar_95", 0.0),
         "stop_loss": stop["stop_loss"] if stop else None,
         "stop_loss_pct": stop["stop_loss_pct"] if stop else 0.0,
         "suggested_shares": sizing.get("shares", 0),
+        "risk_amount": sizing.get("amount", 0.0),
         "risk_per_trade_pct": 2.0,
+        "max_position_shares": conc.get("shares", 0),
+        "max_position_amount": conc.get("amount", 0.0),
+        "risk_score": risk_score,
     }
