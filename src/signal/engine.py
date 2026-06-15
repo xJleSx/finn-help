@@ -89,9 +89,19 @@ class SignalFusionEngine:
         macro_context: Optional[dict] = None,
         sentiment: Optional[dict] = None,
         mtf: Optional[dict] = None,
+        user_id: Optional[str] = None,
     ) -> dict:
         reasons = []
-        weights = dict(BASE_WEIGHTS)
+        if user_id:
+            from src.user_profile import profile_manager
+
+            weights = profile_manager.get_weights(user_id)
+            min_confidence = profile_manager.get_min_confidence(user_id)
+            geo_threshold = profile_manager.get_geo_threshold(user_id)
+        else:
+            weights = dict(BASE_WEIGHTS)
+            min_confidence = 0.0
+            geo_threshold = 7.0
 
         if volatility_regime and volatility_regime.get("adjustment"):
             adj = volatility_regime["adjustment"]
@@ -274,7 +284,7 @@ class SignalFusionEngine:
         elif geo_score > 5:
             reasons.append(f"⚠️ повышенный геополитический риск ({geo_score:.1f}/10)")
 
-        max_portfolio_pct = self._calc_max_position(action, geo_score, fund_risk)
+        max_portfolio_pct = self._calc_max_position(action, geo_score, fund_risk, user_id=user_id)
 
         fused = {
             "ticker": ticker,
@@ -321,9 +331,13 @@ class SignalFusionEngine:
             return "CAUTIOUS_BUY"
         return action
 
-    def _calc_max_position(self, action: str, geo_risk: float, fund_risk: float) -> int:
+    def _calc_max_position(self, action: str, geo_risk: float, fund_risk: float, user_id: Optional[str] = None) -> int:
         base = {"BUY": 30, "CAUTIOUS_BUY": 15, "HOLD": 10, "SELL": 5, "NEUTRAL": 10}
         pct = base.get(action, 10)
+        if user_id:
+            from src.user_profile import profile_manager
+
+            pct = min(pct, profile_manager.get_max_position(user_id))
         if geo_risk > 7:
             pct = min(pct, 10)
         if fund_risk > 0.6:
