@@ -113,7 +113,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/geo — геополитический риск\n"
         "/subscribe — подписаться на уведомления\n"
         "/unsubscribe — отписаться\n"
-        "/daily — ежедневная сводка"
+        "/daily — ежедневная сводка\n"
+        "/stress — стресс-тест портфеля\n"
+        "/stress СУММА — стресс-тест на сумму"
     )
 
 
@@ -165,6 +167,72 @@ async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _reply_with_allocation(update, amount)
     except ValueError:
         await update.message.reply_text("Укажите число: /allocate 100000")
+
+
+async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from src.analysis.stress import StressTester, format_portfolio_for_stress
+    from src.db.connection import get_session
+
+    amount = None
+    if context.args:
+        try:
+            amount = float(context.args[0].replace(" ", "").replace(",", "."))
+        except ValueError:
+            pass
+
+    if amount:
+        from src.portfolio.allocator import allocator
+
+        await update.message.reply_text(f"🔬 Рассчитываю сценарии для {amount:,.0f} ₽...")
+        picks = allocator.recommend(capital=amount)
+        plan = {"recommendation": {"items": picks}}
+        positions = format_portfolio_for_stress(plan)
+    else:
+        await update.message.reply_text("🔬 Анализирую текущий портфель...")
+        db = get_session()
+        try:
+            from src.db.models import Instrument, Portfolio, Price
+
+            rows = db.query(Portfolio).all()
+            positions = []
+            for r in rows:
+                inst = db.query(Instrument).filter_by(id=r.instrument_id).first()
+                price = (
+                    db.query(Price).filter_by(instrument_id=r.instrument_id).order_by(Price.date.desc()).first()
+                )
+                last_price = price.close if price else 0
+                val = last_price * r.quantity if last_price else 0
+                if val > 0:
+                    positions.append(
+                        {
+                            "ticker": inst.ticker if inst else "?",
+                            "amount": float(val),
+                            "last_price": float(last_price) if last_price else 0,
+                            "sector": inst.sector or "Прочее",
+                            "name": inst.full_name or inst.ticker,
+                        }
+                    )
+        finally:
+            db.close()
+
+    if not positions:
+        await update.message.reply_text("Нет позиций для тестирования. Добавьте портфель или укажите сумму.")
+        return
+
+    tester = StressTester(positions)
+
+    crash_results = tester.run_crash_scenarios()
+    sector_results = tester.run_sector_shocks()
+
+    text = "🧪 *Стресс-тест портфеля*\n\n"
+    text += f"Сумма: {tester.total:,.0f} ₽\n\n"
+    text += "*Кризисные сценарии:*\n"
+    text += tester.format_results(crash_results)
+    text += "*Секторальные шоки:*\n"
+    text += tester.format_results(sector_results)
+
+    for chunk in _chunk_text(text, 4096):
+        await update.message.reply_markdown(chunk)
 
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -704,6 +772,7 @@ async def run_bot():
     app.add_handler(CommandHandler("subscribe", subscribe))
     app.add_handler(CommandHandler("unsubscribe", unsubscribe))
     app.add_handler(CommandHandler("daily", daily))
+    app.add_handler(CommandHandler("stress", stress))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 
