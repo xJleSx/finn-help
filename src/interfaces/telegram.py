@@ -119,14 +119,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    subscribers.add(uid)
-    await update.message.reply_text("\u2705 Вы подписаны на уведомления о новых сигналах")
+    cid = update.effective_chat.id
+    ntype = context.args[0] if context.args else "signal"
+    if ntype not in ("signal", "daily", "geo", "dividend"):
+        ntype = "signal"
+    from src.notifications.service import NotificationService
+
+    ns = NotificationService()
+    ns.subscribe(uid, cid, ntype)
+    type_names = {"signal": "сигналы", "daily": "ежедневные сводки", "geo": "гео-риски", "dividend": "дивиденды"}
+    await update.message.reply_text(f"✅ Вы подписаны на {type_names.get(ntype, ntype)}")
 
 
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    subscribers.discard(uid)
-    await update.message.reply_text("\u274c Подписка отменена")
+    ntype = context.args[0] if context.args else None
+    from src.notifications.service import NotificationService
+
+    ns = NotificationService()
+    ns.unsubscribe(uid, ntype)
+    if ntype:
+        await update.message.reply_text("❌ Подписка на этот тип уведомлений отменена")
+    else:
+        await update.message.reply_text("❌ Все подписки отменены")
 
 
 async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -620,29 +635,49 @@ async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def broadcast_signal(n):
-    if not subscribers:
-        return
-    from src.notifications.service import format_signal_text
+    from src.notifications.service import NotificationService, format_signal_text
 
+    ns = NotificationService()
     text = format_signal_text(n)
-    for uid in list(subscribers):
+    for uid, cid in ns.get_subscribers("signal"):
         try:
             await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+            ns.save_notification(uid, "signal", text, title=n.ticker)
         except Exception as e:
-            logger.warning(f"Failed to send to {uid}: {e}")
+            logger.warning(f"Failed to send signal to {uid}: {e}")
+
+
+async def broadcast_dividends():
+    from src.notifications.service import NotificationService
+
+    ns = NotificationService()
+    dividends = ns.get_upcoming_dividends(days_ahead=14)
+    if not dividends:
+        return
+    for uid, cid in ns.get_subscribers("dividend"):
+        for d in dividends:
+            text = (
+                f"💵 *{d.ticker}* — дивиденды {d.amount:.0f} ₽/акц"
+                + (f" ({d.yield_pct:.1f}%)" if d.yield_pct else "")
+                + (f"\n📅 Дивидендная отсечка: {d.ex_date}" if d.ex_date else "")
+            )
+            try:
+                await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+                ns.save_notification(uid, "dividend", text, title=d.ticker)
+            except Exception as e:
+                logger.warning(f"Failed to send dividend to {uid}: {e}")
 
 
 async def broadcast_daily_summary():
-    if not subscribers:
-        return
     from src.notifications.service import NotificationService, format_daily_summary_text
 
     ns = NotificationService()
     summary = ns.get_daily_summary()
     text = format_daily_summary_text(summary)
-    for uid in list(subscribers):
+    for uid, cid in ns.get_subscribers("daily"):
         try:
             await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+            ns.save_notification(uid, "daily", text, title="Ежедневная сводка")
         except Exception as e:
             logger.warning(f"Failed to send daily to {uid}: {e}")
 

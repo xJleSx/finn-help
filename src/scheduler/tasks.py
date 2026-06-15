@@ -238,7 +238,7 @@ async def _collect_macro(db: Session):
 
 
 async def _notify_signals(signals: list[dict]):
-    from src.interfaces.telegram import broadcast_daily_summary, broadcast_signal
+    from src.interfaces.telegram import broadcast_daily_summary, broadcast_dividends, broadcast_signal
 
     for s in signals:
         n = _to_signal_notification(s)
@@ -246,6 +246,11 @@ async def _notify_signals(signals: list[dict]):
             await broadcast_signal(n)
         except Exception as e:
             logger.warning(f"Broadcast failed for {s['ticker']}: {e}")
+
+    try:
+        await broadcast_dividends()
+    except Exception as e:
+        logger.warning(f"Dividend broadcast failed: {e}")
 
     try:
         await broadcast_daily_summary()

@@ -1,6 +1,7 @@
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -239,3 +240,38 @@ class UserSetting(Base):
 
     key = Column(String(100), primary_key=True)
     value = Column(Text)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, nullable=False)
+    chat_id = Column(BigInteger, nullable=False)
+    notify_signal = Column(Boolean, default=True)
+    notify_daily = Column(Boolean, default=True)
+    notify_geo = Column(Boolean, default=False)
+    notify_dividend = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_subscription_user"),
+    )
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, nullable=False)
+    type = Column(String(20), nullable=False)
+    title = Column(String(200))
+    message = Column(Text, nullable=False)
+    data_json = Column(JSON)
+    read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        Index("ix_notifications_user_read", "user_id", "read"),
+        Index("ix_notifications_created", "created_at"),
+    )

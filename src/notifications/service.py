@@ -1,12 +1,13 @@
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from src.db.connection import get_session
-from src.db.models import GeoRiskScore, Instrument, Portfolio, Price
+from src.db.models import GeoRiskScore, Instrument, Notification, Portfolio, Price, Subscription
 from src.db.models import Signal as SignalModel
 from src.notifications import (
     DailySummaryNotification,
+    DividendNotification,
     GeoRiskNotification,
     SignalNotification,
 )
@@ -20,6 +21,16 @@ ACTION_EMOJI = {
     "SELL": "🔴",
     "NEUTRAL": "⚪",
 }
+
+
+def _geo_level(score: float) -> str:
+    if score < 3:
+        return "LOW"
+    if score < 5:
+        return "MODERATE"
+    if score < 7:
+        return "HIGH"
+    return "CRITICAL"
 
 
 def format_signal_text(n: SignalNotification) -> str:
@@ -49,6 +60,114 @@ def format_daily_summary_text(n: DailySummaryNotification) -> str:
 
 
 class NotificationService:
+    # --- Subscriptions ---
+
+    def subscribe(self, user_id: int, chat_id: int, notify_type: str = "daily") -> None:
+        db = get_session()
+        try:
+            sub = db.query(Subscription).filter_by(user_id=user_id).first()
+            if sub:
+                setattr(sub, f"notify_{notify_type}", True)
+            else:
+                kwargs = {f"notify_{notify_type}": True}
+                sub = Subscription(user_id=user_id, chat_id=chat_id, **kwargs)
+                db.add(sub)
+            db.commit()
+        except Exception as e:
+            logger.error("Failed to subscribe %d: %s", user_id, e)
+            db.rollback()
+        finally:
+            db.close()
+
+    def unsubscribe(self, user_id: int, notify_type: str | None = None) -> None:
+        db = get_session()
+        try:
+            sub = db.query(Subscription).filter_by(user_id=user_id).first()
+            if sub:
+                if notify_type:
+                    setattr(sub, f"notify_{notify_type}", False)
+                else:
+                    db.delete(sub)
+                db.commit()
+        except Exception as e:
+            logger.error("Failed to unsubscribe %d: %s", user_id, e)
+            db.rollback()
+        finally:
+            db.close()
+
+    def get_subscribers(self, notify_type: str = "signal") -> list[tuple[int, int]]:
+        db = get_session()
+        try:
+            col = getattr(Subscription, f"notify_{notify_type}", None)
+            if col is None:
+                return []
+            results = db.query(Subscription.user_id, Subscription.chat_id).filter(col).all()
+            return [(r.user_id, r.chat_id) for r in results]
+        finally:
+            db.close()
+
+    # --- Notification persistence ---
+
+    def save_notification(
+        self, user_id: int, notif_type: str, message: str, title: str | None = None, data: dict | None = None
+    ) -> None:
+        db = get_session()
+        try:
+            n = Notification(
+                user_id=user_id,
+                type=notif_type,
+                title=title,
+                message=message,
+                data_json=data,
+            )
+            db.add(n)
+            db.commit()
+        except Exception as e:
+            logger.error("Failed to save notification: %s", e)
+            db.rollback()
+        finally:
+            db.close()
+
+    def was_signal_sent_today(self, ticker: str, notif_type: str = "signal") -> bool:
+        db = get_session()
+        try:
+            today = date.today()
+            count = (
+                db.query(Notification)
+                .filter(
+                    Notification.type == notif_type,
+                    Notification.created_at >= today,
+                    Notification.title == ticker,
+                )
+                .count()
+            )
+            return count > 0
+        finally:
+            db.close()
+
+    def get_unread_count(self, user_id: int) -> int:
+        db = get_session()
+        try:
+            return db.query(Notification).filter_by(user_id=user_id, read=False).count()
+        finally:
+            db.close()
+
+    def mark_read(self, user_id: int, notif_id: int | None = None) -> None:
+        db = get_session()
+        try:
+            q = db.query(Notification).filter_by(user_id=user_id, read=False)
+            if notif_id:
+                q = q.filter(Notification.id == notif_id)
+            q.update({"read": True})
+            db.commit()
+        except Exception as e:
+            logger.error("Failed to mark notifications read: %s", e)
+            db.rollback()
+        finally:
+            db.close()
+
+    # --- Signal changes ---
+
     def get_signal_changes(self) -> list[SignalNotification]:
         db = get_session()
         try:
@@ -57,27 +176,24 @@ class NotificationService:
                 db.query(SignalModel).filter(SignalModel.date >= daily).order_by(SignalModel.confidence.desc()).all()
             )
 
-            yesterday = date.today()
-            prev = db.query(SignalModel).filter(SignalModel.date < yesterday).order_by(SignalModel.date.desc()).first()
-
             changes = []
             for s in recent:
-                prev_action = None
-                if prev:
-                    prev_same = (
-                        db.query(SignalModel)
-                        .filter(
-                            SignalModel.instrument_id == s.instrument_id,
-                            SignalModel.date < yesterday,
-                        )
-                        .order_by(SignalModel.date.desc())
-                        .first()
+                prev_same = (
+                    db.query(SignalModel)
+                    .filter(
+                        SignalModel.instrument_id == s.instrument_id,
+                        SignalModel.date < daily,
                     )
-                    if prev_same:
-                        prev_action = prev_same.action
+                    .order_by(SignalModel.date.desc())
+                    .first()
+                )
+                prev_action = prev_same.action if prev_same else None
 
                 inst = db.query(Instrument).filter_by(id=s.instrument_id).first()
                 if not inst:
+                    continue
+
+                if self.was_signal_sent_today(inst.ticker):
                     continue
 
                 fused = s.fused_json or {}
@@ -94,6 +210,8 @@ class NotificationService:
             return changes
         finally:
             db.close()
+
+    # --- Geo risk ---
 
     def get_geo_change(self) -> Optional[GeoRiskNotification]:
         db = get_session()
@@ -112,12 +230,52 @@ class NotificationService:
 
             return GeoRiskNotification(
                 score=today_score.score,
-                level=today_score.get("level", "LOW") if hasattr(today_score, "get") else "LOW",
+                level=_geo_level(today_score.score),
                 signals=[],
                 prev_score=prev_score,
             )
         finally:
             db.close()
+
+    # --- Dividends ---
+
+    def get_upcoming_dividends(self, days_ahead: int = 14) -> list[DividendNotification]:
+        from src.db.models import Dividend
+
+        db = get_session()
+        try:
+            cutoff = date.today() + timedelta(days=days_ahead)
+            upcoming = (
+                db.query(Dividend)
+                .filter(Dividend.date.between(date.today(), cutoff))
+                .order_by(Dividend.date)
+                .all()
+            )
+            result = []
+            for d in upcoming:
+                inst = db.query(Instrument).filter_by(id=d.instrument_id).first()
+                if not inst:
+                    continue
+                price = (
+                    db.query(Price)
+                    .filter_by(instrument_id=d.instrument_id)
+                    .order_by(Price.date.desc())
+                    .first()
+                )
+                yield_pct = (d.amount / price.close * 100) if price and price.close else None
+                result.append(
+                    DividendNotification(
+                        ticker=inst.ticker,
+                        amount=d.amount,
+                        ex_date=d.date.isoformat() if hasattr(d.date, "isoformat") else str(d.date),
+                        yield_pct=round(yield_pct, 2) if yield_pct else None,
+                    )
+                )
+            return result
+        finally:
+            db.close()
+
+    # --- Daily summary ---
 
     def get_daily_summary(self) -> DailySummaryNotification:
         db = get_session()
