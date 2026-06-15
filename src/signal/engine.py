@@ -10,11 +10,12 @@ from src.db.models import Signal as SignalModel
 logger = logging.getLogger(__name__)
 
 BASE_WEIGHTS = {
-    "technical": 0.40,
+    "technical": 0.35,
     "fundamental": 0.18,
     "geo": 0.17,
     "ml": 0.13,
     "sentiment": 0.12,
+    "mtf": 0.05,
 }
 
 
@@ -87,6 +88,7 @@ class SignalFusionEngine:
         risk_metrics: Optional[dict] = None,
         macro_context: Optional[dict] = None,
         sentiment: Optional[dict] = None,
+        mtf: Optional[dict] = None,
     ) -> dict:
         reasons = []
         weights = dict(BASE_WEIGHTS)
@@ -200,18 +202,30 @@ class SignalFusionEngine:
         fund_signal = (1 - fund_risk) * 2 - 1
         geo_signal = -(geo_score / 10)
 
+        mtf_signal = 0.0
+        mtf_agreement = 0.0
+        if mtf:
+            mtf_signal = mtf.get("direction", 0.0)
+            mtf_agreement = mtf.get("agreement", 0.0)
+            tfs = "/".join(mtf.get("details", {}).keys())
+            if mtf_signal > 0.2:
+                reasons.append(f"MTF ({tfs}): бычий консенсус ({mtf_agreement:.0%})")
+            elif mtf_signal < -0.2:
+                reasons.append(f"MTF ({tfs}): медвежий консенсус ({mtf_agreement:.0%})")
+
         weighted_score = (
             tech_score * weights["technical"]
             + fund_signal * weights["fundamental"]
             + geo_signal * weights["geo"]
             + ml_signal * weights["ml"]
             + sentiment_signal * weights["sentiment"]
+            + mtf_signal * weights["mtf"]
             + macro_adjustment * 0.10
         )
 
         macro_max = 0.10
         w = weights
-        all_except_geo = w["technical"] + w["fundamental"] + w["ml"] + w["sentiment"]
+        all_except_geo = w["technical"] + w["fundamental"] + w["ml"] + w["sentiment"] + w["mtf"]
         all_weights = all_except_geo + w["geo"]
         max_positive = all_except_geo + macro_max
         max_negative = all_weights + macro_max
@@ -282,6 +296,10 @@ class SignalFusionEngine:
                 "sentiment": {
                     "score": round(sentiment_signal, 3),
                     "source": sentiment_source,
+                },
+                "mtf": {
+                    "direction": round(mtf_signal, 3) if mtf else 0,
+                    "agreement": round(mtf_agreement, 3) if mtf else 0,
                 },
             },
         }

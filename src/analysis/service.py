@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from src.analysis.fundamental import FundamentalAnalyzer
 from src.analysis.ml.ensemble import EnsemblePredictor
 from src.analysis.ml.prophet_model import ProphetPredictor
+from src.analysis.multi_timeframe import MultiTimeframeAnalyzer
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.volatility import VolatilityRegimeDetector
 from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, Price, Signal
@@ -25,6 +26,7 @@ class AnalysisService:
         self.prophet = ProphetPredictor()
         self.ensemble = EnsemblePredictor()
         self.volatility = VolatilityRegimeDetector()
+        self.mtf = MultiTimeframeAnalyzer()
 
     def _price_df(self, prices: list[Price]) -> pd.DataFrame:
         return pd.DataFrame(
@@ -141,6 +143,9 @@ class AnalysisService:
 
         risk_metrics = compute_risk_metrics(df["close"].tolist())
 
+        mtf_data = self.mtf.compute_all(df)
+        mtf_concordance = self.mtf.concordance(mtf_data) if mtf_data else None
+
         fused = self.fusion.fuse(
             ticker=ticker.upper(),
             technical=tech_signal,
@@ -151,6 +156,7 @@ class AnalysisService:
             risk_metrics=risk_metrics,
             macro_context=macro_context,
             sentiment=sentiment,
+            mtf=mtf_concordance,
         )
         return fused
 
