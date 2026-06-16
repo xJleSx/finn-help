@@ -119,9 +119,15 @@ class TestBacktestResult:
         r = BacktestResult(capital=100000)
         r.add_snapshot("d1", 0.01, 0.005)
         r.monte_carlo = MonteCarloResult(
-            simulations=100, mean_return=0.1, std_return=0.2,
-            var_95=-0.25, cvar_95=-0.35, upside_pct=0.65,
-            downside_pct=0.35, best_return=0.5, worst_return=-0.4,
+            simulations=100,
+            mean_return=0.1,
+            std_return=0.2,
+            var_95=-0.25,
+            cvar_95=-0.35,
+            upside_pct=0.65,
+            downside_pct=0.35,
+            best_return=0.5,
+            worst_return=-0.4,
             median_return=0.12,
         )
         summary = r.summary()

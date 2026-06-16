@@ -80,8 +80,8 @@ class EnsemblePredictor:
             weighted_confs.append(r.get("confidence", 0) * w)
             actions.append(r["action"])
 
-        avg_prob = float(np.sum(weighted_probs) / np.sum(weights[:len(results)]))
-        avg_confidence = float(np.sum(weighted_confs) / np.sum(weights[:len(results)]))
+        avg_prob = float(np.sum(weighted_probs) / np.sum(weights[: len(results)]))
+        avg_confidence = float(np.sum(weighted_confs) / np.sum(weights[: len(results)]))
 
         buy_votes = sum(1 for a in actions if a == "BUY")
         sell_votes = sum(1 for a in actions if a == "SELL")
@@ -121,7 +121,7 @@ class EnsemblePredictor:
             "lgb_action": results[1]["action"] if len(results) > 1 else "NEUTRAL",
             "cat_action": results[2]["action"] if len(results) > 2 else "NEUTRAL",
             "walk_forward": oos_agg,
-            "weights": [round(w, 3) for w in weights[:len(results)]],
+            "weights": [round(w, 3) for w in weights[: len(results)]],
         }
 
     def _stacking_predict(self, df: pd.DataFrame, base_preds: list[dict]) -> float | None:
@@ -203,7 +203,6 @@ class EnsemblePredictor:
 
         def _make_model():
             try:
-                import copy
                 from xgboost import XGBClassifier
 
                 return XGBClassifier(

@@ -1,5 +1,4 @@
 import logging
-import os
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -79,8 +78,9 @@ def close_session():
 
 
 def init_db():
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     alembic_cfg = Config(Path(__file__).resolve().parents[2] / "alembic.ini")
     command.upgrade(alembic_cfg, "head")

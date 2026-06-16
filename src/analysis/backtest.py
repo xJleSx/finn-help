@@ -217,9 +217,16 @@ def detect_regime(returns: np.ndarray, lookback: int = 21) -> RegimeInfo:
 def run_monte_carlo(returns: list[float], n_simulations: int = 1000, periods: int = 252) -> MonteCarloResult:
     if len(returns) < 10:
         return MonteCarloResult(
-            simulations=0, mean_return=0.0, std_return=0.0,
-            var_95=0.0, cvar_95=0.0, upside_pct=0.0, downside_pct=0.0,
-            best_return=0.0, worst_return=0.0, median_return=0.0,
+            simulations=0,
+            mean_return=0.0,
+            std_return=0.0,
+            var_95=0.0,
+            cvar_95=0.0,
+            upside_pct=0.0,
+            downside_pct=0.0,
+            best_return=0.0,
+            worst_return=0.0,
+            median_return=0.0,
         )
     arr = np.array(returns)
     rng = np.random.default_rng(42)

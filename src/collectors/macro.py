@@ -223,6 +223,7 @@ class MacroCollector:
     @staticmethod
     async def latest_values_async(db) -> dict:
         from sqlalchemy import select
+
         from src.db.models import MacroIndicator
 
         today = date.today()

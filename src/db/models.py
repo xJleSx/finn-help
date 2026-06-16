@@ -273,9 +273,7 @@ class Subscription(Base):
     notify_dividend = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
 
-    __table_args__ = (
-        UniqueConstraint("user_id", name="uq_subscription_user"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", name="uq_subscription_user"),)
 
 
 class Notification(Base):

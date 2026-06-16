@@ -181,7 +181,12 @@ class TestEdgeCases:
         result = engine.fuse(
             ticker="TEST",
             technical={"action": "BUY", "confidence": 0.9, "score": 2.0, "reasons": []},
-            geo={"score": 10.0, "level": "CRITICAL", "signals": [], "components": {"sanctions_risk": 5, "instability": 3, "currency_stress": 2, "volume_anomaly": 0}},
+            geo={
+                "score": 10.0,
+                "level": "CRITICAL",
+                "signals": [],
+                "components": {"sanctions_risk": 5, "instability": 3, "currency_stress": 2, "volume_anomaly": 0},
+            },
         )
         assert result["confidence"] < 0.9
 

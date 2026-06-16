@@ -2,13 +2,18 @@ import logging
 from datetime import date, timedelta
 from typing import Optional
 
+from sqlalchemy.orm import Session
+
 from src.db.connection import get_session
 from src.db.models import GeoRiskScore, Instrument, Notification, Portfolio, Price, Subscription
 from src.db.models import Signal as SignalModel
 from src.notifications import (
     DailySummaryNotification,
+    DivergenceAlert,
     DividendNotification,
     GeoRiskNotification,
+    PriceTargetAlert,
+    RebalanceAlert,
     SignalNotification,
 )
 
@@ -252,22 +257,14 @@ class NotificationService:
         try:
             cutoff = date.today() + timedelta(days=days_ahead)
             upcoming = (
-                db.query(Dividend)
-                .filter(Dividend.date.between(date.today(), cutoff))
-                .order_by(Dividend.date)
-                .all()
+                db.query(Dividend).filter(Dividend.date.between(date.today(), cutoff)).order_by(Dividend.date).all()
             )
             result = []
             for d in upcoming:
                 inst = db.query(Instrument).filter_by(id=d.instrument_id).first()
                 if not inst:
                     continue
-                price = (
-                    db.query(Price)
-                    .filter_by(instrument_id=d.instrument_id)
-                    .order_by(Price.date.desc())
-                    .first()
-                )
+                price = db.query(Price).filter_by(instrument_id=d.instrument_id).order_by(Price.date.desc()).first()
                 yield_pct = (d.amount / price.close * 100) if price and price.close else None
                 result.append(
                     DividendNotification(
@@ -326,7 +323,7 @@ class NotificationService:
         finally:
             db.close()
 
-    def check_price_targets(self) -> list["PriceTargetAlert"]:
+    def check_price_targets(self) -> list[PriceTargetAlert]:
         alerts = []
         db = get_session()
         try:
@@ -342,47 +339,95 @@ class NotificationService:
                 change_pct = (current - p.avg_price) / p.avg_price
                 if change_pct > 0.20:
                     from src.notifications import PriceTargetAlert
+
                     alerts.append(
                         PriceTargetAlert(
-                            ticker=inst.ticker, current_price=current, target_price=p.avg_price * 1.20,
-                            target_type="take_profit", triggered_pct=round(change_pct * 100, 1),
+                            ticker=inst.ticker,
+                            current_price=current,
+                            target_price=p.avg_price * 1.20,
+                            target_type="take_profit",
+                            triggered_pct=round(change_pct * 100, 1),
                         )
                     )
                 elif change_pct < -0.15:
                     from src.notifications import PriceTargetAlert
+
                     alerts.append(
                         PriceTargetAlert(
-                            ticker=inst.ticker, current_price=current, target_price=p.avg_price * 0.85,
-                            target_type="stop_loss", triggered_pct=round(change_pct * 100, 1),
+                            ticker=inst.ticker,
+                            current_price=current,
+                            target_price=p.avg_price * 0.85,
+                            target_type="stop_loss",
+                            triggered_pct=round(change_pct * 100, 1),
                         )
                     )
         finally:
             db.close()
         return alerts
 
-    def check_divergence(self, ticker: str, prices: list[float], rsi_values: list[float], macd_values: list[float]) -> list["DivergenceAlert"]:
-        from src.notifications import DivergenceAlert
+    def check_divergence(
+        self, ticker: str, prices: list[float], rsi_values: list[float], macd_values: list[float]
+    ) -> list[DivergenceAlert]:
+
+
         alerts = []
         if len(prices) < 20 or len(rsi_values) < 20 or len(macd_values) < 10:
             return alerts
         import numpy as np
+
         price_trend = np.polyfit(range(min(len(prices), 14)), prices[-14:], 1)[0]
         rsi_trend = np.polyfit(range(min(len(rsi_values), 14)), rsi_values[-14:], 1)[0]
         macd_trend = np.polyfit(range(min(len(macd_values), 10)), macd_values[-10:], 1)[0]
         if price_trend > 0 and rsi_trend < 0 and abs(rsi_trend) > 0.1:
-            alerts.append(DivergenceAlert(ticker=ticker, divergence_type="bearish", indicator="rsi", price_direction="up", indicator_direction="down", strength=round(abs(rsi_trend), 3)))
+            alerts.append(
+                DivergenceAlert(
+                    ticker=ticker,
+                    divergence_type="bearish",
+                    indicator="rsi",
+                    price_direction="up",
+                    indicator_direction="down",
+                    strength=round(abs(rsi_trend), 3),
+                )
+            )
         elif price_trend < 0 and rsi_trend > 0 and abs(rsi_trend) > 0.1:
-            alerts.append(DivergenceAlert(ticker=ticker, divergence_type="bullish", indicator="rsi", price_direction="down", indicator_direction="up", strength=round(abs(rsi_trend), 3)))
+            alerts.append(
+                DivergenceAlert(
+                    ticker=ticker,
+                    divergence_type="bullish",
+                    indicator="rsi",
+                    price_direction="down",
+                    indicator_direction="up",
+                    strength=round(abs(rsi_trend), 3),
+                )
+            )
         if price_trend > 0 and macd_trend < 0 and abs(macd_trend) > 0.05:
-            alerts.append(DivergenceAlert(ticker=ticker, divergence_type="bearish", indicator="macd", price_direction="up", indicator_direction="down", strength=round(abs(macd_trend), 3)))
+            alerts.append(
+                DivergenceAlert(
+                    ticker=ticker,
+                    divergence_type="bearish",
+                    indicator="macd",
+                    price_direction="up",
+                    indicator_direction="down",
+                    strength=round(abs(macd_trend), 3),
+                )
+            )
         elif price_trend < 0 and macd_trend > 0 and abs(macd_trend) > 0.05:
-            alerts.append(DivergenceAlert(ticker=ticker, divergence_type="bullish", indicator="macd", price_direction="down", indicator_direction="up", strength=round(abs(macd_trend), 3)))
+            alerts.append(
+                DivergenceAlert(
+                    ticker=ticker,
+                    divergence_type="bullish",
+                    indicator="macd",
+                    price_direction="down",
+                    indicator_direction="up",
+                    strength=round(abs(macd_trend), 3),
+                )
+            )
         return alerts
 
-    def check_rebalance(self, db: Session) -> list["RebalanceAlert"]:
-        from src.notifications import RebalanceAlert
+    def check_rebalance(self, db: Session) -> list[RebalanceAlert]:
+
+
         alerts = []
-        from src.analysis.sector import sector_analyzer
         instruments = db.query(Instrument).all()
         positions = db.query(Portfolio).all()
         if not positions:
@@ -400,10 +445,19 @@ class NotificationService:
             val = pos_map.get(inst.id, 0)
             pct = val / total_value * 100
             from src.user_profile import profile_manager
+
             max_pct = profile_manager.get_max_position("default")
             if pct > max_pct * 1.3:
-                alerts.append(RebalanceAlert(ticker=inst.ticker, current_pct=round(pct, 1), target_pct=float(max_pct), deviation_pct=round(pct - max_pct, 1), reason=f"Позиция {pct:.1f}% превышает лимит {max_pct}%"))
+                alerts.append(
+                    RebalanceAlert(
+                        ticker=inst.ticker,
+                        current_pct=round(pct, 1),
+                        target_pct=float(max_pct),
+                        deviation_pct=round(pct - max_pct, 1),
+                        reason=f"Позиция {pct:.1f}% превышает лимит {max_pct}%",
+                    )
+                )
         return alerts
 
-    def check_rebalance_async(self, db) -> list["RebalanceAlert"]:
+    def check_rebalance_async(self, db) -> list[RebalanceAlert]:
         return self.check_rebalance(db)

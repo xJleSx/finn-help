@@ -15,8 +15,8 @@ from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.db.connection import get_session, init_db
 from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Portfolio, Price
-from src.signal.engine import compute_risk_metrics
 from src.llm.router import llm
+from src.signal.engine import compute_risk_metrics
 
 if sys.stdout.encoding != "utf-8" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -176,12 +176,32 @@ async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True)
         if len(ind_rows) < 2:
             return None, f"Недостаточно индикаторов для {ticker}"
 
-        pdf = pd.DataFrame([{"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume} for p in prices])
-        idf = pd.DataFrame([{
-            "date": r.date, "rsi": r.rsi, "macd_line": r.macd_line, "macd_signal": r.macd_signal,
-            "macd_hist": r.macd_hist, "sma_20": r.sma_20, "sma_50": r.sma_50, "sma_200": r.sma_200,
-            "bb_upper": r.bb_upper, "bb_lower": r.bb_lower, "bb_mid": r.bb_mid, "volume_sma_20": r.volume_sma_20, "atr": r.atr,
-        } for r in ind_rows])
+        pdf = pd.DataFrame(
+            [
+                {"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume}
+                for p in prices
+            ]
+        )
+        idf = pd.DataFrame(
+            [
+                {
+                    "date": r.date,
+                    "rsi": r.rsi,
+                    "macd_line": r.macd_line,
+                    "macd_signal": r.macd_signal,
+                    "macd_hist": r.macd_hist,
+                    "sma_20": r.sma_20,
+                    "sma_50": r.sma_50,
+                    "sma_200": r.sma_200,
+                    "bb_upper": r.bb_upper,
+                    "bb_lower": r.bb_lower,
+                    "bb_mid": r.bb_mid,
+                    "volume_sma_20": r.volume_sma_20,
+                    "atr": r.atr,
+                }
+                for r in ind_rows
+            ]
+        )
         idf = idf.merge(pdf[["date", "close"]], on="date", how="left")
 
         tech_signal = analysis_service.analyzer.generate_signal(idf)
@@ -193,16 +213,23 @@ async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True)
         geo = {"score": geo_row.score} if geo_row else {"score": 0.0}
 
         from src.collectors.macro import MacroCollector
+
         macro_context = MacroCollector.latest_values(db)
 
         from datetime import datetime, timedelta, timezone
+
         cutoff = datetime.now(timezone.utc) - timedelta(days=3)
         news_recent = db.query(News).filter(News.created_at >= cutoff).all()
         if news_recent:
             scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in news_recent]
             mean = sum(scores) / len(scores)
             variance = sum((s - mean) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
-            sentiment = {"score": round(mean, 3), "divergence": round(min(variance * 2, 1.0), 3), "source": "rss", "count": len(scores)}
+            sentiment = {
+                "score": round(mean, 3),
+                "divergence": round(min(variance * 2, 1.0), 3),
+                "source": "rss",
+                "count": len(scores),
+            }
         else:
             sentiment = {"score": 0.0, "divergence": 0.0, "source": "none"}
 

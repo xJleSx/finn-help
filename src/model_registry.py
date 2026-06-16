@@ -1,7 +1,6 @@
 import hashlib
 import json
 import logging
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -90,13 +89,15 @@ def list_models() -> list[dict]:
     for name, data in registry.items():
         latest = data["latest"]
         meta = next((v for v in data["versions"] if v["version"] == latest), None)
-        result.append({
-            "name": name,
-            "latest_version": latest,
-            "versions_count": len(data["versions"]),
-            "created_at": meta["created_at"] if meta else None,
-            "metrics": meta["metrics"] if meta else {},
-        })
+        result.append(
+            {
+                "name": name,
+                "latest_version": latest,
+                "versions_count": len(data["versions"]),
+                "created_at": meta["created_at"] if meta else None,
+                "metrics": meta["metrics"] if meta else {},
+            }
+        )
     return result
 
 

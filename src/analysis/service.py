@@ -1,6 +1,5 @@
 import logging
 from datetime import date
-from typing import Optional
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -10,7 +9,7 @@ from src.analysis.fundamental import FundamentalAnalyzer
 from src.analysis.multi_timeframe import MultiTimeframeAnalyzer
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.volatility import VolatilityRegimeDetector
-from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, Price, Signal
+from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Price, Signal
 from src.llm.router import llm
 from src.signal.engine import SignalFusionEngine, compute_risk_metrics
 
@@ -31,6 +30,7 @@ class AnalysisService:
     def prophet(self):
         if self._prophet is None:
             from src.analysis.ml.prophet_model import ProphetPredictor
+
             self._prophet = ProphetPredictor()
         return self._prophet
 
@@ -38,26 +38,39 @@ class AnalysisService:
     def ensemble(self):
         if self._ensemble is None:
             from src.analysis.ml.ensemble import EnsemblePredictor
+
             self._ensemble = EnsemblePredictor()
         return self._ensemble
 
     def _price_df(self, prices: list[Price]) -> pd.DataFrame:
-        return pd.DataFrame([
-            {"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume}
-            for p in prices
-        ])
+        return pd.DataFrame(
+            [
+                {"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume}
+                for p in prices
+            ]
+        )
 
     def _indicator_df(self, rows: list[Indicator]) -> pd.DataFrame:
-        return pd.DataFrame([
-            {
-                "date": r.date, "rsi": r.rsi, "macd_line": r.macd_line,
-                "macd_signal": r.macd_signal, "macd_hist": r.macd_hist,
-                "sma_20": r.sma_20, "sma_50": r.sma_50, "sma_200": r.sma_200,
-                "bb_upper": r.bb_upper, "bb_lower": r.bb_lower, "bb_mid": r.bb_mid,
-                "volume_sma_20": r.volume_sma_20, "atr": r.atr,
-            }
-            for r in rows
-        ])
+        return pd.DataFrame(
+            [
+                {
+                    "date": r.date,
+                    "rsi": r.rsi,
+                    "macd_line": r.macd_line,
+                    "macd_signal": r.macd_signal,
+                    "macd_hist": r.macd_hist,
+                    "sma_20": r.sma_20,
+                    "sma_50": r.sma_50,
+                    "sma_200": r.sma_200,
+                    "bb_upper": r.bb_upper,
+                    "bb_lower": r.bb_lower,
+                    "bb_mid": r.bb_mid,
+                    "volume_sma_20": r.volume_sma_20,
+                    "atr": r.atr,
+                }
+                for r in rows
+            ]
+        )
 
     def _dividend_df(self, divs: list[Dividend]) -> pd.DataFrame:
         return pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
@@ -88,10 +101,12 @@ class AnalysisService:
 
     async def _load_macro(self, db: AsyncSession) -> dict:
         from src.collectors.macro import MacroCollector
+
         return await MacroCollector.latest_values_async(db)
 
     async def _load_sentiment(self, db: AsyncSession) -> dict:
         from datetime import datetime, timedelta, timezone
+
         from src.db.models import News
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=3)
@@ -109,12 +124,8 @@ class AnalysisService:
             "count": len(scores),
         }
 
-    async def analyze_single(
-        self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True
-    ) -> dict:
-        price_result = await db.execute(
-            select(Price).where(Price.instrument_id == inst.id).order_by(Price.date)
-        )
+    async def analyze_single(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> dict:
+        price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
         prices = price_result.scalars().all()
         if len(prices) < 50:
             raise ValueError(f"Not enough price data for {ticker}")
@@ -132,9 +143,7 @@ class AnalysisService:
 
         tech_signal = self.analyzer.generate_signal(ind_df)
 
-        div_result = await db.execute(
-            select(Dividend).where(Dividend.instrument_id == inst.id)
-        )
+        div_result = await db.execute(select(Dividend).where(Dividend.instrument_id == inst.id))
         divs = div_result.scalars().all()
         div_df = self._dividend_df(divs)
         fund = self.fundamental.analyze(df, div_df)
@@ -204,10 +213,8 @@ class AnalysisService:
         advice = await llm.advise(fused)
         return fused, advice
 
-
     def analyze_all_sync(self, db, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict]:
         """Sync version for CLI / scheduler use."""
-        from sqlalchemy.orm import Session
         instruments = db.query(Instrument)
         if updated_ids is not None:
             instruments = instruments.filter(Instrument.id.in_(updated_ids))
@@ -252,16 +259,23 @@ class AnalysisService:
                 geo = {"score": geo_row.score} if geo_row else {"score": 0.0}
 
                 from src.collectors.macro import MacroCollector
+
                 macro_context = MacroCollector.latest_values(db)
 
                 from datetime import datetime, timedelta, timezone
+
                 cutoff = datetime.now(timezone.utc) - timedelta(days=3)
                 recent = db.query(News).filter(News.created_at >= cutoff).all()
                 if recent:
                     scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
                     mean = sum(scores) / len(scores)
                     variance = sum((s - mean) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
-                    sentiment = {"score": round(mean, 3), "divergence": round(min(variance * 2, 1.0), 3), "source": "rss", "count": len(scores)}
+                    sentiment = {
+                        "score": round(mean, 3),
+                        "divergence": round(min(variance * 2, 1.0), 3),
+                        "source": "rss",
+                        "count": len(scores),
+                    }
                 else:
                     sentiment = {"score": 0.0, "divergence": 0.0, "source": "none"}
 

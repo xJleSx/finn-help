@@ -2,7 +2,6 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +42,14 @@ class UserProfile:
     risk_profile: str = "balanced"
     investment_horizon: str = "medium"  # short, medium, long
     capital: float = 100_000
-    preferences: dict = field(default_factory=lambda: {
-        "sectors": [],
-        "exclude_tickers": [],
-        "min_dividend_yield": 0.0,
-        "max_position_pct": 30,
-    })
+    preferences: dict = field(
+        default_factory=lambda: {
+            "sectors": [],
+            "exclude_tickers": [],
+            "min_dividend_yield": 0.0,
+            "max_position_pct": 30,
+        }
+    )
 
     def to_dict(self) -> dict:
         return {

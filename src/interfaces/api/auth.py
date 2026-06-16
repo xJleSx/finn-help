@@ -63,9 +63,7 @@ async def get_current_user(
         user_id = int(payload.get("sub", 0))
         if not user_id:
             return None
-        result = await db.execute(
-            select(User).where(User.id == user_id, User.is_active == True)
-        )
+        result = await db.execute(select(User).where(User.id == user_id, User.is_active))
         user = result.scalar_one_or_none()
         return user
     except Exception:

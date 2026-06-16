@@ -9,12 +9,14 @@ import pytest
 
 class AsyncMagicMock(MagicMock):
     """MagicMock that supports async/await like AsyncMock."""
+
     async def __call__(self, *args, **kwargs):
         return super().__call__(*args, **kwargs)
 
     def __await__(self):
         async def _():
             return self
+
         return _().__await__()
 
 
@@ -32,7 +34,7 @@ def mock_db():
 @pytest.fixture
 def mock_client(mock_db):
     from src.db.models import User
-    from src.interfaces.api.auth import get_current_user, require_user, get_db
+    from src.interfaces.api.auth import get_current_user, get_db, require_user
     from src.interfaces.api.server import app
 
     def override_get_db():
@@ -51,6 +53,7 @@ def mock_client(mock_db):
     app.dependency_overrides[require_user] = override_user
 
     from fastapi.testclient import TestClient
+
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -101,7 +104,6 @@ class TestGeoRisk:
 
 class TestAllocate:
     def test_allocate_returns_dict(self, mock_client, mock_db):
-        from src.portfolio.allocator import PortfolioAllocator
         mock_db.execute.return_value.scalars.return_value.all.return_value = []
         resp = mock_client.post("/api/portfolio/allocate", json={"capital": 50000})
         assert resp.status_code == 200

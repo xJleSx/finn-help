@@ -96,12 +96,8 @@ class SignalFusionEngine:
             from src.user_profile import profile_manager
 
             weights = profile_manager.get_weights(user_id)
-            min_confidence = profile_manager.get_min_confidence(user_id)
-            geo_threshold = profile_manager.get_geo_threshold(user_id)
         else:
             weights = dict(BASE_WEIGHTS)
-            min_confidence = 0.0
-            geo_threshold = 7.0
 
         if volatility_regime and volatility_regime.get("adjustment"):
             adj = volatility_regime["adjustment"]
@@ -355,7 +351,6 @@ class SignalFusionEngine:
 
     def save_signal_sync(self, db, instrument_id: int, fused: dict) -> SignalModel:
         """Sync version for CLI / scheduler."""
-        from sqlalchemy.orm import Session
         from src.db.models import Signal as SignalModel
 
         fused_clean = self._to_native(fused)

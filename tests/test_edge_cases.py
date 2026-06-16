@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
@@ -15,17 +15,20 @@ class TestEnsembleEdgeCases:
     def sample_df(self):
         np.random.seed(42)
         n = 100
-        return pd.DataFrame({
-            "close": np.cumsum(np.random.randn(n)) + 100,
-            "rsi": np.random.uniform(20, 80, n),
-            "macd_hist": np.random.randn(n) * 0.5,
-            "sma_20": np.full(n, 105),
-            "sma_50": np.full(n, 100),
-            "volume": np.random.randint(1000, 10000, n),
-        })
+        return pd.DataFrame(
+            {
+                "close": np.cumsum(np.random.randn(n)) + 100,
+                "rsi": np.random.uniform(20, 80, n),
+                "macd_hist": np.random.randn(n) * 0.5,
+                "sma_20": np.full(n, 105),
+                "sma_50": np.full(n, 100),
+                "volume": np.random.randint(1000, 10000, n),
+            }
+        )
 
     def test_empty_df(self):
         from src.analysis.ml.ensemble import EnsemblePredictor
+
         ep = EnsemblePredictor()
         ep._xgb = MagicMock()
         ep._xgb.predict.return_value = {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0, "probability": 0.5}
@@ -38,6 +41,7 @@ class TestEnsembleEdgeCases:
 
     def test_single_row(self):
         from src.analysis.ml.ensemble import EnsemblePredictor
+
         ep = EnsemblePredictor()
         ep._xgb = MagicMock()
         ep._xgb.predict.return_value = {"action": "BUY", "confidence": 0.7, "signal_score": 0.3, "probability": 0.65}
@@ -49,13 +53,17 @@ class TestEnsembleEdgeCases:
         result = ep.predict(df)
         assert result["action"] in ("BUY", "SELL", "HOLD", "NEUTRAL")
 
-    @pytest.mark.parametrize("n_rows,expected_actions", [
-        (10, ("NEUTRAL", "HOLD")),
-        (50, ("BUY", "SELL", "HOLD", "NEUTRAL")),
-        (200, ("BUY", "SELL", "HOLD", "NEUTRAL")),
-    ])
+    @pytest.mark.parametrize(
+        "n_rows,expected_actions",
+        [
+            (10, ("NEUTRAL", "HOLD")),
+            (50, ("BUY", "SELL", "HOLD", "NEUTRAL")),
+            (200, ("BUY", "SELL", "HOLD", "NEUTRAL")),
+        ],
+    )
     def test_various_sizes(self, n_rows, expected_actions):
         from src.analysis.ml.ensemble import EnsemblePredictor
+
         ep = EnsemblePredictor()
         ep._xgb = MagicMock()
         ep._xgb.predict.return_value = {"action": "BUY", "confidence": 0.7, "signal_score": 0.3, "probability": 0.65}
@@ -64,13 +72,15 @@ class TestEnsembleEdgeCases:
         ep._cat = MagicMock()
         ep._cat.predict.return_value = {"action": "HOLD", "confidence": 0.5, "signal_score": 0.0, "probability": 0.5}
         np.random.seed(42)
-        df = pd.DataFrame({
-            "close": np.cumsum(np.random.randn(n_rows)) + 100,
-            "rsi": np.random.uniform(20, 80, n_rows),
-            "macd_hist": np.random.randn(n_rows) * 0.5,
-            "sma_20": np.full(n_rows, 105),
-            "sma_50": np.full(n_rows, 100),
-        })
+        df = pd.DataFrame(
+            {
+                "close": np.cumsum(np.random.randn(n_rows)) + 100,
+                "rsi": np.random.uniform(20, 80, n_rows),
+                "macd_hist": np.random.randn(n_rows) * 0.5,
+                "sma_20": np.full(n_rows, 105),
+                "sma_50": np.full(n_rows, 100),
+            }
+        )
         result = ep.predict(df)
         assert result["action"] in expected_actions
         assert 0 <= result["confidence"] <= 1
@@ -79,6 +89,7 @@ class TestEnsembleEdgeCases:
     @pytest.mark.parametrize("missing_col", ["rsi", "macd_hist", "close"])
     def test_missing_columns(self, missing_col, sample_df):
         from src.analysis.ml.ensemble import EnsemblePredictor
+
         ep = EnsemblePredictor()
         ep._xgb = MagicMock()
         ep._xgb.predict.return_value = {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0, "probability": 0.5}
@@ -92,9 +103,15 @@ class TestEnsembleEdgeCases:
 
     def test_all_models_fail(self, sample_df):
         from src.analysis.ml.ensemble import EnsemblePredictor
+
         ep = EnsemblePredictor()
         mock_pred = MagicMock()
-        mock_pred.predict.return_value = {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0, "probability": 0.5}
+        mock_pred.predict.return_value = {
+            "action": "NEUTRAL",
+            "confidence": 0.0,
+            "signal_score": 0.0,
+            "probability": 0.5,
+        }
         ep._xgb = mock_pred
         ep._lgb = mock_pred
         ep._cat = mock_pred
@@ -106,18 +123,22 @@ class TestSectorAnalyzer:
     @pytest.fixture
     def analyzer(self):
         from src.analysis.sector import SectorAnalyzer
+
         return SectorAnalyzer()
 
-    @pytest.mark.parametrize("name,expected_sector", [
-        ("Сбер Банк", "Финансы"),
-        ("Газпром", "Нефть"),
-        ("Яндекс", "IT"),
-        ("Магнит", "Потребительский"),
-        ("МТС", "Телеком"),
-        ("Интер РАО", "Энергетика"),
-        ("Фосагро", "Химия"),
-        ("Аэрофлот", "Транспорт"),
-    ])
+    @pytest.mark.parametrize(
+        "name,expected_sector",
+        [
+            ("Сбер Банк", "Финансы"),
+            ("Газпром", "Нефть"),
+            ("Яндекс", "IT"),
+            ("Магнит", "Потребительский"),
+            ("МТС", "Телеком"),
+            ("Интер РАО", "Энергетика"),
+            ("Фосагро", "Химия"),
+            ("Аэрофлот", "Транспорт"),
+        ],
+    )
     def test_sector_for(self, analyzer, name, expected_sector):
         assert analyzer.sector_for(name, "") == expected_sector
 
@@ -157,16 +178,16 @@ class TestSectorAnalyzer:
 class TestBacktestEdgeCases:
     @pytest.mark.parametrize("slippage_bps", [0, 5, 10, 20])
     def test_various_slippage(self, slippage_bps):
-        from src.analysis.backtest import BacktestConfig, run_monte_carlo
-        config = BacktestConfig(slippage_bps=slippage_bps)
+        from src.analysis.backtest import run_monte_carlo
+
         returns = [np.random.randn() * 0.02 for _ in range(100)]
         mc = run_monte_carlo(returns)
         assert isinstance(mc.simulations, int)
 
     @pytest.mark.parametrize("commission_pct", [0.0, 0.0005, 0.001, 0.003])
     def test_various_commission(self, commission_pct):
-        from src.analysis.backtest import BacktestConfig, run_monte_carlo
-        config = BacktestConfig(commission_pct=commission_pct)
+        from src.analysis.backtest import run_monte_carlo
+
         returns = [np.random.randn() * 0.02 for _ in range(100)]
         mc = run_monte_carlo(returns)
         assert isinstance(mc.simulations, int)
@@ -174,11 +195,13 @@ class TestBacktestEdgeCases:
     @pytest.mark.parametrize("initial_capital", [10000, 100000, 1000000])
     def test_various_capital(self, initial_capital):
         from src.analysis.backtest import BacktestConfig
+
         config = BacktestConfig(capital=initial_capital)
         assert config.capital == initial_capital
 
     def test_constant_prices(self):
         from src.analysis.backtest import BacktestResult
+
         prices = [100] * 50
         result = BacktestResult(capital=100000)
         for i in range(1, len(prices)):
@@ -188,6 +211,7 @@ class TestBacktestEdgeCases:
 
     def test_uptrend_prices(self):
         from src.analysis.backtest import BacktestResult
+
         prices = [100 + i for i in range(100)]
         result = BacktestResult(capital=100000)
         for i in range(1, len(prices)):
@@ -197,6 +221,7 @@ class TestBacktestEdgeCases:
 
     def test_downtrend_prices(self):
         from src.analysis.backtest import BacktestResult
+
         prices = [100 - i for i in range(100)]
         result = BacktestResult(capital=100000)
         for i in range(1, len(prices)):
@@ -206,19 +231,23 @@ class TestBacktestEdgeCases:
 
     def test_very_short_series(self):
         from src.analysis.backtest import BacktestResult
+
         result = BacktestResult(capital=100000)
         assert result.portfolio_return == 0.0
         assert result.portfolio_sharpe == 0.0
 
     def test_extreme_volatility(self):
-        from src.analysis.backtest import BacktestResult, run_monte_carlo
         import math
+
+        from src.analysis.backtest import run_monte_carlo
+
         returns = [0.1 * math.sin(i) for i in range(100)]
         mc = run_monte_carlo(returns)
         assert isinstance(mc.simulations, int) and mc.simulations > 0
 
     def test_apply_costs(self):
         from src.analysis.backtest import BacktestConfig, apply_costs
+
         config = BacktestConfig()
         net, slippage, commission = apply_costs(0.01, True, 0.5, config)
         assert net < 0.01
@@ -226,8 +255,10 @@ class TestBacktestEdgeCases:
         assert commission >= 0
 
     def test_detect_regime(self):
-        from src.analysis.backtest import detect_regime
         import numpy as np
+
+        from src.analysis.backtest import detect_regime
+
         returns = np.array([0.01] * 30)
         regime = detect_regime(returns)
         assert regime.regime == "BULL"
@@ -240,16 +271,19 @@ class TestBacktestEdgeCases:
 
     def test_monte_carlo_empty(self):
         from src.analysis.backtest import run_monte_carlo
+
         mc = run_monte_carlo([], n_simulations=100)
         assert mc.simulations == 0
 
     def test_monte_carlo_few(self):
         from src.analysis.backtest import run_monte_carlo
+
         mc = run_monte_carlo([0.01, 0.02, -0.01], n_simulations=100)
         assert mc.simulations == 0
 
     def test_monte_carlo_normal(self):
         from src.analysis.backtest import run_monte_carlo
+
         returns = [np.random.randn() * 0.02 for _ in range(100)]
         mc = run_monte_carlo(returns, n_simulations=500, periods=252)
         assert mc.simulations == 500

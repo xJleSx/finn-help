@@ -65,7 +65,6 @@ class CorrelationAnalyzer:
 
         return returns.corr(method="pearson")
 
-
     async def diversification_penalty_async(self, ticker: str, existing_tickers: list[str], db: AsyncSession) -> float:
         if not existing_tickers:
             return 0.0

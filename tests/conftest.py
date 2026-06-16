@@ -14,8 +14,8 @@ from sqlalchemy.orm import sessionmaker
 
 from src.db.models import Base
 
-
 # ── Sync fixtures (for unit tests) ──────────────────────────────────────────
+
 
 @pytest.fixture(scope="session")
 def in_memory_db():
@@ -44,6 +44,7 @@ def db_session(in_memory_db):
 
 # ── Async fixtures (for API tests) ──────────────────────────────────────────
 
+
 @pytest.fixture(scope="session")
 def async_in_memory_db():
     db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -54,6 +55,7 @@ def async_in_memory_db():
         echo=False,
     )
     import asyncio
+
     loop = asyncio.new_event_loop()
     loop.run_until_complete(engine.run_sync(Base.metadata.create_all))
     yield engine
@@ -78,8 +80,8 @@ async def async_db_session(async_in_memory_db) -> AsyncGenerator[AsyncSession, N
 @pytest.fixture
 async def async_client(async_in_memory_db) -> AsyncGenerator[AsyncClient, None]:
     """Create fresh async session per request (no commit/rollback at generator level)."""
-    from src.interfaces.api.server import app
     from src.interfaces.api.auth import get_db
+    from src.interfaces.api.server import app
 
     session_class = async_sessionmaker(bind=async_in_memory_db, class_=AsyncSession, expire_on_commit=False)
 
@@ -99,18 +101,20 @@ async def async_client(async_in_memory_db) -> AsyncGenerator[AsyncClient, None]:
 
 # ── Legacy sync client fixture ──────────────────────────────────────────────
 
+
 @pytest.fixture
 def client(db_session):
     from src.interfaces.api.server import app
 
     def override_get_db_sync():
-        from sqlalchemy.orm import Session
         yield db_session
 
     app.dependency_overrides.clear()
     from src.interfaces.api.auth import get_db
+
     app.dependency_overrides[get_db] = override_get_db_sync
 
     from fastapi.testclient import TestClient
+
     yield TestClient(app)
     app.dependency_overrides.clear()

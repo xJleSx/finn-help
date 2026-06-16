@@ -1,7 +1,6 @@
 import logging
 from datetime import date, timedelta
 
-import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -421,11 +420,10 @@ class PortfolioAllocator:
             if should_close:
                 db.close()
 
-
     async def allocate_async(self, capital: float, db: AsyncSession | None = None) -> dict:
-        should_close = db is None
         if db is None:
             from src.db.connection import get_session as get_sync_session
+
             sync_db = get_sync_session()
             try:
                 return self.allocate(capital, db=sync_db)
@@ -472,16 +470,18 @@ class PortfolioAllocator:
                 sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
 
                 risk = _item_risk_sync(item, capital)
-                category_items.append({
-                    "ticker": item["ticker"],
-                    "name": item["name"],
-                    "amount": amount,
-                    "reason": item.get("reason", ""),
-                    "expected_yield": item.get("yield", 0),
-                    "sector": sector,
-                    "last_price": item.get("last_price"),
-                    "risk": risk,
-                })
+                category_items.append(
+                    {
+                        "ticker": item["ticker"],
+                        "name": item["name"],
+                        "amount": amount,
+                        "reason": item.get("reason", ""),
+                        "expected_yield": item.get("yield", 0),
+                        "sector": sector,
+                        "last_price": item.get("last_price"),
+                        "risk": risk,
+                    }
+                )
                 total_allocated += amount
 
             plan[category] = {
@@ -530,12 +530,14 @@ class PortfolioAllocator:
             price = price_result.scalar_one_or_none()
             current_price = price.close if price else 0
             value = current_price * p.quantity if current_price else 0
-            output.append({
-                "ticker": inst.ticker if inst else "?",
-                "quantity": float(p.quantity),
-                "avg_price": float(p.avg_price) if p.avg_price else 0,
-                "current_value": round(float(value), 2),
-            })
+            output.append(
+                {
+                    "ticker": inst.ticker if inst else "?",
+                    "quantity": float(p.quantity),
+                    "avg_price": float(p.avg_price) if p.avg_price else 0,
+                    "current_value": round(float(value), 2),
+                }
+            )
         return output
 
     async def _load_instruments_async(self, db: AsyncSession) -> list[dict]:
@@ -561,22 +563,28 @@ class PortfolioAllocator:
             if divs and last_price and last_price > 0:
                 div_yield = sum(d.amount for d in divs) / last_price * 100
 
-            output.append({
-                "id": inst.id,
-                "ticker": inst.ticker,
-                "name": inst.full_name or inst.ticker,
-                "type": inst.instrument_type,
-                "sector": sector,
-                "last_price": float(last_price) if last_price else None,
-                "div_yield": round(div_yield, 2),
-                "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "dividend",
-                "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "growth",
-            })
+            output.append(
+                {
+                    "id": inst.id,
+                    "ticker": inst.ticker,
+                    "name": inst.full_name or inst.ticker,
+                    "type": inst.instrument_type,
+                    "sector": sector,
+                    "last_price": float(last_price) if last_price else None,
+                    "div_yield": round(div_yield, 2),
+                    "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "dividend",
+                    "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "growth",
+                }
+            )
         return output
 
     async def _score_candidates_async(
-        self, instruments: list[dict], category: str, budget: float,
-        existing: list[dict], db: AsyncSession,
+        self,
+        instruments: list[dict],
+        category: str,
+        budget: float,
+        existing: list[dict],
+        db: AsyncSession,
     ) -> list[dict]:
         existing_tickers = set(e["ticker"] for e in existing)
         existing_tickers_list = list(existing_tickers)
@@ -683,10 +691,7 @@ class PortfolioAllocator:
     async def _volume_score_async(self, inst: dict, db: AsyncSession) -> float:
         try:
             result = await db.execute(
-                select(Price)
-                .where(Price.instrument_id == inst["id"])
-                .order_by(Price.date.desc())
-                .limit(20)
+                select(Price).where(Price.instrument_id == inst["id"]).order_by(Price.date.desc()).limit(20)
             )
             prices = result.scalars().all()
             if not prices:

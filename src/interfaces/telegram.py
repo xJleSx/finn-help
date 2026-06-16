@@ -191,7 +191,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/top — лучшие возможности\n"
         "/export — CSV-отчёт портфеля\n\n"
         "Используйте кнопки для быстрого доступа \u2935\ufe0f",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
 
@@ -281,9 +281,7 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
             positions = []
             for r in rows:
                 inst = db.query(Instrument).filter_by(id=r.instrument_id).first()
-                price = (
-                    db.query(Price).filter_by(instrument_id=r.instrument_id).order_by(Price.date.desc()).first()
-                )
+                price = db.query(Price).filter_by(instrument_id=r.instrument_id).order_by(Price.date.desc()).first()
                 last_price = price.close if price else 0
                 val = last_price * r.quantity if last_price else 0
                 if val > 0:
@@ -392,11 +390,7 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"{ticker} не найден")
             return
         signals = (
-            db.query(SignalModel)
-            .filter_by(instrument_id=inst.id)
-            .order_by(SignalModel.date.desc())
-            .limit(60)
-            .all()
+            db.query(SignalModel).filter_by(instrument_id=inst.id).order_by(SignalModel.date.desc()).limit(60).all()
         )
         if not signals:
             await update.message.reply_text(f"Нет истории сигналов для {ticker}")
@@ -410,6 +404,15 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_markdown("\n".join(lines))
     finally:
         db.close()
+
+
+async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args or []
+    ticker = args[0].upper() if args else None
+    if not ticker:
+        await update.message.reply_text("Укажите тикер: /analyze SBER")
+        return
+    await _reply_with_analysis(update, ticker)
 
 
 async def backtest_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -435,8 +438,6 @@ async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         perf = sector_analyzer.compute_sector_performance(db)
         vol = sector_analyzer.compute_sector_volatility(db)
-        corr = sector_analyzer.compute_sector_correlation(db)
-
         lines = ["🏭 *Доходность секторов (30д):*\n"]
         sorted_sectors = sorted(perf.items(), key=lambda x: x[1], reverse=True)
         for sector, perf_val in sorted_sectors:
@@ -492,22 +493,26 @@ async def export_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for p in positions:
             inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
             price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
-            rows.append({
-                "ticker": inst.ticker if inst else "?",
-                "name": inst.full_name if inst else "",
-                "quantity": float(p.quantity),
-                "avg_price": float(p.avg_price) if p.avg_price else 0,
-                "current_price": float(price.close) if price and price.close else 0,
-                "value": float(price.close * p.quantity) if price and price.close and p.quantity else 0,
-                "allocation_pct": 0,
-                "profit_pct": round(((price.close / p.avg_price) - 1) * 100, 2) if price and price.close and p.avg_price else 0,
-            })
+            rows.append(
+                {
+                    "ticker": inst.ticker if inst else "?",
+                    "name": inst.full_name if inst else "",
+                    "quantity": float(p.quantity),
+                    "avg_price": float(p.avg_price) if p.avg_price else 0,
+                    "current_price": float(price.close) if price and price.close else 0,
+                    "value": float(price.close * p.quantity) if price and price.close and p.quantity else 0,
+                    "allocation_pct": 0,
+                    "profit_pct": round(((price.close / p.avg_price) - 1) * 100, 2)
+                    if price and price.close and p.avg_price
+                    else 0,
+                }
+            )
 
         csv_content = generate_portfolio_csv(rows)
         await update.message.reply_document(
             document=io.BytesIO(csv_content.encode("utf-8-sig")),
             filename="portfolio.csv",
-            caption="\U0001f4ca Отчёт по портфелю"
+            caption="\U0001f4ca Отчёт по портфелю",
         )
     finally:
         db.close()
@@ -622,10 +627,28 @@ def _find_excluded_tickers(text: str) -> set[str]:
     text_lower = text.lower()
     exclude: set[str] = set()
 
-    exclude_keywords = ["без ", "кроме ", "недоступ", "не учитывай", "исключ", "убери ",
-                        "не рассматривай", "без учета", "без участия", "нет ", "нету ",
-                        "отсутств", "не им", "пока нет", "ещё нет", "нет в наличии",
-                        "не интересу", "не нужно", "не хочу", "не рассматрива"]
+    exclude_keywords = [
+        "без ",
+        "кроме ",
+        "недоступ",
+        "не учитывай",
+        "исключ",
+        "убери ",
+        "не рассматривай",
+        "без учета",
+        "без участия",
+        "нет ",
+        "нету ",
+        "отсутств",
+        "не им",
+        "пока нет",
+        "ещё нет",
+        "нет в наличии",
+        "не интересу",
+        "не нужно",
+        "не хочу",
+        "не рассматрива",
+    ]
 
     has_exclusion = any(k in text_lower for k in exclude_keywords)
     if not has_exclusion:
@@ -635,11 +658,26 @@ def _find_excluded_tickers(text: str) -> set[str]:
 
     for ticker in all_tickers:
         t_lower = ticker.lower()
-        if any(re.search(rf'\b{kw}\s*{re.escape(t_lower)}\b', text_lower) for kw in ["без", "кроме", "нет", "нету",
-               "недоступ", "исключ", "убери", "отсутств", "не интересу", "не нужно"]):
+        if any(
+            re.search(rf"\b{kw}\s*{re.escape(t_lower)}\b", text_lower)
+            for kw in [
+                "без",
+                "кроме",
+                "нет",
+                "нету",
+                "недоступ",
+                "исключ",
+                "убери",
+                "отсутств",
+                "не интересу",
+                "не нужно",
+            ]
+        ):
             exclude.add(ticker)
-        elif any(re.search(rf'\b{re.escape(t_lower)}\s*{kw}\b', text_lower) for kw in ["нет", "нету", "отсутств",
-               "недоступ", "исключ"]):
+        elif any(
+            re.search(rf"\b{re.escape(t_lower)}\s*{kw}\b", text_lower)
+            for kw in ["нет", "нету", "отсутств", "недоступ", "исключ"]
+        ):
             exclude.add(ticker)
 
     rev_map = {v.lower(): v for v in RUSSIAN_NAMES.values()}
@@ -648,16 +686,13 @@ def _find_excluded_tickers(text: str) -> set[str]:
             exclude.add(ticker)
         if any(t_lower + " " + kw in text_lower for kw in ["нет", "отсутств", "недоступ", "исключ"]):
             exclude.add(ticker)
-        if t_lower in text_lower and any(kw in text_lower for kw in ["недоступ", "исключ",
-                                                                     "не учитывай", "убери"]):
+        if t_lower in text_lower and any(kw in text_lower for kw in ["недоступ", "исключ", "не учитывай", "убери"]):
             exclude.add(ticker)
 
     for phrase, ticker in RUSSIAN_NAMES.items():
-        if any(kw + phrase in text_lower for kw in ["без ", "кроме ", "нет ",
-                                                    "недоступ", "исключ", "убери "]):
+        if any(kw + phrase in text_lower for kw in ["без ", "кроме ", "нет ", "недоступ", "исключ", "убери "]):
             exclude.add(ticker)
-        if any(phrase + " " + kw in text_lower for kw in ["нет", "нету", "отсутств",
-                                                          "недоступ", "исключ", "убери"]):
+        if any(phrase + " " + kw in text_lower for kw in ["нет", "нету", "отсутств", "недоступ", "исключ", "убери"]):
             exclude.add(ticker)
 
     return exclude

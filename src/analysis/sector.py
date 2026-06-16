@@ -1,6 +1,5 @@
 import logging
 from datetime import date, timedelta
-from typing import Optional
 
 import numpy as np
 from sqlalchemy import select
@@ -59,24 +58,17 @@ class SectorAnalyzer:
             sector_returns[sector].append(ret)
 
         return {
-            sector: round(float(np.mean(returns)), 4)
-            for sector, returns in sector_returns.items()
-            if len(returns) >= 2
+            sector: round(float(np.mean(returns)), 4) for sector, returns in sector_returns.items() if len(returns) >= 2
         }
 
-    def compute_sector_correlation(
-        self, db: Session, days: int = 90
-    ) -> dict[str, dict[str, float]]:
+    def compute_sector_correlation(self, db: Session, days: int = 90) -> dict[str, dict[str, float]]:
         cutoff = date.today() - timedelta(days=days)
         instruments = db.query(Instrument).all()
         sector_prices: dict[str, list[float]] = {}
 
         for inst in instruments:
             prices = (
-                db.query(Price)
-                .filter(Price.instrument_id == inst.id, Price.date >= cutoff)
-                .order_by(Price.date)
-                .all()
+                db.query(Price).filter(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date).all()
             )
             closes = [p.close for p in prices if p.close and p.close > 0]
             if len(closes) < 20:
@@ -116,10 +108,7 @@ class SectorAnalyzer:
 
         for inst in instruments:
             prices = (
-                db.query(Price)
-                .filter(Price.instrument_id == inst.id, Price.date >= cutoff)
-                .order_by(Price.date)
-                .all()
+                db.query(Price).filter(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date).all()
             )
             closes = [p.close for p in prices if p.close and p.close > 0]
             if len(closes) < 10:
@@ -131,12 +120,7 @@ class SectorAnalyzer:
                 sector_vols[sector] = []
             sector_vols[sector].append(vol)
 
-        return {
-            sector: round(float(np.mean(vols)), 4)
-            for sector, vols in sector_vols.items()
-            if len(vols) >= 2
-        }
-
+        return {sector: round(float(np.mean(vols)), 4) for sector, vols in sector_vols.items() if len(vols) >= 2}
 
     async def compute_sector_performance_async(self, db: AsyncSession, days: int = 30) -> dict[str, float]:
         cutoff = date.today() - timedelta(days=days)
@@ -146,10 +130,7 @@ class SectorAnalyzer:
 
         for inst in instruments:
             first_result = await db.execute(
-                select(Price)
-                .where(Price.instrument_id == inst.id, Price.date >= cutoff)
-                .order_by(Price.date)
-                .limit(1)
+                select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date).limit(1)
             )
             first = first_result.scalar_one_or_none()
             last_result = await db.execute(
@@ -168,14 +149,10 @@ class SectorAnalyzer:
             sector_returns[sector].append(ret)
 
         return {
-            sector: round(float(np.mean(returns)), 4)
-            for sector, returns in sector_returns.items()
-            if len(returns) >= 2
+            sector: round(float(np.mean(returns)), 4) for sector, returns in sector_returns.items() if len(returns) >= 2
         }
 
-    async def compute_sector_correlation_async(
-        self, db: AsyncSession, days: int = 90
-    ) -> dict[str, dict[str, float]]:
+    async def compute_sector_correlation_async(self, db: AsyncSession, days: int = 90) -> dict[str, dict[str, float]]:
         cutoff = date.today() - timedelta(days=days)
         result = await db.execute(select(Instrument))
         instruments = result.scalars().all()
@@ -183,9 +160,7 @@ class SectorAnalyzer:
 
         for inst in instruments:
             price_result = await db.execute(
-                select(Price)
-                .where(Price.instrument_id == inst.id, Price.date >= cutoff)
-                .order_by(Price.date)
+                select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date)
             )
             prices = price_result.scalars().all()
             closes = [p.close for p in prices if p.close and p.close > 0]
@@ -227,9 +202,7 @@ class SectorAnalyzer:
 
         for inst in instruments:
             price_result = await db.execute(
-                select(Price)
-                .where(Price.instrument_id == inst.id, Price.date >= cutoff)
-                .order_by(Price.date)
+                select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date)
             )
             prices = price_result.scalars().all()
             closes = [p.close for p in prices if p.close and p.close > 0]
@@ -242,11 +215,7 @@ class SectorAnalyzer:
                 sector_vols[sector] = []
             sector_vols[sector].append(vol)
 
-        return {
-            sector: round(float(np.mean(vols)), 4)
-            for sector, vols in sector_vols.items()
-            if len(vols) >= 2
-        }
+        return {sector: round(float(np.mean(vols)), 4) for sector, vols in sector_vols.items() if len(vols) >= 2}
 
 
 sector_analyzer = SectorAnalyzer()

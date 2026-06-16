@@ -240,6 +240,7 @@ class TestEdgeCases:
 
         def factory():
             from xgboost import XGBClassifier
+
             return XGBClassifier(n_estimators=5, max_depth=2)
 
         result = walk_forward_validate(x, y, factory, n_splits=2, min_train_size=25)

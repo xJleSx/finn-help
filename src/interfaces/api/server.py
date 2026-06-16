@@ -75,10 +75,7 @@ class RegisterBody(BaseModel):
 @limiter.limit("5/minute")
 async def register(request: Request, body: RegisterBody, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(User).where(
-            (User.username == body.username) |
-            ((body.email is not None) & (User.email == body.email))
-        )
+        select(User).where((User.username == body.username) | ((body.email is not None) & (User.email == body.email)))
     )
     if result.scalar_one_or_none():
         raise HTTPException(400, "Username or email already taken")
@@ -141,15 +138,17 @@ async def list_instruments(
             select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()).limit(1)
         )
         last_price = price_result.scalar_one_or_none()
-        output.append({
-            "id": inst.id,
-            "ticker": inst.ticker,
-            "full_name": inst.full_name,
-            "sector": inst.sector,
-            "type": inst.instrument_type,
-            "last_price": last_price.close if last_price else None,
-            "last_date": last_price.date.isoformat() if last_price else None,
-        })
+        output.append(
+            {
+                "id": inst.id,
+                "ticker": inst.ticker,
+                "full_name": inst.full_name,
+                "sector": inst.sector,
+                "type": inst.instrument_type,
+                "last_price": last_price.close if last_price else None,
+                "last_date": last_price.date.isoformat() if last_price else None,
+            }
+        )
     return output
 
 
@@ -184,9 +183,7 @@ async def get_prices(
 
     cutoff = date.today() - timedelta(days=days)
     price_result = await db.execute(
-        select(Price)
-        .where(Price.instrument_id == inst.id, Price.date >= cutoff)
-        .order_by(Price.date)
+        select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date)
     )
     prices = price_result.scalars().all()
     return [
@@ -215,9 +212,7 @@ async def get_indicators(
 
     cutoff = date.today() - timedelta(days=days)
     ind_result = await db.execute(
-        select(Indicator)
-        .where(Indicator.instrument_id == inst.id, Indicator.date >= cutoff)
-        .order_by(Indicator.date)
+        select(Indicator).where(Indicator.instrument_id == inst.id, Indicator.date >= cutoff).order_by(Indicator.date)
     )
     inds = ind_result.scalars().all()
     return [
@@ -305,9 +300,7 @@ async def get_news(limit: int = Query(20, le=100), db: AsyncSession = Depends(ge
 @app.get("/api/geo-risk")
 async def get_geo_risk(days: int = Query(30), db: AsyncSession = Depends(get_db)):
     cutoff = date.today() - timedelta(days=days)
-    result = await db.execute(
-        select(GeoRiskScore).where(GeoRiskScore.date >= cutoff).order_by(GeoRiskScore.date)
-    )
+    result = await db.execute(select(GeoRiskScore).where(GeoRiskScore.date >= cutoff).order_by(GeoRiskScore.date))
     scores = result.scalars().all()
     return [
         {
@@ -322,24 +315,28 @@ async def get_geo_risk(days: int = Query(30), db: AsyncSession = Depends(get_db)
 @app.get("/api/macro")
 async def get_macro(db: AsyncSession = Depends(get_db)):
     from src.collectors.macro import MacroCollector
+
     return await MacroCollector.latest_values_async(db)
 
 
 @app.get("/api/sectors/performance")
 async def get_sector_performance(days: int = Query(30, le=365), db: AsyncSession = Depends(get_db)):
     from src.analysis.sector import sector_analyzer
+
     return await sector_analyzer.compute_sector_performance_async(db, days=days)
 
 
 @app.get("/api/sectors/correlation")
 async def get_sector_correlation(days: int = Query(90, le=365), db: AsyncSession = Depends(get_db)):
     from src.analysis.sector import sector_analyzer
+
     return await sector_analyzer.compute_sector_correlation_async(db, days=days)
 
 
 @app.get("/api/sectors/volatility")
 async def get_sector_volatility(days: int = Query(30, le=365), db: AsyncSession = Depends(get_db)):
     from src.analysis.sector import sector_analyzer
+
     return await sector_analyzer.compute_sector_volatility_async(db, days=days)
 
 
@@ -349,6 +346,7 @@ async def get_portfolio(
     user: Optional[User] = Depends(get_current_user),
 ):
     from src.db.models import Portfolio
+
     q = select(Portfolio)
     if user:
         q = q.where(Portfolio.user_id == user.id)
@@ -364,17 +362,19 @@ async def get_portfolio(
         )
         last_price = price_result.scalar_one_or_none()
         current_price = last_price.close if last_price else 0
-        output.append({
-            "id": p.id,
-            "ticker": inst.ticker if inst else "?",
-            "quantity": float(p.quantity),
-            "avg_price": float(p.avg_price) if p.avg_price else 0,
-            "current_price": float(current_price),
-            "value": float(current_price * p.quantity) if current_price and p.quantity else 0,
-            "profit_pct": round(((current_price / p.avg_price) - 1) * 100, 2)
-            if current_price and p.avg_price
-            else 0,
-        })
+        output.append(
+            {
+                "id": p.id,
+                "ticker": inst.ticker if inst else "?",
+                "quantity": float(p.quantity),
+                "avg_price": float(p.avg_price) if p.avg_price else 0,
+                "current_price": float(current_price),
+                "value": float(current_price * p.quantity) if current_price and p.quantity else 0,
+                "profit_pct": round(((current_price / p.avg_price) - 1) * 100, 2)
+                if current_price and p.avg_price
+                else 0,
+            }
+        )
     return output
 
 
@@ -391,6 +391,7 @@ async def add_portfolio_position(
     user: User = Depends(require_user),
 ):
     from src.db.models import Portfolio
+
     result = await db.execute(select(Instrument).where(Instrument.ticker == body.ticker.upper()))
     inst = result.scalar_one_or_none()
     if not inst:
@@ -418,6 +419,7 @@ async def allocate_portfolio(
     user: User = Depends(require_user),
 ):
     from src.portfolio.allocator import allocator
+
     try:
         result = await allocator.allocate_async(capital, db=db)
         return result
@@ -429,6 +431,7 @@ async def allocate_portfolio(
 @app.get("/api/models")
 async def list_models():
     from src.model_registry import list_models
+
     return list_models()
 
 
@@ -455,15 +458,19 @@ async def report_portfolio_csv(
         )
         last_price = price_result.scalar_one_or_none()
         current_price = last_price.close if last_price else 0
-        positions.append({
-            "ticker": inst.ticker if inst else "?",
-            "name": inst.full_name if inst else "",
-            "quantity": float(p.quantity),
-            "avg_price": float(p.avg_price) if p.avg_price else 0,
-            "current_price": float(current_price),
-            "value": float(current_price * p.quantity) if current_price and p.quantity else 0,
-            "profit_pct": round(((current_price / p.avg_price) - 1) * 100, 2) if current_price and p.avg_price else 0,
-        })
+        positions.append(
+            {
+                "ticker": inst.ticker if inst else "?",
+                "name": inst.full_name if inst else "",
+                "quantity": float(p.quantity),
+                "avg_price": float(p.avg_price) if p.avg_price else 0,
+                "current_price": float(current_price),
+                "value": float(current_price * p.quantity) if current_price and p.quantity else 0,
+                "profit_pct": round(((current_price / p.avg_price) - 1) * 100, 2)
+                if current_price and p.avg_price
+                else 0,
+            }
+        )
     csv_content = generate_portfolio_csv(positions)
     return PlainTextResponse(
         csv_content,
@@ -489,8 +496,8 @@ async def report_signals_csv(db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/reports/sectors")
 async def report_sectors_csv(db: AsyncSession = Depends(get_db)):
-    from src.reports import generate_sector_report_csv
     from src.analysis.sector import sector_analyzer
+    from src.reports import generate_sector_report_csv
 
     perf = await sector_analyzer.compute_sector_performance_async(db)
     vol = await sector_analyzer.compute_sector_volatility_async(db)
@@ -505,15 +512,18 @@ async def report_sectors_csv(db: AsyncSession = Depends(get_db)):
 @app.get("/api/alerts/price-targets")
 async def get_price_target_alerts():
     from src.notifications.service import notification_service
+
     alerts = []
     for a in notification_service.check_price_targets():
-        alerts.append({
-            "ticker": a.ticker,
-            "current_price": a.current_price,
-            "target_price": a.target_price,
-            "target_type": a.target_type,
-            "triggered_pct": a.triggered_pct,
-        })
+        alerts.append(
+            {
+                "ticker": a.ticker,
+                "current_price": a.current_price,
+                "target_price": a.target_price,
+                "target_type": a.target_type,
+                "triggered_pct": a.triggered_pct,
+            }
+        )
     return alerts
 
 
@@ -550,6 +560,7 @@ async def get_divergence_alerts(ticker: str, db: AsyncSession = Depends(get_db))
 @app.get("/api/alerts/rebalance")
 async def get_rebalance_alerts(db: AsyncSession = Depends(get_db)):
     from src.notifications.service import notification_service
+
     alerts = notification_service.check_rebalance_async(db)
     return [
         {

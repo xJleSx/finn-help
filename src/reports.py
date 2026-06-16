@@ -1,12 +1,6 @@
 import csv
 import logging
-from datetime import date, timedelta
-from io import BytesIO, StringIO
-from typing import Optional
-
-from sqlalchemy.orm import Session
-
-from src.db.models import Instrument, Price, Signal
+from io import StringIO
 
 logger = logging.getLogger(__name__)
 
@@ -16,16 +10,18 @@ def generate_portfolio_csv(positions: list[dict]) -> str:
     writer = csv.writer(output)
     writer.writerow(["Тикер", "Название", "Кол-во", "Средняя", "Цена", "Стоимость", "Доля", "Прибыль %"])
     for p in positions:
-        writer.writerow([
-            p.get("ticker", ""),
-            p.get("name", ""),
-            p.get("quantity", 0),
-            p.get("avg_price", 0),
-            p.get("current_price", 0),
-            p.get("value", 0),
-            f'{p.get("allocation_pct", 0):.1f}%' if "allocation_pct" in p else "",
-            f'{p.get("profit_pct", 0):.1f}%',
-        ])
+        writer.writerow(
+            [
+                p.get("ticker", ""),
+                p.get("name", ""),
+                p.get("quantity", 0),
+                p.get("avg_price", 0),
+                p.get("current_price", 0),
+                p.get("value", 0),
+                f"{p.get('allocation_pct', 0):.1f}%" if "allocation_pct" in p else "",
+                f"{p.get('profit_pct', 0):.1f}%",
+            ]
+        )
     return output.getvalue()
 
 
@@ -34,13 +30,15 @@ def generate_signals_csv(signals: list[dict]) -> str:
     writer = csv.writer(output)
     writer.writerow(["Тикер", "Действие", "Уверенность", "Score", "Причины"])
     for s in signals:
-        writer.writerow([
-            s.get("ticker", ""),
-            s.get("action", ""),
-            s.get("confidence", 0),
-            s.get("weighted_score", 0),
-            "; ".join(s.get("reasons", [])),
-        ])
+        writer.writerow(
+            [
+                s.get("ticker", ""),
+                s.get("action", ""),
+                s.get("confidence", 0),
+                s.get("weighted_score", 0),
+                "; ".join(s.get("reasons", [])),
+            ]
+        )
     return output.getvalue()
 
 
@@ -53,7 +51,7 @@ def generate_analysis_csv(ticker: str, signal: dict, prices: list[dict]) -> str:
     writer.writerow(["Действие", signal.get("action", "N/A")])
     writer.writerow(["Уверенность", signal.get("confidence", 0)])
     writer.writerow(["Score", signal.get("weighted_score", 0)])
-    writer.writerow(["Макс. доля", f'{signal.get("max_portfolio_pct", 0)}%'])
+    writer.writerow(["Макс. доля", f"{signal.get('max_portfolio_pct', 0)}%"])
     writer.writerow([])
     writer.writerow(["Причины"])
     for r in signal.get("reasons", []):
@@ -69,23 +67,23 @@ def generate_backtest_csv(result) -> str:
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow(["Параметр", "Значение"])
-    writer.writerow(["Доходность", f'{result.portfolio_return:.2%}'])
-    writer.writerow(["Benchmark", f'{result.benchmark_return:.2%}'])
-    writer.writerow(["Альфа", f'{result.alpha:.2%}'])
-    writer.writerow(["Sharpe", f'{result.portfolio_sharpe:.2f}'])
-    writer.writerow(["Sortino", f'{result.portfolio_sortino:.2f}'])
-    writer.writerow(["Max DD", f'{result.portfolio_max_dd:.2%}'])
-    writer.writerow(["Win Rate", f'{result.win_rate:.1%}'])
-    writer.writerow(["Прибыль фактор", f'{result.profit_factor:.2f}'])
+    writer.writerow(["Доходность", f"{result.portfolio_return:.2%}"])
+    writer.writerow(["Benchmark", f"{result.benchmark_return:.2%}"])
+    writer.writerow(["Альфа", f"{result.alpha:.2%}"])
+    writer.writerow(["Sharpe", f"{result.portfolio_sharpe:.2f}"])
+    writer.writerow(["Sortino", f"{result.portfolio_sortino:.2f}"])
+    writer.writerow(["Max DD", f"{result.portfolio_max_dd:.2%}"])
+    writer.writerow(["Win Rate", f"{result.win_rate:.1%}"])
+    writer.writerow(["Прибыль фактор", f"{result.profit_factor:.2f}"])
     writer.writerow(["Трейдов", result.trades])
-    writer.writerow(["Комиссии", f'{result.total_commission:.0f}'])
-    writer.writerow(["Проскальзывание", f'{result.total_slippage:.0f}'])
+    writer.writerow(["Комиссии", f"{result.total_commission:.0f}"])
+    writer.writerow(["Проскальзывание", f"{result.total_slippage:.0f}"])
     if result.monte_carlo:
         writer.writerow([])
-        writer.writerow(["Monte-Carlo", f'{result.monte_carlo.simulations} симуляций'])
-        writer.writerow(["Средняя", f'{result.monte_carlo.mean_return:.2%}'])
-        writer.writerow(["VaR 95%", f'{result.monte_carlo.var_95:.2%}'])
-        writer.writerow(["CVaR 95%", f'{result.monte_carlo.cvar_95:.2%}'])
+        writer.writerow(["Monte-Carlo", f"{result.monte_carlo.simulations} симуляций"])
+        writer.writerow(["Средняя", f"{result.monte_carlo.mean_return:.2%}"])
+        writer.writerow(["VaR 95%", f"{result.monte_carlo.var_95:.2%}"])
+        writer.writerow(["CVaR 95%", f"{result.monte_carlo.cvar_95:.2%}"])
     if result.regime:
         writer.writerow(["Режим", result.regime.regime])
     writer.writerow([])
@@ -93,7 +91,7 @@ def generate_backtest_csv(result) -> str:
     for i in range(len(result.dates)):
         pr = result.portfolio_returns[i] if i < len(result.portfolio_returns) else 0
         br = result.benchmark_returns[i] if i < len(result.benchmark_returns) else 0
-        writer.writerow([result.dates[i], f'{pr:.4f}', f'{br:.4f}'])
+        writer.writerow([result.dates[i], f"{pr:.4f}", f"{br:.4f}"])
     return output.getvalue()
 
 
@@ -105,9 +103,11 @@ def generate_sector_report_csv(sector_perf: dict, sector_vol: dict) -> str:
     for s in all_sectors:
         perf = sector_perf.get(s, "")
         vol = sector_vol.get(s, "")
-        writer.writerow([
-            s,
-            f"{perf:.1%}" if isinstance(perf, float) else perf,
-            f"{vol:.1%}" if isinstance(vol, float) else vol,
-        ])
+        writer.writerow(
+            [
+                s,
+                f"{perf:.1%}" if isinstance(perf, float) else perf,
+                f"{vol:.1%}" if isinstance(vol, float) else vol,
+            ]
+        )
     return output.getvalue()
