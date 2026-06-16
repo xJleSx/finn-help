@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
     tinkoff_token: str = ""
-    database_url: str = "sqlite:///data/finn.db"
+    database_url: str = "postgresql://finn:finn@localhost:5432/finn"
     telegram_bot_token: str = ""
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:3000"

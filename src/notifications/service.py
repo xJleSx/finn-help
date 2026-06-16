@@ -404,3 +404,6 @@ class NotificationService:
             if pct > max_pct * 1.3:
                 alerts.append(RebalanceAlert(ticker=inst.ticker, current_pct=round(pct, 1), target_pct=float(max_pct), deviation_pct=round(pct - max_pct, 1), reason=f"Позиция {pct:.1f}% превышает лимит {max_pct}%"))
         return alerts
+
+    def check_rebalance_async(self, db) -> list["RebalanceAlert"]:
+        return self.check_rebalance(db)

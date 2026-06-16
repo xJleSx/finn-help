@@ -220,7 +220,7 @@ async def _compute_geo_risk(db: Session, news_list: list[dict]):
 async def _generate_signals(db: Session, updated_ids: set[int] | None = None) -> list[dict]:
     from src.analysis.service import analysis_service
 
-    return analysis_service.analyze_all(db, updated_ids=updated_ids)
+    return analysis_service.analyze_all_sync(db, updated_ids=updated_ids)
 
 
 async def _collect_macro(db: Session):

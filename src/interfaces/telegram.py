@@ -1,10 +1,19 @@
 import asyncio
+import io
 import logging
 import re
+import time
 from typing import Optional
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from src.cli import run_analysis
 from src.config import settings
@@ -93,9 +102,67 @@ RUSSIAN_NAMES: dict[str, str] = {
 }
 
 subscribers: set[int] = set()
+analysis_cache: dict[str, tuple[float, dict, str]] = {}
+CACHE_TTL = 300
+
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    parts = data.split(":", 1)
+
+    if parts[0] == "analyze" and len(parts) > 1:
+        ticker = parts[1]
+        await query.message.reply_text(f"\U0001f50d Анализирую {ticker}...")
+        await _reply_with_analysis(query.message, ticker)
+
+    elif parts[0] == "add" and len(parts) > 1:
+        ticker = parts[1]
+        context.args = [ticker, "1"]
+        await add_position(update, context)
+
+    elif parts[0] == "history" and len(parts) > 1:
+        ticker = parts[1]
+        context.args = [ticker]
+        await history(update, context)
+
+    elif parts[0] == "backtest" and len(parts) > 1:
+        ticker = parts[1]
+        context.args = [ticker]
+        await backtest_single(update, context)
+
+    elif parts[0] == "action" and len(parts) > 1:
+        action = parts[1]
+        if action == "portfolio":
+            await portfolio(update, context)
+        elif action == "daily":
+            await daily(update, context)
+        elif action == "sectors":
+            await sectors(update, context)
+        elif action == "top":
+            await top(update, context)
+        elif action == "stress":
+            await stress(update, context)
+        elif action == "export":
+            await export_portfolio(update, context)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [
+            InlineKeyboardButton("\U0001f50d Анализ", callback_data="action:top"),
+            InlineKeyboardButton("🏭 Сектора", callback_data="action:sectors"),
+        ],
+        [
+            InlineKeyboardButton("\U0001f4ca Портфель", callback_data="action:portfolio"),
+            InlineKeyboardButton("\U0001f4dd Сводка", callback_data="action:daily"),
+        ],
+        [
+            InlineKeyboardButton("\U0001f9ea Стресс-тест", callback_data="action:stress"),
+            InlineKeyboardButton("\U0001f4e5 Экспорт CSV", callback_data="action:export"),
+        ],
+    ]
     await update.message.reply_text(
         "\U0001f916 FinAdvisor — финансовый ассистент\n\n"
         "Просто напишите вопрос про акцию:\n"
@@ -115,14 +182,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/unsubscribe — отписаться\n"
         "/daily — ежедневная сводка\n"
         "/stress — стресс-тест портфеля\n"
-        "/stress СУММА — стресс-тест на сумму\n"
         "/backtest — история стратегии\n"
-        "/backtest СУММА — бэктест на сумму\n"
         "/profile — риск-профиль (conservative/balanced/aggressive)\n"
         "/add SBER 10 — добавить в портфель\n"
         "/remove SBER — удалить из портфеля\n"
-        "/portfolio — мой портфель\n"
-        "/history SBER — история сигналов"
+        "/history SBER — история сигналов\n"
+        "/sectors — сектора рынка\n"
+        "/top — лучшие возможности\n"
+        "/export — CSV-отчёт портфеля\n\n"
+        "Используйте кнопки для быстрого доступа \u2935\ufe0f",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
@@ -343,7 +412,105 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
-async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def backtest_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args or []
+    ticker = args[0].upper() if args else None
+    if not ticker:
+        await update.message.reply_text("Укажите тикер: /backtest SBER")
+        return
+
+    from src.analysis.backtest import backtest_allocation
+
+    await update.message.reply_text(f"🕰 Бэктест для {ticker}...")
+    result = backtest_allocation(capital=100_000)
+    await update.message.reply_markdown(result.summary())
+
+
+async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from src.analysis.sector import sector_analyzer
+    from src.db.connection import get_session
+
+    await update.message.reply_text("🏭 Анализирую сектора...")
+    db = get_session()
+    try:
+        perf = sector_analyzer.compute_sector_performance(db)
+        vol = sector_analyzer.compute_sector_volatility(db)
+        corr = sector_analyzer.compute_sector_correlation(db)
+
+        lines = ["🏭 *Доходность секторов (30д):*\n"]
+        sorted_sectors = sorted(perf.items(), key=lambda x: x[1], reverse=True)
+        for sector, perf_val in sorted_sectors:
+            emoji = "\U0001f7e2" if perf_val > 0 else "\U0001f534"
+            v = vol.get(sector, "")
+            vol_str = f" (волат. {v:.0%})" if isinstance(v, float) else ""
+            lines.append(f"{emoji} {sector}: {perf_val:+.1%}{vol_str}")
+
+        await update.message.reply_markdown("\n".join(lines))
+    finally:
+        db.close()
+
+
+async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🏆 Ищу лучшие возможности...")
+    try:
+        from src.portfolio.allocator import allocator
+
+        picks = allocator.recommend(capital=100_000)
+        if not picks:
+            await update.message.reply_text("Нет данных. Запустите `finn update`.")
+            return
+
+        text = "🏆 *Топ-10 возможностей:*\n\n"
+        for i, p in enumerate(picks[:10], 1):
+            score = p.get("score", 0)
+            name = p.get("name") or p["ticker"]
+            text += f"{i}. *{p['ticker']}* — score {score:.2f}\n"
+            text += f"   {p['category']} | {name}\n"
+            reason = p.get("reason", "")
+            if reason:
+                text += f"   \u2192 {reason}\n"
+            text += "\n"
+
+        keyboard = [[InlineKeyboardButton("\U0001f4b0 Распределить 100 000 ₽", callback_data="action:portfolio")]]
+        await update.message.reply_markdown(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        await update.message.reply_text(f"\u274c Ошибка: {e}")
+
+
+async def export_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from src.db.models import Instrument, Portfolio, Price
+    from src.reports import generate_portfolio_csv
+
+    db = get_session()
+    try:
+        positions = db.query(Portfolio).all()
+        if not positions:
+            await update.message.reply_text("Портфель пуст. Добавьте позиции через /add SBER 10")
+            return
+
+        rows = []
+        for p in positions:
+            inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
+            price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
+            rows.append({
+                "ticker": inst.ticker if inst else "?",
+                "name": inst.full_name if inst else "",
+                "quantity": float(p.quantity),
+                "avg_price": float(p.avg_price) if p.avg_price else 0,
+                "current_price": float(price.close) if price and price.close else 0,
+                "value": float(price.close * p.quantity) if price and price.close and p.quantity else 0,
+                "allocation_pct": 0,
+                "profit_pct": round(((price.close / p.avg_price) - 1) * 100, 2) if price and price.close and p.avg_price else 0,
+            })
+
+        csv_content = generate_portfolio_csv(rows)
+        await update.message.reply_document(
+            document=io.BytesIO(csv_content.encode("utf-8-sig")),
+            filename="portfolio.csv",
+            caption="\U0001f4ca Отчёт по портфелю"
+        )
+    finally:
+        db.close()
     in_args = context.args or []
     if not in_args:
         await update.message.reply_text("Укажите тикер: /analyze SBER")
@@ -396,40 +563,59 @@ async def _handle_text(update: Update, text: str):
 
 
 async def _reply_with_analysis(update: Update, ticker: str):
-    await update.message.reply_text(f"\U0001f50d Анализирую {ticker}...")
-
-    try:
-        fused, advice = await run_analysis(ticker, with_llm=True)
-        if not fused:
-            await update.message.reply_text(f"\u274c {advice}")
+    now = time.time()
+    cached = analysis_cache.get(ticker)
+    if cached and (now - cached[0]) < CACHE_TTL:
+        fused, advice = cached[1], cached[2]
+        logger.info("Using cached analysis for %s", ticker)
+    else:
+        await update.message.reply_text(f"\U0001f50d Анализирую {ticker}...")
+        try:
+            fused, advice = await run_analysis(ticker, with_llm=True)
+            analysis_cache[ticker] = (now, fused, advice)
+        except Exception as e:
+            logger.exception("Analysis error for %s", ticker)
+            await update.message.reply_text(f"\u274c Ошибка анализа: {e}. Убедитесь, что запущен `finn update`.")
             return
 
-        action = fused["action"]
-        confidence = fused["confidence"]
-        emoji = ACTION_EMOJI.get(action, "\u26aa")
+    if not fused:
+        await update.message.reply_text(f"\u274c {advice}")
+        return
 
-        action_labels = {
-            "BUY": "рекомендуется к покупке",
-            "CAUTIOUS_BUY": "можно рассмотреть для покупки",
-            "HOLD": "рекомендуется держать",
-            "SELL": "рекомендуется продать",
-            "NEUTRAL": "нейтрально",
-        }
-        label = action_labels.get(action, action)
+    action = fused["action"]
+    confidence = fused["confidence"]
+    emoji = ACTION_EMOJI.get(action, "\u26aa")
 
-        text = f"{emoji} *{ticker}* — {label}\n"
-        text += f"Уверенность: {confidence:.0%}\n"
-        text += "\n" + _simplify_reasons(fused.get("reasons", []))
+    action_labels = {
+        "BUY": "рекомендуется к покупке",
+        "CAUTIOUS_BUY": "можно рассмотреть для покупки",
+        "HOLD": "рекомендуется держать",
+        "SELL": "рекомендуется продать",
+        "NEUTRAL": "нейтрально",
+    }
+    label = action_labels.get(action, action)
 
-        if advice:
-            text += f"\n\n{advice}"
-        text += f"\n\n\U0001f4a1 Рекомендуемая доля в портфеле: до {fused['max_portfolio_pct']}%"
+    text = f"{emoji} *{ticker}* — {label}\n"
+    text += f"Уверенность: {confidence:.0%}\n"
+    text += "\n" + _simplify_reasons(fused.get("reasons", []))
 
-        for chunk in _chunk_text(text, 4096):
-            await update.message.reply_markdown(chunk)
-    except Exception as e:
-        logger.warning("Analysis error", exc_info=True)
-        await update.message.reply_text(f"\u274c Ошибка: {e}\nУбедитесь, что запущен `finn update` и данные загружены.")
+    if advice:
+        text += f"\n\n{advice}"
+    text += f"\n\n\U0001f4a1 Рекомендуемая доля: до {fused['max_portfolio_pct']}%"
+
+    keyboard = [
+        [
+            InlineKeyboardButton("\u2795 Добавить 1 шт", callback_data=f"add:{ticker}"),
+            InlineKeyboardButton("\U0001f4ca История", callback_data=f"history:{ticker}"),
+        ],
+        [
+            InlineKeyboardButton("🏭 Сектора", callback_data="action:sectors"),
+            InlineKeyboardButton("🏆 Топ", callback_data="action:top"),
+        ],
+    ]
+
+    for chunk in _chunk_text(text, 4096):
+        await update.message.reply_markdown(chunk, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 def _find_excluded_tickers(text: str) -> set[str]:
@@ -1020,6 +1206,11 @@ async def run_bot():
     app.add_handler(CommandHandler("remove", remove_position))
     app.add_handler(CommandHandler("history", history))
     app.add_handler(CommandHandler("profile", profile))
+    app.add_handler(CommandHandler("sectors", sectors))
+    app.add_handler(CommandHandler("top", top))
+    app.add_handler(CommandHandler("export", export_portfolio))
+
+    app.add_handler(CallbackQueryHandler(button_callback))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 

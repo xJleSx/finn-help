@@ -14,7 +14,9 @@ from src.analysis.service import analysis_service
 from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.db.connection import get_session, init_db
-from src.db.models import Dividend, Instrument, Portfolio, Price
+from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Portfolio, Price
+from src.signal.engine import compute_risk_metrics
+from src.llm.router import llm
 
 if sys.stdout.encoding != "utf-8" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -166,8 +168,68 @@ async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True)
     try:
         inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
         if not inst:
-            return None, f"Инструмент {ticker} не найден"  # type: ignore[return-value]
-        return await analysis_service.analyze_with_advice(db, inst, ticker, with_ml=with_ml)
+            return None, f"Инструмент {ticker} не найден"
+        prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
+        if len(prices) < 50:
+            return None, f"Недостаточно данных для {ticker}"
+        ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
+        if len(ind_rows) < 2:
+            return None, f"Недостаточно индикаторов для {ticker}"
+
+        pdf = pd.DataFrame([{"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume} for p in prices])
+        idf = pd.DataFrame([{
+            "date": r.date, "rsi": r.rsi, "macd_line": r.macd_line, "macd_signal": r.macd_signal,
+            "macd_hist": r.macd_hist, "sma_20": r.sma_20, "sma_50": r.sma_50, "sma_200": r.sma_200,
+            "bb_upper": r.bb_upper, "bb_lower": r.bb_lower, "bb_mid": r.bb_mid, "volume_sma_20": r.volume_sma_20, "atr": r.atr,
+        } for r in ind_rows])
+        idf = idf.merge(pdf[["date", "close"]], on="date", how="left")
+
+        tech_signal = analysis_service.analyzer.generate_signal(idf)
+        divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
+        div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
+        fund = analysis_service.fundamental.analyze(pdf, div_df)
+        ml = analysis_service._compute_ml(pdf, idf) if with_ml else None
+        geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
+        geo = {"score": geo_row.score} if geo_row else {"score": 0.0}
+
+        from src.collectors.macro import MacroCollector
+        macro_context = MacroCollector.latest_values(db)
+
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+        news_recent = db.query(News).filter(News.created_at >= cutoff).all()
+        if news_recent:
+            scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in news_recent]
+            mean = sum(scores) / len(scores)
+            variance = sum((s - mean) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
+            sentiment = {"score": round(mean, 3), "divergence": round(min(variance * 2, 1.0), 3), "source": "rss", "count": len(scores)}
+        else:
+            sentiment = {"score": 0.0, "divergence": 0.0, "source": "none"}
+
+        volatility_regime = analysis_service.volatility.detect(pdf, idf)
+        risk_metrics = compute_risk_metrics(pdf["close"].tolist())
+        mtf_data = analysis_service.mtf.compute_all(pdf)
+        mtf_concordance = analysis_service.mtf.concordance(mtf_data) if mtf_data else None
+
+        fused = analysis_service.fusion.fuse(
+            ticker=ticker.upper(),
+            technical=tech_signal,
+            fundamental=fund,
+            geo=geo,
+            ml_prediction=ml,
+            volatility_regime=volatility_regime,
+            risk_metrics=risk_metrics,
+            macro_context=macro_context,
+            sentiment=sentiment,
+            mtf=mtf_concordance,
+        )
+
+        if with_llm:
+            advice = await llm.advise(fused)
+        else:
+            advice = ""
+
+        return fused, advice
     finally:
         db.close()
 

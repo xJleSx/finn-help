@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import Signal as SignalModel
 
@@ -353,7 +353,11 @@ class SignalFusionEngine:
             return obj.item()
         return obj
 
-    def save_signal(self, db: Session, instrument_id: int, fused: dict) -> SignalModel:
+    def save_signal_sync(self, db, instrument_id: int, fused: dict) -> SignalModel:
+        """Sync version for CLI / scheduler."""
+        from sqlalchemy.orm import Session
+        from src.db.models import Signal as SignalModel
+
         fused_clean = self._to_native(fused)
         signal = SignalModel(
             instrument_id=instrument_id,
@@ -364,4 +368,18 @@ class SignalFusionEngine:
         )
         db.add(signal)
         db.commit()
+        return signal
+
+    async def save_signal(self, db: AsyncSession, instrument_id: int, fused: dict) -> SignalModel:
+        fused_clean = self._to_native(fused)
+        signal = SignalModel(
+            instrument_id=instrument_id,
+            date=datetime.now(timezone.utc),
+            action=fused["action"],
+            confidence=fused_clean["confidence"],
+            fused_json=fused_clean,
+        )
+        db.add(signal)
+        await db.commit()
+        await db.refresh(signal)
         return signal

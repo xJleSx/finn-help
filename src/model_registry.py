@@ -1,0 +1,157 @@
+import hashlib
+import json
+import logging
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
+
+MODEL_DIR = Path(__file__).resolve().parents[2] / "data" / "models"
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+REGISTRY_FILE = MODEL_DIR / "registry.json"
+
+
+def _load_registry() -> dict:
+    if REGISTRY_FILE.exists():
+        try:
+            return json.loads(REGISTRY_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_registry(registry: dict):
+    REGISTRY_FILE.write_text(json.dumps(registry, indent=2, ensure_ascii=False))
+
+
+def save_model(model: Any, name: str, metrics: Optional[dict] = None, params: Optional[dict] = None) -> str:
+    import cloudpickle
+
+    version = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    model_path = MODEL_DIR / f"{name}__{version}.pkl"
+    meta = {
+        "name": name,
+        "version": version,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "metrics": metrics or {},
+        "params": params or {},
+        "path": str(model_path),
+    }
+
+    with open(model_path, "wb") as f:
+        cloudpickle.dump(model, f)
+
+    model_hash = hashlib.md5(model_path.read_bytes()).hexdigest()
+    meta["hash"] = model_hash
+
+    registry = _load_registry()
+    if name not in registry:
+        registry[name] = {"versions": [], "latest": None}
+    registry[name]["versions"].append(meta)
+    registry[name]["latest"] = version
+    _save_registry(registry)
+
+    logger.info("Model %s version %s saved (hash=%s)", name, version, model_hash[:8])
+    return version
+
+
+def load_model(name: str, version: Optional[str] = None) -> Any:
+    import cloudpickle
+
+    registry = _load_registry()
+    if name not in registry:
+        raise ValueError(f"Model '{name}' not found in registry")
+
+    versions = registry[name]["versions"]
+    if version is None:
+        version = registry[name]["latest"]
+
+    meta = next((v for v in versions if v["version"] == version), None)
+    if not meta:
+        raise ValueError(f"Version '{version}' not found for model '{name}'")
+
+    path = Path(meta["path"])
+    if not path.exists():
+        raise FileNotFoundError(f"Model file not found: {path}")
+
+    with open(path, "rb") as f:
+        model = cloudpickle.load(f)
+
+    logger.info("Model %s version %s loaded", name, version)
+    return model
+
+
+def list_models() -> list[dict]:
+    registry = _load_registry()
+    result = []
+    for name, data in registry.items():
+        latest = data["latest"]
+        meta = next((v for v in data["versions"] if v["version"] == latest), None)
+        result.append({
+            "name": name,
+            "latest_version": latest,
+            "versions_count": len(data["versions"]),
+            "created_at": meta["created_at"] if meta else None,
+            "metrics": meta["metrics"] if meta else {},
+        })
+    return result
+
+
+def get_model_metrics(name: str, version: Optional[str] = None) -> dict:
+    registry = _load_registry()
+    if name not in registry:
+        return {}
+    versions = registry[name]["versions"]
+    if version is None:
+        version = registry[name]["latest"]
+    meta = next((v for v in versions if v["version"] == version), None)
+    return meta["metrics"] if meta else {}
+
+
+def delete_model(name: str, version: Optional[str] = None):
+    registry = _load_registry()
+    if name not in registry:
+        return
+
+    if version is None:
+        for v in registry[name]["versions"]:
+            p = Path(v["path"])
+            if p.exists():
+                p.unlink()
+        del registry[name]
+    else:
+        versions = registry[name]["versions"]
+        meta = next((v for v in versions if v["version"] == version), None)
+        if meta:
+            p = Path(meta["path"])
+            if p.exists():
+                p.unlink()
+            registry[name]["versions"] = [v for v in versions if v["version"] != version]
+            if registry[name]["latest"] == version:
+                remaining = registry[name]["versions"]
+                registry[name]["latest"] = remaining[-1]["version"] if remaining else None
+            if not registry[name]["versions"]:
+                del registry[name]
+
+    _save_registry(registry)
+    logger.info("Model %s version %s deleted", name, version or "all")
+
+
+def cleanup_old_versions(name: str, keep: int = 3):
+    registry = _load_registry()
+    if name not in registry:
+        return
+    versions = sorted(registry[name]["versions"], key=lambda v: v["version"], reverse=True)
+    if len(versions) <= keep:
+        return
+    for v in versions[keep:]:
+        p = Path(v["path"])
+        if p.exists():
+            p.unlink()
+    registry[name]["versions"] = versions[:keep]
+    registry[name]["latest"] = versions[0]["version"]
+    _save_registry(registry)
+    logger.info("Cleaned up %s old versions of %s, keeping %s", len(versions) - keep, name, keep)

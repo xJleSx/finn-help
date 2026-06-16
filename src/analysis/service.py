@@ -1,9 +1,10 @@
 import logging
 from datetime import date
+from typing import Optional
 
 import pandas as pd
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.analysis.fundamental import FundamentalAnalyzer
 from src.analysis.multi_timeframe import MultiTimeframeAnalyzer
@@ -30,7 +31,6 @@ class AnalysisService:
     def prophet(self):
         if self._prophet is None:
             from src.analysis.ml.prophet_model import ProphetPredictor
-
             self._prophet = ProphetPredictor()
         return self._prophet
 
@@ -38,46 +38,26 @@ class AnalysisService:
     def ensemble(self):
         if self._ensemble is None:
             from src.analysis.ml.ensemble import EnsemblePredictor
-
             self._ensemble = EnsemblePredictor()
         return self._ensemble
 
     def _price_df(self, prices: list[Price]) -> pd.DataFrame:
-        return pd.DataFrame(
-            [
-                {
-                    "date": p.date,
-                    "open": p.open,
-                    "high": p.high,
-                    "low": p.low,
-                    "close": p.close,
-                    "volume": p.volume,
-                }
-                for p in prices
-            ]
-        )
+        return pd.DataFrame([
+            {"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume}
+            for p in prices
+        ])
 
     def _indicator_df(self, rows: list[Indicator]) -> pd.DataFrame:
-        return pd.DataFrame(
-            [
-                {
-                    "date": r.date,
-                    "rsi": r.rsi,
-                    "macd_line": r.macd_line,
-                    "macd_signal": r.macd_signal,
-                    "macd_hist": r.macd_hist,
-                    "sma_20": r.sma_20,
-                    "sma_50": r.sma_50,
-                    "sma_200": r.sma_200,
-                    "bb_upper": r.bb_upper,
-                    "bb_lower": r.bb_lower,
-                    "bb_mid": r.bb_mid,
-                    "volume_sma_20": r.volume_sma_20,
-                    "atr": r.atr,
-                }
-                for r in rows
-            ]
-        )
+        return pd.DataFrame([
+            {
+                "date": r.date, "rsi": r.rsi, "macd_line": r.macd_line,
+                "macd_signal": r.macd_signal, "macd_hist": r.macd_hist,
+                "sma_20": r.sma_20, "sma_50": r.sma_50, "sma_200": r.sma_200,
+                "bb_upper": r.bb_upper, "bb_lower": r.bb_lower, "bb_mid": r.bb_mid,
+                "volume_sma_20": r.volume_sma_20, "atr": r.atr,
+            }
+            for r in rows
+        ])
 
     def _dividend_df(self, divs: list[Dividend]) -> pd.DataFrame:
         return pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
@@ -101,22 +81,22 @@ class AnalysisService:
             logger.warning("ML prediction failed", exc_info=True)
             return None
 
-    def _load_geo(self, db: Session) -> dict:
-        geo = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
+    async def _load_geo(self, db: AsyncSession) -> dict:
+        result = await db.execute(select(GeoRiskScore).order_by(GeoRiskScore.date.desc()).limit(1))
+        geo = result.scalar_one_or_none()
         return {"score": geo.score} if geo else {"score": 0.0}
 
-    def _load_macro(self, db: Session) -> dict:
+    async def _load_macro(self, db: AsyncSession) -> dict:
         from src.collectors.macro import MacroCollector
+        return await MacroCollector.latest_values_async(db)
 
-        return MacroCollector.latest_values(db)
-
-    def _load_sentiment(self, db: Session) -> dict:
+    async def _load_sentiment(self, db: AsyncSession) -> dict:
         from datetime import datetime, timedelta, timezone
-
         from src.db.models import News
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=3)
-        recent = db.query(News).filter(News.created_at >= cutoff).all()
+        result = await db.execute(select(News).where(News.created_at >= cutoff))
+        recent = result.scalars().all()
         if not recent:
             return {"score": 0.0, "divergence": 0.0, "source": "none"}
         scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
@@ -129,14 +109,22 @@ class AnalysisService:
             "count": len(scores),
         }
 
-    def analyze_single(self, db: Session, inst: Instrument, ticker: str, with_ml: bool = True) -> dict:
-        prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
+    async def analyze_single(
+        self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True
+    ) -> dict:
+        price_result = await db.execute(
+            select(Price).where(Price.instrument_id == inst.id).order_by(Price.date)
+        )
+        prices = price_result.scalars().all()
         if len(prices) < 50:
             raise ValueError(f"Not enough price data for {ticker}")
 
         df = self._price_df(prices)
 
-        ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
+        ind_result = await db.execute(
+            select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date)
+        )
+        ind_rows = ind_result.scalars().all()
         if len(ind_rows) < 2:
             raise ValueError(f"Not enough indicator data for {ticker}")
         ind_df = self._indicator_df(ind_rows)
@@ -144,14 +132,17 @@ class AnalysisService:
 
         tech_signal = self.analyzer.generate_signal(ind_df)
 
-        divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
+        div_result = await db.execute(
+            select(Dividend).where(Dividend.instrument_id == inst.id)
+        )
+        divs = div_result.scalars().all()
         div_df = self._dividend_df(divs)
         fund = self.fundamental.analyze(df, div_df)
 
         ml = self._compute_ml(df, ind_df) if with_ml else None
-        geo = self._load_geo(db)
-        macro_context = self._load_macro(db)
-        sentiment = self._load_sentiment(db)
+        geo = await self._load_geo(db)
+        macro_context = await self._load_macro(db)
+        sentiment = await self._load_sentiment(db)
 
         volatility_regime = self.volatility.detect(df, ind_df)
 
@@ -174,11 +165,53 @@ class AnalysisService:
         )
         return fused
 
-    def analyze_all(self, db: Session, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict]:
-        q = db.query(Instrument)
+    async def analyze_all(
+        self, db: AsyncSession, updated_ids: set[int] | None = None, with_ml: bool = True
+    ) -> list[dict]:
+        q = select(Instrument)
         if updated_ids is not None:
-            q = q.filter(Instrument.id.in_(updated_ids))
-        instruments = q.all()
+            q = q.where(Instrument.id.in_(updated_ids))
+        result = await db.execute(q)
+        instruments = result.scalars().all()
+
+        signals: list[dict] = []
+        for inst in instruments:
+            cached_result = await db.execute(
+                select(Signal).where(
+                    Signal.instrument_id == inst.id,
+                    func.date(Signal.date) == date.today(),
+                )
+            )
+            cached = cached_result.scalar_one_or_none()
+            if cached and cached.fused_json:
+                fused_json = cached.fused_json
+                if isinstance(fused_json, dict):
+                    signals.append(fused_json)
+                continue
+
+            try:
+                fused = await self.analyze_single(db, inst, str(inst.ticker), with_ml=with_ml)
+                await self.fusion.save_signal(db, inst.id, fused)
+                signals.append(fused)
+            except ValueError:
+                continue
+        return signals
+
+    async def analyze_with_advice(
+        self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True
+    ) -> tuple[dict, str]:
+        fused = await self.analyze_single(db, inst, ticker, with_ml=with_ml)
+        advice = await llm.advise(fused)
+        return fused, advice
+
+
+    def analyze_all_sync(self, db, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict]:
+        """Sync version for CLI / scheduler use."""
+        from sqlalchemy.orm import Session
+        instruments = db.query(Instrument)
+        if updated_ids is not None:
+            instruments = instruments.filter(Instrument.id.in_(updated_ids))
+        instruments = instruments.all()
 
         signals: list[dict] = []
         for inst in instruments:
@@ -197,19 +230,64 @@ class AnalysisService:
                 continue
 
             try:
-                fused = self.analyze_single(db, inst, str(inst.ticker), with_ml=with_ml)
-                self.fusion.save_signal(db, inst.id, fused)
+                prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
+                if len(prices) < 50:
+                    continue
+                df = self._price_df(prices)
+
+                ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
+                if len(ind_rows) < 2:
+                    continue
+                ind_df = self._indicator_df(ind_rows)
+                ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
+
+                tech_signal = self.analyzer.generate_signal(ind_df)
+
+                divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
+                div_df = self._dividend_df(divs)
+                fund = self.fundamental.analyze(df, div_df)
+
+                ml = self._compute_ml(df, ind_df) if with_ml else None
+                geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
+                geo = {"score": geo_row.score} if geo_row else {"score": 0.0}
+
+                from src.collectors.macro import MacroCollector
+                macro_context = MacroCollector.latest_values(db)
+
+                from datetime import datetime, timedelta, timezone
+                cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+                recent = db.query(News).filter(News.created_at >= cutoff).all()
+                if recent:
+                    scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
+                    mean = sum(scores) / len(scores)
+                    variance = sum((s - mean) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
+                    sentiment = {"score": round(mean, 3), "divergence": round(min(variance * 2, 1.0), 3), "source": "rss", "count": len(scores)}
+                else:
+                    sentiment = {"score": 0.0, "divergence": 0.0, "source": "none"}
+
+                volatility_regime = self.volatility.detect(df, ind_df)
+                risk_metrics = compute_risk_metrics(df["close"].tolist())
+                mtf_data = self.mtf.compute_all(df)
+                mtf_concordance = self.mtf.concordance(mtf_data) if mtf_data else None
+
+                fused = self.fusion.fuse(
+                    ticker=str(inst.ticker).upper(),
+                    technical=tech_signal,
+                    fundamental=fund,
+                    geo=geo,
+                    ml_prediction=ml,
+                    volatility_regime=volatility_regime,
+                    risk_metrics=risk_metrics,
+                    macro_context=macro_context,
+                    sentiment=sentiment,
+                    mtf=mtf_concordance,
+                )
+                self.fusion.save_signal_sync(db, inst.id, fused)
                 signals.append(fused)
-            except ValueError:
+            except (ValueError, Exception) as e:
+                logger.warning("analyze_all_sync failed for %s: %s", inst.ticker, e)
                 continue
         return signals
-
-    async def analyze_with_advice(
-        self, db: Session, inst: Instrument, ticker: str, with_ml: bool = True
-    ) -> tuple[dict, str]:
-        fused = self.analyze_single(db, inst, ticker, with_ml=with_ml)
-        advice = await llm.advise(fused)
-        return fused, advice
 
 
 analysis_service = AnalysisService()

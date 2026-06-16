@@ -1,15 +1,16 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.db.connection import get_session, close_session
+from src.db.connection import get_async_session
 from src.db.models import User
 
 logger = logging.getLogger(__name__)
@@ -46,18 +47,14 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
-def get_db():
-    db = get_session()
-    try:
-        yield db
-    finally:
-        db.close()
-        close_session()
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with get_async_session() as session:
+        yield session
 
 
 async def get_current_user(
     token: Optional[str] = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
     if not token:
         return None
@@ -66,7 +63,10 @@ async def get_current_user(
         user_id = int(payload.get("sub", 0))
         if not user_id:
             return None
-        user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+        result = await db.execute(
+            select(User).where(User.id == user_id, User.is_active == True)
+        )
+        user = result.scalar_one_or_none()
         return user
     except Exception:
         return None

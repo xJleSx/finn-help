@@ -219,3 +219,26 @@ class MacroCollector:
             if row:
                 result[indicator_type] = row.value
         return result
+
+    @staticmethod
+    async def latest_values_async(db) -> dict:
+        from sqlalchemy import select
+        from src.db.models import MacroIndicator
+
+        today = date.today()
+        result = {}
+        for indicator_type in MACRO_TYPES:
+            stmt = (
+                select(MacroIndicator)
+                .where(
+                    MacroIndicator.indicator_type == indicator_type,
+                    MacroIndicator.date <= today,
+                )
+                .order_by(MacroIndicator.date.desc())
+                .limit(1)
+            )
+            row_result = await db.execute(stmt)
+            row = row_result.scalar_one_or_none()
+            if row:
+                result[indicator_type] = row.value
+        return result
