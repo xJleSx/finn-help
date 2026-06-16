@@ -11,7 +11,12 @@ services:
       - CORS_ORIGINS=http://localhost:3000
     volumes:
       - finn_data:/app/data
-    command: uvicorn src.interfaces.api.server:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   web:
     build:
@@ -21,8 +26,10 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NODE_ENV=production
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   finn_data:

@@ -12,3 +12,6 @@ node_modules
 data/
 *.db
 .DS_Store
+*.md
+tests/
+scripts/
