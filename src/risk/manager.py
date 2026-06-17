@@ -12,18 +12,6 @@ def historical_var(returns: np.ndarray, confidence: float = 0.95) -> float:
         return 0.0
     return float(abs(np.percentile(returns, (1 - confidence) * 100)))
 
-
-def parametric_var(returns: np.ndarray, confidence: float = 0.95) -> float:
-    if len(returns) < 10:
-        return 0.0
-    from scipy import stats
-
-    mu = np.mean(returns)
-    sigma = np.std(returns)
-    z = stats.norm.ppf(1 - confidence)
-    return float(abs(mu + z * sigma))
-
-
 def compute_var(price_series: list[float], confidence: float = 0.95) -> dict:
     arr = np.array(price_series, dtype=float)
     if len(arr) < 10:

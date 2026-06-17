@@ -33,25 +33,7 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_users_username'), 'users', ['username'], unique=True)
 
-    with op.batch_alter_table('portfolio') as batch_op:
-        batch_op.add_column(sa.Column('user_id', sa.Integer(), nullable=False, server_default='0'))
-        batch_op.create_unique_constraint('uq_user_portfolio', ['user_id', 'instrument_id'])
-        batch_op.create_foreign_key('fk_portfolio_user', 'users', ['user_id'], ['id'])
-
-    with op.batch_alter_table('transactions') as batch_op:
-        batch_op.add_column(sa.Column('user_id', sa.Integer(), nullable=False, server_default='0'))
-        batch_op.create_foreign_key('fk_transactions_user', 'users', ['user_id'], ['id'])
-
 
 def downgrade() -> None:
-    with op.batch_alter_table('transactions') as batch_op:
-        batch_op.drop_constraint('fk_transactions_user', type_='foreignkey')
-        batch_op.drop_column('user_id')
-
-    with op.batch_alter_table('portfolio') as batch_op:
-        batch_op.drop_constraint('fk_portfolio_user', type_='foreignkey')
-        batch_op.drop_constraint('uq_user_portfolio', type_='unique')
-        batch_op.drop_column('user_id')
-
     op.drop_index(op.f('ix_users_username'), table_name='users')
     op.drop_table('users')

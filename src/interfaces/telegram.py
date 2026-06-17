@@ -4,7 +4,7 @@ import logging
 import time
 from typing import Optional
 
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 
 from groq import AsyncGroq
 import httpx
@@ -61,6 +61,26 @@ COOLDOWN_SECONDS = 5
 TICKER, QUANTITY, PRICE = range(3)
 
 
+ALLOWED_IDS: set[int] = set()
+_raw = settings.telegram_allowed_ids
+if _raw:
+    for part in _raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            ALLOWED_IDS.add(int(part))
+
+
+async def _check_access(update: Update) -> bool:
+    if not ALLOWED_IDS:
+        return True
+    uid = update.effective_user.id if update.effective_user else 0
+    if uid in ALLOWED_IDS:
+        return True
+    if update.effective_message:
+        await update.effective_message.reply_text("⛔ Доступ запрещён. Ваш Telegram ID не в списке разрешённых.")
+    return False
+
+
 async def _check_cooldown(update: Update) -> bool:
     uid = update.effective_user.id if update.effective_user else 0
     now = time.time()
@@ -74,6 +94,8 @@ async def _check_cooldown(update: Update) -> bool:
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -118,6 +140,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     if not update.effective_message:
         return
     await update.effective_message.reply_text(
@@ -187,6 +211,8 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     if not update.effective_message:
         return
     ns = NotificationService()
@@ -196,6 +222,8 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -216,6 +244,8 @@ async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -293,47 +323,6 @@ async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_markdown(result.summary())
 
 
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
-
-    db = get_session()
-    try:
-        row = db.query(UserSetting).filter_by(key="risk_profile").first()
-        current = row.value if row else "balanced"
-
-        if context.args:
-            new_profile = context.args[0].lower()
-            if new_profile not in ("conservative", "balanced", "aggressive"):
-                await update.effective_message.reply_text("Доступные профили: conservative, balanced, aggressive")
-                return
-
-            allocator.set_profile(new_profile)
-            if row:
-                row.value = new_profile
-            else:
-                db.add(UserSetting(key="risk_profile", value=new_profile))
-            db.commit()
-            names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
-            await update.effective_message.reply_text(f"✅ Профиль изменён на *{names[new_profile]}*")
-        else:
-            names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
-            desc = {
-                "conservative": "50% ETF, 25% облигации, 20% дивидендные, 5% рост",
-                "balanced": "40% ETF, 30% дивидендные, 20% облигации, 10% рост",
-                "aggressive": "40% рост, 25% ETF, 25% дивидендные, 10% облигации",
-            }
-            text = f"📊 Текущий профиль: *{names.get(current, current)}*\n\n"
-            text += "*Возможные профили:*\n"
-            for k, name in names.items():
-                text += f"• `/profile {k}` — {name} ({desc[k]})\n"
-            await update.effective_message.reply_markdown(text)
-    finally:
-        db.close()
-
-
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message:
         return
@@ -369,6 +358,8 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -382,6 +373,8 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -406,6 +399,8 @@ async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -663,6 +658,8 @@ async def _ask_llm_general(update: Update, text: str):
 
 
 async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -726,6 +723,8 @@ async def _save_position(update: Update, ticker: str, qty: float, avg_price: flo
 
 
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return ConversationHandler.END
     if not update.effective_message:
         return ConversationHandler.END
     if not await _check_cooldown(update):
@@ -955,6 +954,8 @@ async def correlation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def whatif(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -991,6 +992,8 @@ async def whatif(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -1153,8 +1156,14 @@ async def run_bot():
     await app.start()
     await app.updater.start_polling()
 
-    while True:
-        await asyncio.sleep(60)
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        logger.info("Bot shutting down...")
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
 
 
 if __name__ == "__main__":

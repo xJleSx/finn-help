@@ -55,6 +55,21 @@ dev = [
     "pytest>=9.1.0",
     "pytest-asyncio>=1.4.0",
     "pytest-httpx>=0.36.2",
+    "pytest-cov>=6.0.0",
+    "pip-audit>=2.7.0",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["*/cli.py", "*/telegram.py", "*/telegram_helpers.py", "*/notifications/*", "*/reports.py", "*/user_profile.py", "*/model_registry.py"]
+
+[tool.coverage.report]
+fail_under = 40
+exclude_also = [
+    "def __repr__",
+    "def __str__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
 ]
 
 [tool.hatch.build.targets.wheel]

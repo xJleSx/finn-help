@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+
 from typing import Optional
 
 from src.config import settings
@@ -210,10 +210,3 @@ class TBankClient:
         nano = int(round((val - units) * 1e9))
         return Quotation(units=units, nano=nano)
 
-
-def get_sandbox_client() -> TBankClient:
-    return TBankClient(use_sandbox=True)
-
-
-def get_prod_client() -> TBankClient:
-    return TBankClient(use_sandbox=False)

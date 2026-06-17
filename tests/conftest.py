@@ -6,6 +6,8 @@ import os
 import tempfile
 from typing import AsyncGenerator
 
+os.environ.setdefault("JWT_SECRET", "test-secret-not-for-production")
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine

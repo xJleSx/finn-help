@@ -52,6 +52,7 @@ cd finn-help
 # Настроить окружение
 cp .env.example .env
 # Отредактировать .env — указать GROQ_API_KEY
+# ⚠️ .env содержит реальные токены. На production: icacls .env /inheritance:r /grant "%USERNAME%:F" (Windows) или chmod 600 .env (Linux/macOS)
 
 # Запустить через Docker
 docker compose up --build -d

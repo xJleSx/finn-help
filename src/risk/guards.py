@@ -120,7 +120,7 @@ def check_position_size(position_value: float, portfolio_value: float) -> tuple[
 
     if pct > limit:
         return False, f"Позиция {pct:.1%} > лимит {limit:.1%}"
-    if pct > limit * 0.8:
+    if pct >= limit * 0.8:
         return True, f"⚠️ Приближение к лимиту: {pct:.1%} / {limit:.1%}"
     return True, f"✅ {pct:.1%} / {limit:.1%}"
 
