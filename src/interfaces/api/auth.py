@@ -15,7 +15,7 @@ from src.db.models import User
 
 logger = logging.getLogger(__name__)
 
-SECRET_KEY = settings.groq_api_key or "dev-secret-change-in-production"
+SECRET_KEY = settings.jwt_secret or settings.groq_api_key or "dev-secret-change-in-production"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 

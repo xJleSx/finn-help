@@ -76,10 +76,18 @@ def load_model(name: str, version: Optional[str] = None) -> Any:
     if not path.exists():
         raise FileNotFoundError(f"Model file not found: {path}")
 
+    if "hash" in meta:
+        actual_hash = hashlib.md5(path.read_bytes()).hexdigest()
+        if actual_hash != meta["hash"]:
+            raise ValueError(
+                f"Model hash mismatch for '{name}' version {version}: "
+                f"expected {meta['hash']}, got {actual_hash}"
+            )
+
     with open(path, "rb") as f:
         model = cloudpickle.load(f)
 
-    logger.info("Model %s version %s loaded", name, version)
+    logger.info("Model %s version %s loaded (hash verified)", name, version)
     return model
 
 

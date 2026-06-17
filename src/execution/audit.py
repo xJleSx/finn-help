@@ -1,10 +1,37 @@
+import json
 import logging
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 from src.db.connection import get_session
 from src.db.models import Order as OrderModel, TradeLog
 
 logger = logging.getLogger(__name__)
+
+AUDIT_DIR = Path(__file__).resolve().parents[2] / "data" / "audit"
+
+
+def _ensure_audit_dir():
+    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _audit_log_file() -> Path:
+    _ensure_audit_dir()
+    return AUDIT_DIR / f"orders_{datetime.now(timezone.utc).strftime('%Y_%m')}.jsonl"
+
+
+def audit_log_order(entry: dict):
+    file_path = _audit_log_file()
+    entry["_timestamp"] = datetime.now(timezone.utc).isoformat()
+    entry["_id"] = f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}_{os.urandom(4).hex()}"
+    try:
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+            f.flush()
+        os.fsync(f.fileno())
+    except Exception as e:
+        logger.error("Failed to write audit log: %s", e)
 
 
 def save_order(order: "OrderRecord") -> int:
@@ -26,6 +53,19 @@ def save_order(order: "OrderRecord") -> int:
         db.add(o)
         db.commit()
         logger.info("Order saved to DB: %s %s %d @ %.2f", order.direction, order.ticker, order.quantity, order.price)
+
+        audit_log_order({
+            "event": "order_saved",
+            "id": o.id,
+            "ticker": order.ticker,
+            "direction": order.direction,
+            "quantity": order.quantity,
+            "price": order.price,
+            "status": order.status,
+            "mode": order.mode.value if hasattr(order.mode, "value") else str(order.mode),
+            "reason": order.reason,
+        })
+
         return o.id
     except Exception as e:
         db.rollback()
@@ -62,6 +102,20 @@ def log_trade(
         db.add(t)
         db.commit()
         logger.info("Trade logged: %s %d %s @ %.2f (P&L=%.2f)", direction, quantity, ticker, price, pnl)
+
+        audit_log_order({
+            "event": "trade_logged",
+            "id": t.id,
+            "order_id": order_id,
+            "ticker": ticker,
+            "direction": direction,
+            "quantity": quantity,
+            "price": price,
+            "commission": commission,
+            "slippage": slippage,
+            "pnl": pnl,
+            "reason": reason,
+        })
     except Exception as e:
         db.rollback()
         logger.error("Failed to log trade: %s", e)

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections import deque
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
@@ -40,8 +41,7 @@ class OrderRecord:
         self.db_id: int = 0
 
 
-_execution_log: list[OrderRecord] = []
-_mode: TradeMode = TradeMode.MANUAL
+_execution_log: "deque[OrderRecord]" = deque(maxlen=1000)
 _mode_lock = asyncio.Lock()
 
 
@@ -208,11 +208,9 @@ async def execute_order(
                     pass
                 finally:
                     _sl_db.close()
-                position_tracker.set_sl_tp(
-                    ticker,
-                    sl_pct=sl_pct,
-                    tp_pct=tp_pct,
-                )
+                rr_ratio = personal.get("rr_ratio", 2.0)
+                tp_pct = max(tp_pct, sl_pct * rr_ratio)
+                position_tracker.set_sl_tp(ticker, sl_pct=sl_pct, tp_pct=tp_pct)
 
             # log slippage
             if slippage > 0 and record.db_id:

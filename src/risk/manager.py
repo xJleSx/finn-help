@@ -75,16 +75,41 @@ def compute_risk_score(var_95: float, stop_loss_pct: float, atr_ratio: float | N
     return round(min(score / 7.0, 1.0), 3)
 
 
+def kelly_fraction(
+    win_rate: float,
+    avg_win_pct: float,
+    avg_loss_pct: float,
+    max_kelly: float = 0.25,
+) -> float:
+    if avg_loss_pct <= 0:
+        return 0.0
+    b = abs(avg_win_pct / avg_loss_pct)
+    p = win_rate
+    q = 1 - p
+    if b <= 0:
+        return 0.0
+    kelly = (b * p - q) / b
+    return max(0.0, min(kelly, max_kelly))
+
+
 def compute_position_size(
     capital: float,
     price: float,
     risk_per_trade_pct: float = 2.0,
     stop_loss_pct: float | None = None,
+    method: str = "fixed_fractional",
+    win_rate: float = 0.0,
+    avg_win_pct: float = 0.0,
+    avg_loss_pct: float = 0.0,
 ) -> dict:
     if price <= 0:
         return {"shares": 0, "amount": 0.0, "risk_amount": 0.0}
 
-    max_risk_amount = capital * risk_per_trade_pct / 100
+    if method == "kelly" and win_rate > 0 and avg_win_pct > 0 and avg_loss_pct > 0:
+        fraction = kelly_fraction(win_rate, avg_win_pct, avg_loss_pct)
+        max_risk_amount = capital * fraction
+    else:
+        max_risk_amount = capital * risk_per_trade_pct / 100
 
     if stop_loss_pct and stop_loss_pct < 0:
         risk_per_share = price * abs(stop_loss_pct) / 100
@@ -98,4 +123,5 @@ def compute_position_size(
         "amount": amount,
         "risk_amount": round(max_risk_amount, 2),
         "risk_pct": risk_per_trade_pct,
+        "method": method,
     }

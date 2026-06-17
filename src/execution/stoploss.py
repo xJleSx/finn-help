@@ -45,6 +45,7 @@ class PositionTracker:
             pos["shares"] = max(0, pos["shares"] - quantity)
             if pos["shares"] == 0:
                 pos["avg_price"] = 0.0
+                self._positions.pop(ticker, None)
 
     def set_sl_tp(self, ticker: str, sl_pct: Optional[float] = None, tp_pct: Optional[float] = None):
         if ticker in self._positions:

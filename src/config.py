@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
+    jwt_secret: str = ""
     tinkoff_token: str = ""
     tinkoff_sandbox: bool = True
     database_url: str = "postgresql://finn:finn@localhost:5432/finn"

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -7,6 +8,8 @@ import numpy as np
 from src.config import personal
 
 logger = logging.getLogger(__name__)
+
+_risk_lock = asyncio.Lock()
 
 # kill switch
 _kill_switch_active = False
@@ -19,6 +22,12 @@ _max_drawdown_pct: float = 0.20
 
 
 RISK_PROFILE_MAP = {
+    "ultra_conservative": {
+        "risk_per_trade": 0.005,
+        "max_position_pct": 0.05,
+        "max_drawdown_pct": 0.05,
+        "daily_loss_limit": 0.02,
+    },
     "conservative": {
         "risk_per_trade": 0.01,
         "max_position_pct": 0.15,
@@ -143,8 +152,11 @@ def compute_position_shares(
     stop_loss_pct: float = 0.05,
     current_price: float = 1.0,
     max_shares: int = 1000,
+    current_vol: float = 0.0,
+    target_vol: float = 0.25,
 ) -> int:
-    amount_at_risk = portfolio_value * risk_per_trade
+    vol_adj = compute_volatility_target(target_vol, current_vol, max_leverage=1.0)
+    amount_at_risk = portfolio_value * risk_per_trade * vol_adj
     risk_per_share = current_price * stop_loss_pct
     if risk_per_share <= 0:
         return min(max_shares, 1)
@@ -153,6 +165,18 @@ def compute_position_shares(
 
 
 VAR_LIMIT = 0.05
+_MAX_LEVERAGE = 1.0
+
+
+def set_max_leverage(n: float):
+    global _MAX_LEVERAGE
+    _MAX_LEVERAGE = n
+
+
+def check_leverage(current_leverage: float) -> tuple[bool, str]:
+    if current_leverage > _MAX_LEVERAGE:
+        return False, f"Плечо {current_leverage:.1f}x > лимит {_MAX_LEVERAGE:.1f}x"
+    return True, f"Плечо {current_leverage:.1f}x в пределах {_MAX_LEVERAGE:.1f}x"
 
 
 def set_var_limit(pct: float):
@@ -164,6 +188,41 @@ def check_var_limit(var_95: float) -> tuple[bool, str]:
     if var_95 > VAR_LIMIT:
         return False, f"VaR(95%) {var_95:.1%} > лимит {VAR_LIMIT:.1%}"
     return True, f"VaR(95%) {var_95:.1%} в пределах {VAR_LIMIT:.1%}"
+
+
+MIN_DAILY_VOLUME = 1_000_000
+MIN_LIQUIDITY_RATIO = 2
+
+
+def set_min_volume(vol: float):
+    global MIN_DAILY_VOLUME
+    MIN_DAILY_VOLUME = vol
+
+
+def check_liquidity(avg_volume: float, order_value: float) -> tuple[bool, str]:
+    if avg_volume <= 0:
+        return False, "Нет данных об объёмах"
+    if order_value > avg_volume:
+        return False, f"Сумма заявки {order_value:,.0f} ₽ превышает среднедневной объём {avg_volume:,.0f} ₽"
+    ratio = avg_volume / order_value if order_value > 0 else float("inf")
+    if ratio < MIN_LIQUIDITY_RATIO:
+        return True, f"⚠️ Низкая ликвидность: объём превышает заявку в {ratio:.0f}x"
+    return True, f"✅ Ликвидность: {ratio:.0f}x запас"
+
+
+NEGATIVE_SENTIMENT_THRESHOLD = -0.3
+
+
+def check_news_sentiment(news_scores: list[float]) -> tuple[bool, str]:
+    if not news_scores:
+        return True, "Нет новостей для проверки"
+    avg = sum(news_scores) / len(news_scores)
+    min_news = min(news_scores)
+    if avg < NEGATIVE_SENTIMENT_THRESHOLD or min_news < -0.5:
+        return False, f"Негативный новостной фон: средний сентимент {avg:.2f}, мин {min_news:.2f}"
+    if avg < -0.1:
+        return True, f"⚠️ Осторожно: сентимент {avg:.2f}"
+    return True, f"✅ Новостной фон: {avg:.2f}"
 
 
 def update_drawdown(current_value: float) -> float:
@@ -212,3 +271,38 @@ def get_day_pnl() -> tuple[float, float]:
     pnl = _current_day_value - _day_start_value
     pnl_pct = pnl / _day_start_value if _day_start_value else 0
     return pnl, pnl_pct
+
+
+async def async_check_daily_loss(day_return_pct: float) -> bool:
+    async with _risk_lock:
+        return check_daily_loss(day_return_pct)
+
+
+async def async_update_drawdown(current_value: float) -> float:
+    async with _risk_lock:
+        return update_drawdown(current_value)
+
+
+async def async_activate_kill_switch(reason: str = ""):
+    async with _risk_lock:
+        activate_kill_switch(reason)
+
+
+async def async_deactivate_kill_switch():
+    async with _risk_lock:
+        deactivate_kill_switch()
+
+
+async def async_is_kill_switch_active() -> bool:
+    async with _risk_lock:
+        return is_kill_switch_active()
+
+
+async def async_update_day_value(current_value: float):
+    async with _risk_lock:
+        update_day_value(current_value)
+
+
+async def async_start_day(value: float):
+    async with _risk_lock:
+        start_day(value)

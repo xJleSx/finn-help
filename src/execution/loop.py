@@ -13,15 +13,17 @@ from src.db.models import UserSetting
 from src.execution.engine import OrderRecord, execute_order, get_log, set_mode
 from src.execution.stoploss import position_tracker
 from src.risk.guards import (
-    activate_kill_switch,
-    check_daily_loss,
+    async_activate_kill_switch,
+    async_check_daily_loss,
+    async_deactivate_kill_switch,
+    async_is_kill_switch_active,
+    async_start_day,
+    async_update_day_value,
+    async_update_drawdown,
+    check_liquidity,
+    check_news_sentiment,
     check_var_limit,
-    deactivate_kill_switch,
     get_day_pnl,
-    is_kill_switch_active,
-    start_day,
-    update_day_value,
-    update_drawdown,
     _load_risk_params,
 )
 
@@ -84,8 +86,8 @@ def reset_daily_counters():
     logger.info("Daily trade counter reset")
 
 
-def can_trade() -> tuple[bool, str]:
-    if is_kill_switch_active():
+async def can_trade() -> tuple[bool, str]:
+    if await async_is_kill_switch_active():
         return False, "Kill switch active"
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -148,6 +150,55 @@ async def _check_var():
         db.close()
 
 
+async def _check_liquidity(ticker: str) -> tuple[bool, str]:
+    db = get_session()
+    try:
+        from src.db.models import Instrument, Price
+        inst = db.query(Instrument).filter_by(ticker=ticker).first()
+        if not inst:
+            return True, "ok"
+        prices = (
+            db.query(Price.close, Price.volume)
+            .filter_by(instrument_id=inst.id)
+            .order_by(Price.date.desc())
+            .limit(20)
+            .all()
+        )
+        volumes = [p.volume for p in prices if p.volume is not None and p.close is not None]
+        if len(volumes) < 5:
+            return True, "ok"
+        avg_vol = sum(volumes) / len(volumes)
+        last_price = prices[0].close if prices else 0
+        order_value = last_price * 10 if last_price else 0
+        return check_liquidity(avg_vol, order_value)
+    finally:
+        db.close()
+
+
+async def _check_news(ticker: str) -> tuple[bool, str]:
+    db = get_session()
+    try:
+        from src.db.models import Instrument, News, NewsInstrument
+        inst = db.query(Instrument).filter_by(ticker=ticker).first()
+        if not inst:
+            return True, "ok"
+        recent_news = (
+            db.query(News.sentiment_weighted, News.sentiment_score)
+            .join(NewsInstrument)
+            .filter(NewsInstrument.instrument_id == inst.id)
+            .order_by(News.published_at.desc())
+            .limit(10)
+            .all()
+        )
+        scores = [
+            n.sentiment_weighted or n.sentiment_score or 0
+            for n in recent_news
+        ]
+        return check_news_sentiment(scores)
+    finally:
+        db.close()
+
+
 async def _process_signals():
     from src.db.models import Signal as SignalModel
 
@@ -166,7 +217,7 @@ async def _process_signals():
                 logger.info("Market closed, skipping signal processing")
                 return
 
-            can, reason = can_trade()
+            can, reason = await can_trade()
             if not can:
                 logger.warning("Cannot trade: %s", reason)
                 return
@@ -175,6 +226,16 @@ async def _process_signals():
             if not var_ok:
                 logger.warning("VaR limit exceeded: %s", var_msg)
                 return
+
+            lq_ok, lq_msg = await _check_liquidity(s.ticker)
+            if not lq_ok:
+                logger.warning("Liquidity check failed for %s: %s", s.ticker, lq_msg)
+                continue
+
+            ns_ok, ns_msg = await _check_news(s.ticker)
+            if not ns_ok:
+                logger.warning("News sentiment check failed for %s: %s", s.ticker, ns_msg)
+                continue
 
             if s.action in ("BUY", "CAUTIOUS_BUY"):
                 result = await execute_order(
@@ -239,10 +300,33 @@ async def _check_daily_pnl():
             )
             price = latest_price[0] if latest_price else (p.avg_price or 0)
             current_value += (p.quantity or 0) * price
-        update_day_value(current_value)
-        update_drawdown(current_value)
+        await async_update_day_value(current_value)
+        await async_update_drawdown(current_value)
         pnl, pnl_pct = get_day_pnl()
-        check_daily_loss(pnl_pct)
+        await async_check_daily_loss(pnl_pct)
+    finally:
+        db.close()
+
+
+async def _rebalance_portfolio():
+    db = get_session()
+    try:
+        from src.notifications.service import NotificationService
+        ns = NotificationService()
+        alerts = ns.check_rebalance(db)
+        for alert in alerts:
+            if abs(alert.drift_pct) < 0.02:
+                continue
+            direction = "BUY" if alert.drift_pct < 0 else "SELL"
+            qty = max(1, int(abs(alert.drift_pct) * 100))
+            await execute_order(
+                ticker=alert.ticker,
+                direction=direction,
+                quantity=qty,
+                reason=f"rebalance: {alert.target_weight:.0%} target, drift {alert.drift_pct:+.1%}",
+            )
+    except Exception as e:
+        logger.warning("Rebalance error: %s", e)
     finally:
         db.close()
 
@@ -264,16 +348,24 @@ async def run_execution_loop(interval: int = 300):
 
     _load_daily_counters()
     _load_risk_params()
-    start_day(1_000_000)
+    await async_start_day(1_000_000)
+
+    rebalance_interval = 3600 * 6
+    last_rebalance = 0.0
 
     while _running:
         try:
             if await market_hours_check():
                 await _check_daily_pnl()
 
-                if not is_kill_switch_active():
+                if not await async_is_kill_switch_active():
                     await _process_signals()
                     await _check_stop_losses()
+
+                    elapsed = (datetime.now(timezone.utc).timestamp() - last_rebalance)
+                    if elapsed > rebalance_interval:
+                        await _rebalance_portfolio()
+                        last_rebalance = datetime.now(timezone.utc).timestamp()
         except Exception as e:
             logger.error("Execution loop error: %s", e, exc_info=True)
 
