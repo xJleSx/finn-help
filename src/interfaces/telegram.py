@@ -1,109 +1,76 @@
 import asyncio
 import io
 import logging
-import re
 import time
 from typing import Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from collections import OrderedDict, defaultdict
+
+from groq import AsyncGroq
+import httpx
+
+from telegram import Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    ConversationHandler,
     MessageHandler,
     filters,
 )
 
+from src.analysis.backtest import backtest_allocation
+from src.analysis.sector import sector_analyzer
+from src.analysis.correlation_analysis import correlation_table
+from src.analysis.personal_backtest import run_personal_backtest
+from src.analysis.stress import StressTester, format_portfolio_for_stress, format_sector_concentration, format_var_section
+from src.analysis.whatif import whatif_macro, whatif_scenario
 from src.cli import run_analysis
-from src.config import settings
+from src.collectors.cbr import CBRCollector
+from src.config import personal, settings
 from src.db.connection import get_session
-from src.db.models import Instrument
+from src.db.models import GeoRiskScore, Instrument, Price, Signal as SignalModel, UserSetting
+from src.db.models import Portfolio as PortModel
+from src.interfaces.telegram_helpers import (
+    ACTION_EMOJI,
+    _chunk_text,
+    _extract_allocation_amount,
+    _find_excluded_tickers,
+    _find_tickers,
+    _format_allocation_plan,
+    _simplify_reasons,
+    build_analyze_keyboard,
+    build_main_keyboard,
+    build_top_keyboard,
+    get_portfolio_positions,
+)
+from src.notifications.service import NotificationService, format_daily_summary_text, format_signal_text
+from src.portfolio.allocator import allocator
+from src.reports import generate_portfolio_csv
 
 logger = logging.getLogger(__name__)
 
-ACTION_EMOJI = {
-    "BUY": "\U0001f7e2",
-    "CAUTIOUS_BUY": "\U0001f7e1",
-    "HOLD": "\u26aa",
-    "SELL": "\U0001f534",
-    "NEUTRAL": "\u26aa",
-}
-
-RUSSIAN_NAMES: dict[str, str] = {
-    "сбер": "SBER",
-    "сбера": "SBER",
-    "сбербанк": "SBER",
-    "газпром": "GAZP",
-    "газпрома": "GAZP",
-    "лукойл": "LKOH",
-    "лукойла": "LKOH",
-    "втб": "VTBR",
-    "яндекс": "YNDX",
-    "yandex": "YNDX",
-    "нлмк": "NLMK",
-    "магнит": "MGNT",
-    "магнита": "MGNT",
-    "мтс": "MTSS",
-    "татнефть": "TATN",
-    "татнефти": "TATN",
-    "ростелеком": "RTKM",
-    "фосагро": "PHOR",
-    "афк система": "AFKS",
-    "система": "AFKS",
-    "аэрофлот": "AFLT",
-    "роснефть": "ROSN",
-    "роснефти": "ROSN",
-    "норникель": "GMKN",
-    "норильский никель": "GMKN",
-    "полюс": "PLZL",
-    "алроса": "ALRS",
-    "северсталь": "CHMF",
-    "магнитогорский": "MAGN",
-    "интер рао": "IRAO",
-    "ozon": "OZON",
-    "тинькофф": "TCSG",
-    "ткс": "TCSG",
-    "tcsg": "TCSG",
-    "озон": "OZON",
-    "московская биржа": "MOEX",
-    "биржа": "MOEX",
-    "moex": "MOEX",
-    "распадская": "RASP",
-    "транснефть": "TRNFP",
-    "преф сбер": "SBERP",
-    "преф татнефть": "TATNP",
-    "преф": "SNGSP",
-    "самараэнерго": "SMLT",
-    "юнипро": "UPRO",
-    "всм": "VSMO",
-    "всмпо": "VSMO",
-    "полиметалл": "POLY",
-    "русал": "RUAL",
-    "пик": "PIKK",
-    "пикк": "PIKK",
-    "лср": "LSRG",
-    "лсрг": "LSRG",
-    "мосэнерго": "MSNG",
-    "фск": "FEES",
-    "федеральная сетевая": "FEES",
-    "русгидро": "HYDR",
-    "гидро": "HYDR",
-    "башнефть": "BANE",
-    "преф башнефть": "BANEP",
-    "селенга": "SELG",
-    "трубная": "TRNR",
-    "five": "FIVE",
-    "пятерочка": "FIVE",
-    "x5": "FIVE",
-    "икс5": "FIVE",
-    "fix": "FIX",
-    "фикс": "FIX",
-}
-
-subscribers: set[int] = set()
-analysis_cache: dict[str, tuple[float, dict, str]] = {}
+analysis_cache: OrderedDict[str, tuple[float, dict, str]] = OrderedDict()
 CACHE_TTL = 300
+MAX_CACHE_SIZE = 100
+
+_user_cooldowns: dict[int, float] = {}
+COOLDOWN_SECONDS = 5
+
+TICKER, QUANTITY, PRICE = range(3)
+
+
+async def _check_cooldown(update: Update) -> bool:
+    uid = update.effective_user.id if update.effective_user else 0
+    now = time.time()
+    last = _user_cooldowns.get(uid, 0)
+    if now - last < COOLDOWN_SECONDS:
+        if update.effective_message:
+            await update.effective_message.reply_text("⏳ Подождите немного перед следующим запросом.")
+        return False
+    _user_cooldowns[uid] = now
+    return True
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -111,11 +78,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     parts = data.split(":", 1)
+    msg = query.message
 
     if parts[0] == "analyze" and len(parts) > 1:
         ticker = parts[1]
-        await query.message.reply_text(f"\U0001f50d Анализирую {ticker}...")
-        await _reply_with_analysis(query.message, ticker)
+        if msg:
+            await msg.reply_text(f"\U0001f50d Анализирую {ticker}...")
+        await _reply_with_analysis(update, ticker)
 
     elif parts[0] == "add" and len(parts) > 1:
         ticker = parts[1]
@@ -130,7 +99,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif parts[0] == "backtest" and len(parts) > 1:
         ticker = parts[1]
         context.args = [ticker]
-        await backtest_single(update, context)
+        await backtest(update, context)
 
     elif parts[0] == "action" and len(parts) > 1:
         action = parts[1]
@@ -149,21 +118,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [
-            InlineKeyboardButton("\U0001f50d Анализ", callback_data="action:top"),
-            InlineKeyboardButton("🏭 Сектора", callback_data="action:sectors"),
-        ],
-        [
-            InlineKeyboardButton("\U0001f4ca Портфель", callback_data="action:portfolio"),
-            InlineKeyboardButton("\U0001f4dd Сводка", callback_data="action:daily"),
-        ],
-        [
-            InlineKeyboardButton("\U0001f9ea Стресс-тест", callback_data="action:stress"),
-            InlineKeyboardButton("\U0001f4e5 Экспорт CSV", callback_data="action:export"),
-        ],
-    ]
-    await update.message.reply_text(
+    if not update.effective_message:
+        return
+    await update.effective_message.reply_text(
         "\U0001f916 FinAdvisor — финансовый ассистент\n\n"
         "Просто напишите вопрос про акцию:\n"
         "• «анализ сбер»\n"
@@ -191,12 +148,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/top — лучшие возможности\n"
         "/export — CSV-отчёт портфеля\n\n"
         "Используйте кнопки для быстрого доступа \u2935\ufe0f",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=build_main_keyboard(),
     )
 
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user is None or update.effective_chat is None:
+    if not update.effective_message or update.effective_user is None or update.effective_chat is None:
+        return
+    if not await _check_cooldown(update):
         return
     uid = update.effective_user.id
     cid = update.effective_chat.id
@@ -204,58 +163,63 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ntype = args[0] if args else "signal"
     if ntype not in ("signal", "daily", "geo", "dividend"):
         ntype = "signal"
-    from src.notifications.service import NotificationService
 
     ns = NotificationService()
     ns.subscribe(uid, cid, ntype)
     type_names = {"signal": "сигналы", "daily": "ежедневные сводки", "geo": "гео-риски", "dividend": "дивиденды"}
-    await update.message.reply_text(f"✅ Вы подписаны на {type_names.get(ntype, ntype)}")
+    await update.effective_message.reply_text(f"✅ Вы подписаны на {type_names.get(ntype, ntype)}")
 
 
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user is None:
+    if not update.effective_message or update.effective_user is None:
+        return
+    if not await _check_cooldown(update):
         return
     uid = update.effective_user.id
     args = context.args or []
     ntype = args[0] if args else None
-    from src.notifications.service import NotificationService
-
     ns = NotificationService()
     ns.unsubscribe(uid, ntype)
     if ntype:
-        await update.message.reply_text("❌ Подписка на этот тип уведомлений отменена")
+        await update.effective_message.reply_text("❌ Подписка на этот тип уведомлений отменена")
     else:
-        await update.message.reply_text("❌ Все подписки отменены")
+        await update.effective_message.reply_text("❌ Все подписки отменены")
 
 
 async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.notifications.service import NotificationService, format_daily_summary_text
-
+    if not update.effective_message:
+        return
     ns = NotificationService()
     summary = ns.get_daily_summary()
     text = format_daily_summary_text(summary)
-    await update.message.reply_markdown(text)
+    await update.effective_message.reply_markdown(text)
 
 
 async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
     if not context.args:
-        await update.message.reply_text("Укажите сумму: /allocate 100000")
+        await update.effective_message.reply_text("Укажите сумму: /allocate 100000")
         return
     try:
         full_text = " ".join(context.args)
         amount = float(context.args[0].replace(" ", "").replace(",", "."))
         if amount < 500:
-            await update.message.reply_text("Минимальная сумма — 500 ₽")
+            await update.effective_message.reply_text("Минимальная сумма — 500 ₽")
             return
         exclude = _find_excluded_tickers(full_text)
         await _reply_with_allocation(update, amount, exclude=exclude)
     except ValueError:
-        await update.message.reply_text("Укажите число: /allocate 100000")
+        await update.effective_message.reply_text("Укажите число: /allocate 100000")
 
 
 async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.analysis.stress import StressTester, format_portfolio_for_stress
-    from src.db.connection import get_session
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
 
     amount = None
     if context.args:
@@ -265,40 +229,31 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     if amount:
-        from src.portfolio.allocator import allocator
 
-        await update.message.reply_text(f"🔬 Рассчитываю сценарии для {amount:,.0f} ₽...")
+        await update.effective_message.reply_text(f"🔬 Рассчитываю сценарии для {amount:,.0f} ₽...")
         picks = allocator.recommend(capital=amount)
         plan = {"recommendation": {"items": picks}}
         positions = format_portfolio_for_stress(plan)
     else:
-        await update.message.reply_text("🔬 Анализирую текущий портфель...")
+        await update.effective_message.reply_text("🔬 Анализирую текущий портфель...")
         db = get_session()
         try:
-            from src.db.models import Instrument, Portfolio, Price
-
-            rows = db.query(Portfolio).all()
-            positions = []
-            for r in rows:
-                inst = db.query(Instrument).filter_by(id=r.instrument_id).first()
-                price = db.query(Price).filter_by(instrument_id=r.instrument_id).order_by(Price.date.desc()).first()
-                last_price = price.close if price else 0
-                val = last_price * r.quantity if last_price else 0
-                if val > 0:
-                    positions.append(
-                        {
-                            "ticker": inst.ticker if inst else "?",
-                            "amount": float(val),
-                            "last_price": float(last_price) if last_price else 0,
-                            "sector": inst.sector or "Прочее",
-                            "name": inst.full_name or inst.ticker,
-                        }
-                    )
+            rows = get_portfolio_positions(db)
+            positions = [
+                {
+                    "ticker": r["ticker"],
+                    "amount": r["value"],
+                    "last_price": r["current_price"],
+                    "sector": r["sector"],
+                    "name": r["name"] or r["ticker"],
+                }
+                for r in rows if r["value"] > 0
+            ]
         finally:
             db.close()
 
     if not positions:
-        await update.message.reply_text("Нет позиций для тестирования. Добавьте портфель или укажите сумму.")
+        await update.effective_message.reply_text("Нет позиций для тестирования. Добавьте портфель или укажите сумму.")
         return
 
     tester = StressTester(positions)
@@ -314,29 +269,35 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += tester.format_results(sector_results)
 
     for chunk in _chunk_text(text, 4096):
-        await update.message.reply_markdown(chunk)
+        await update.effective_message.reply_markdown(chunk)
 
 
 async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.analysis.backtest import backtest_allocation
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
 
     amount: float = 100_000
     if context.args:
         try:
             amount = float(context.args[0].replace(" ", "").replace(",", "."))
             if amount < 500:
-                await update.message.reply_text("Минимальная сумма — 500 ₽")
+                await update.effective_message.reply_text("Минимальная сумма — 500 ₽")
                 return
         except ValueError:
             pass
 
-    await update.message.reply_text(f"🕰 Прогоняю стратегию для {amount:,.0f} ₽ за последний год...")
+    await update.effective_message.reply_text(f"🕰 Прогоняю стратегию для {amount:,.0f} ₽ за последний год...")
     result = backtest_allocation(capital=amount)
-    await update.message.reply_markdown(result.summary())
+    await update.effective_message.reply_markdown(result.summary())
 
 
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.db.models import UserSetting
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
 
     db = get_session()
     try:
@@ -346,9 +307,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.args:
             new_profile = context.args[0].lower()
             if new_profile not in ("conservative", "balanced", "aggressive"):
-                await update.message.reply_text("Доступные профили: conservative, balanced, aggressive")
+                await update.effective_message.reply_text("Доступные профили: conservative, balanced, aggressive")
                 return
-            from src.portfolio.allocator import allocator
 
             allocator.set_profile(new_profile)
             if row:
@@ -357,7 +317,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db.add(UserSetting(key="risk_profile", value=new_profile))
             db.commit()
             names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
-            await update.message.reply_text(f"✅ Профиль изменён на *{names[new_profile]}*")
+            await update.effective_message.reply_text(f"✅ Профиль изменён на *{names[new_profile]}*")
         else:
             names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
             desc = {
@@ -369,31 +329,33 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += "*Возможные профили:*\n"
             for k, name in names.items():
                 text += f"• `/profile {k}` — {name} ({desc[k]})\n"
-            await update.message.reply_markdown(text)
+            await update.effective_message.reply_markdown(text)
     finally:
         db.close()
 
 
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
     args = context.args or []
     if not args:
-        await update.message.reply_text("Укажите тикер: /history SBER")
+        await update.effective_message.reply_text("Укажите тикер: /history SBER")
         return
     ticker = args[0].upper()
-
-    from src.db.models import Signal as SignalModel
 
     db = get_session()
     try:
         inst = db.query(Instrument).filter_by(ticker=ticker).first()
         if not inst:
-            await update.message.reply_text(f"{ticker} не найден")
+            await update.effective_message.reply_text(f"{ticker} не найден")
             return
         signals = (
             db.query(SignalModel).filter_by(instrument_id=inst.id).order_by(SignalModel.date.desc()).limit(60).all()
         )
         if not signals:
-            await update.message.reply_text(f"Нет истории сигналов для {ticker}")
+            await update.effective_message.reply_text(f"Нет истории сигналов для {ticker}")
             return
 
         lines = [f"📈 *История сигналов — {ticker}*\n"]
@@ -401,39 +363,31 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
             emoji = "🟢" if s.action in ("BUY", "CAUTIOUS_BUY") else "🔴" if s.action == "SELL" else "⚪"
             conf = s.confidence or 0
             lines.append(f"{emoji} {s.date}  **{s.action}** _{conf:.0%}_")
-        await update.message.reply_markdown("\n".join(lines))
+        await update.effective_message.reply_markdown("\n".join(lines))
     finally:
         db.close()
 
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
     args = context.args or []
     ticker = args[0].upper() if args else None
     if not ticker:
-        await update.message.reply_text("Укажите тикер: /analyze SBER")
+        await update.effective_message.reply_text("Укажите тикер: /analyze SBER")
         return
     await _reply_with_analysis(update, ticker)
 
 
-async def backtest_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args or []
-    ticker = args[0].upper() if args else None
-    if not ticker:
-        await update.message.reply_text("Укажите тикер: /backtest SBER")
+async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
         return
 
-    from src.analysis.backtest import backtest_allocation
-
-    await update.message.reply_text(f"🕰 Бэктест для {ticker}...")
-    result = backtest_allocation(capital=100_000)
-    await update.message.reply_markdown(result.summary())
-
-
-async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.analysis.sector import sector_analyzer
-    from src.db.connection import get_session
-
-    await update.message.reply_text("🏭 Анализирую сектора...")
+    await update.effective_message.reply_text("🏭 Анализирую сектора...")
     db = get_session()
     try:
         perf = sector_analyzer.compute_sector_performance(db)
@@ -446,19 +400,22 @@ async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE):
             vol_str = f" (волат. {v:.0%})" if isinstance(v, float) else ""
             lines.append(f"{emoji} {sector}: {perf_val:+.1%}{vol_str}")
 
-        await update.message.reply_markdown("\n".join(lines))
+        await update.effective_message.reply_markdown("\n".join(lines))
     finally:
         db.close()
 
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🏆 Ищу лучшие возможности...")
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
+    await update.effective_message.reply_text("🏆 Ищу лучшие возможности...")
     try:
-        from src.portfolio.allocator import allocator
 
         picks = allocator.recommend(capital=100_000)
         if not picks:
-            await update.message.reply_text("Нет данных. Запустите `finn update`.")
+            await update.effective_message.reply_text("Нет данных. Запустите `finn update`.")
             return
 
         text = "🏆 *Топ-10 возможностей:*\n\n"
@@ -472,81 +429,51 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text += f"   \u2192 {reason}\n"
             text += "\n"
 
-        keyboard = [[InlineKeyboardButton("\U0001f4b0 Распределить 100 000 ₽", callback_data="action:portfolio")]]
-        await update.message.reply_markdown(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    except Exception as e:
-        await update.message.reply_text(f"\u274c Ошибка: {e}")
+        await update.effective_message.reply_markdown(text, reply_markup=build_top_keyboard())
+    except Exception:
+        logger.warning("Top command error", exc_info=True)
+        await update.effective_message.reply_text("\u274c Не удалось загрузить топ. Убедитесь, что запущен `finn update`.")
 
 
 async def export_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.db.models import Instrument, Portfolio, Price
-    from src.reports import generate_portfolio_csv
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
 
     db = get_session()
     try:
-        positions = db.query(Portfolio).all()
-        if not positions:
-            await update.message.reply_text("Портфель пуст. Добавьте позиции через /add SBER 10")
+        rows = get_portfolio_positions(db)
+        if not rows:
+            await update.effective_message.reply_text("Портфель пуст. Добавьте позиции через /add SBER 10")
             return
 
-        rows = []
-        for p in positions:
-            inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
-            price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
-            rows.append(
-                {
-                    "ticker": inst.ticker if inst else "?",
-                    "name": inst.full_name if inst else "",
-                    "quantity": float(p.quantity),
-                    "avg_price": float(p.avg_price) if p.avg_price else 0,
-                    "current_price": float(price.close) if price and price.close else 0,
-                    "value": float(price.close * p.quantity) if price and price.close and p.quantity else 0,
-                    "allocation_pct": 0,
-                    "profit_pct": round(((price.close / p.avg_price) - 1) * 100, 2)
-                    if price and price.close and p.avg_price
-                    else 0,
-                }
-            )
-
         csv_content = generate_portfolio_csv(rows)
-        await update.message.reply_document(
+        await update.effective_message.reply_document(
             document=io.BytesIO(csv_content.encode("utf-8-sig")),
             filename="portfolio.csv",
             caption="\U0001f4ca Отчёт по портфелю",
         )
     finally:
         db.close()
-    in_args = context.args or []
-    if not in_args:
-        await update.message.reply_text("Укажите тикер: /analyze SBER")
-        return
-    ticker = in_args[0].upper()
-    await _reply_with_analysis(update, ticker)
 
 
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
     text = " ".join(context.args) if context.args else ""
     if not text:
-        await update.message.reply_text("Задайте вопрос, например: /ask Что думаешь про SBER?")
+        await update.effective_message.reply_text("Задайте вопрос, например: /ask Что думаешь про SBER?")
         return
     await _handle_text(update, text)
 
 
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    amount = _extract_allocation_amount(text)
-    if amount is not None:
-        exclude = _find_excluded_tickers(text)
-        await _reply_with_allocation(update, amount, exclude=exclude)
+    if not update.effective_message:
         return
-    tickers = _find_tickers(text)
-    if tickers:
-        ticker = tickers[0]
-        if len(tickers) > 1:
-            await update.message.reply_text(f"Нашёл несколько, анализирую {ticker}")
-        await _reply_with_analysis(update, ticker)
-        return
-    await _ask_llm_general(update, text)
+    await _handle_text(update, update.effective_message.text)
 
 
 async def _handle_text(update: Update, text: str):
@@ -555,15 +482,13 @@ async def _handle_text(update: Update, text: str):
         exclude = _find_excluded_tickers(text)
         await _reply_with_allocation(update, amount, exclude=exclude)
         return
-
     tickers = _find_tickers(text)
     if tickers:
         ticker = tickers[0]
         if len(tickers) > 1:
-            await update.message.reply_text(f"Нашёл несколько, анализирую {ticker}")
+            await update.effective_message.reply_text(f"Нашёл несколько, анализирую {ticker}")
         await _reply_with_analysis(update, ticker)
         return
-
     await _ask_llm_general(update, text)
 
 
@@ -573,18 +498,23 @@ async def _reply_with_analysis(update: Update, ticker: str):
     if cached and (now - cached[0]) < CACHE_TTL:
         fused, advice = cached[1], cached[2]
         logger.info("Using cached analysis for %s", ticker)
+        msg = None
     else:
-        await update.message.reply_text(f"\U0001f50d Анализирую {ticker}...")
+        msg = await update.effective_message.reply_text(f"\U0001f50d Анализирую {ticker}...")
         try:
             fused, advice = await run_analysis(ticker, with_llm=True)
             analysis_cache[ticker] = (now, fused, advice)
-        except Exception as e:
+            if len(analysis_cache) > MAX_CACHE_SIZE:
+                analysis_cache.popitem(last=False)
+        except Exception:
             logger.exception("Analysis error for %s", ticker)
-            await update.message.reply_text(f"\u274c Ошибка анализа: {e}. Убедитесь, что запущен `finn update`.")
+            await msg.edit_text(
+                "\u274c Не удалось проанализировать. Убедитесь, что запущен `finn update`."
+            )
             return
 
     if not fused:
-        await update.message.reply_text(f"\u274c {advice}")
+        await update.effective_message.reply_text(f"\u274c {advice}")
         return
 
     action = fused["action"]
@@ -608,117 +538,23 @@ async def _reply_with_analysis(update: Update, ticker: str):
         text += f"\n\n{advice}"
     text += f"\n\n\U0001f4a1 Рекомендуемая доля: до {fused['max_portfolio_pct']}%"
 
-    keyboard = [
-        [
-            InlineKeyboardButton("\u2795 Добавить 1 шт", callback_data=f"add:{ticker}"),
-            InlineKeyboardButton("\U0001f4ca История", callback_data=f"history:{ticker}"),
-        ],
-        [
-            InlineKeyboardButton("🏭 Сектора", callback_data="action:sectors"),
-            InlineKeyboardButton("🏆 Топ", callback_data="action:top"),
-        ],
-    ]
-
-    for chunk in _chunk_text(text, 4096):
-        await update.message.reply_markdown(chunk, reply_markup=InlineKeyboardMarkup(keyboard))
-
-
-def _find_excluded_tickers(text: str) -> set[str]:
-    text_lower = text.lower()
-    exclude: set[str] = set()
-
-    exclude_keywords = [
-        "без ",
-        "кроме ",
-        "недоступ",
-        "не учитывай",
-        "исключ",
-        "убери ",
-        "не рассматривай",
-        "без учета",
-        "без участия",
-        "нет ",
-        "нету ",
-        "отсутств",
-        "не им",
-        "пока нет",
-        "ещё нет",
-        "нет в наличии",
-        "не интересу",
-        "не нужно",
-        "не хочу",
-        "не рассматрива",
-    ]
-
-    has_exclusion = any(k in text_lower for k in exclude_keywords)
-    if not has_exclusion:
-        return exclude
-
-    all_tickers = _find_tickers(text)
-
-    for ticker in all_tickers:
-        t_lower = ticker.lower()
-        if any(
-            re.search(rf"\b{kw}\s*{re.escape(t_lower)}\b", text_lower)
-            for kw in [
-                "без",
-                "кроме",
-                "нет",
-                "нету",
-                "недоступ",
-                "исключ",
-                "убери",
-                "отсутств",
-                "не интересу",
-                "не нужно",
-            ]
-        ):
-            exclude.add(ticker)
-        elif any(
-            re.search(rf"\b{re.escape(t_lower)}\s*{kw}\b", text_lower)
-            for kw in ["нет", "нету", "отсутств", "недоступ", "исключ"]
-        ):
-            exclude.add(ticker)
-
-    rev_map = {v.lower(): v for v in RUSSIAN_NAMES.values()}
-    for t_lower, ticker in rev_map.items():
-        if any(kw + t_lower in text_lower for kw in ["без ", "кроме ", "нет "]):
-            exclude.add(ticker)
-        if any(t_lower + " " + kw in text_lower for kw in ["нет", "отсутств", "недоступ", "исключ"]):
-            exclude.add(ticker)
-        if t_lower in text_lower and any(kw in text_lower for kw in ["недоступ", "исключ", "не учитывай", "убери"]):
-            exclude.add(ticker)
-
-    for phrase, ticker in RUSSIAN_NAMES.items():
-        if any(kw + phrase in text_lower for kw in ["без ", "кроме ", "нет ", "недоступ", "исключ", "убери "]):
-            exclude.add(ticker)
-        if any(phrase + " " + kw in text_lower for kw in ["нет", "нету", "отсутств", "недоступ", "исключ", "убери"]):
-            exclude.add(ticker)
-
-    return exclude
-
-
-def _extract_allocation_amount(text: str) -> float | None:
-    text_lower = text.lower().strip()
-    alloc_keywords = ["вложить", "инвестировать", "распредели", "распределение", "allocate", "разложить", "разместить"]
-    if not any(k in text_lower for k in alloc_keywords):
-        return None
-    numbers = re.findall(r"(\d[\d\s]*\d|\d)", text_lower.replace(",", ".").replace(" ", ""))
-    if numbers:
-        return float(numbers[-1])
-    return None
+    chunks = _chunk_text(text, 4096)
+    if msg:
+        await msg.edit_text(chunks[0], parse_mode="Markdown", reply_markup=build_analyze_keyboard(ticker))
+    else:
+        await update.effective_message.reply_markdown(chunks[0], reply_markup=build_analyze_keyboard(ticker))
+    for chunk in chunks[1:]:
+        await update.effective_message.reply_markdown(chunk, reply_markup=build_analyze_keyboard(ticker))
 
 
 async def _reply_with_allocation(update: Update, capital: float, exclude: set[str] | None = None):
-    await update.message.reply_text(f"\U0001f50d Анализирую рынок для {capital:,.0f} ₽...")
+    msg = await update.effective_message.reply_text(f"\U0001f50d Анализирую рынок для {capital:,.0f} ₽...")
 
     try:
-        from src.portfolio.allocator import allocator
 
         picks = allocator.recommend(capital=capital, exclude=exclude)
         if not picks:
-            msg = "Не удалось подобрать варианты. Запустите `finn update` для загрузки данных."
-            await update.message.reply_text(msg)
+            await msg.edit_text("Не удалось подобрать варианты. Запустите `finn update` для загрузки данных.")
             return
 
         text = f"\U0001f4b0 *Рекомендации для {capital:,.0f} ₽*"
@@ -748,96 +584,28 @@ async def _reply_with_allocation(update: Update, capital: float, exclude: set[st
                     text += f"   {' • '.join(parts)}\n"
             text += "\n"
 
-        for chunk in _chunk_text(text, 4096):
-            await update.message.reply_markdown(chunk)
-
+        chunks = _chunk_text(text, 4096)
         allocation_text = _format_allocation_plan(picks, capital)
-        for chunk in _chunk_text(allocation_text, 4096):
-            await update.message.reply_markdown(chunk)
-    except Exception as e:
+        alloc_chunks = _chunk_text(allocation_text, 4096) if allocation_text else []
+
+        await msg.edit_text(chunks[0], parse_mode="Markdown")
+        for chunk in chunks[1:]:
+            await update.effective_message.reply_markdown(chunk)
+        for chunk in alloc_chunks:
+            await update.effective_message.reply_markdown(chunk)
+    except Exception:
         logger.warning("Recommendation error", exc_info=True)
-        await update.message.reply_text(f"\u274c Ошибка: {e}. Убедитесь, что запущен `finn update`.")
-
-
-def _format_allocation_plan(picks: list[dict], capital: float) -> str:
-    candidates = []
-    for p in picks:
-        score = p.get("score", 0)
-        price = p.get("last_price")
-        if score > 0 and price and price > 0:
-            candidates.append(p)
-    if not candidates:
-        return ""
-
-    total_score = sum(c["score"] for c in candidates)
-    if total_score <= 0:
-        return ""
-
-    max_positions = 7
-    if capital < 1000:
-        max_positions = 2
-    elif capital < 5000:
-        max_positions = 4
-
-    used: list[dict] = []
-    for p in candidates:
-        if len(used) >= max_positions:
-            break
-        share = p["score"] / total_score
-        amt = capital * share
-        price = p["last_price"]
-        if amt < price:
-            continue
-        shares = int(amt / price)
-        if shares < 1:
-            continue
-        used.append({**p, "amount": amt, "shares": shares, "pct": amt / capital})
-        total_score -= p["score"]
-
-    if not used:
-        return ""
-
-    allocated = sum(u["amount"] for u in used)
-    leftover = capital - allocated
-    if leftover > 0:
-        weights = [u["amount"] for u in used]
-        total_w = sum(weights) or 1
-        for i, u in enumerate(used):
-            extra = leftover * weights[i] / total_w
-            extra_shares = int(extra / (u["last_price"] or 1))
-            if extra_shares > 0:
-                u["shares"] += extra_shares
-                u["amount"] = u["shares"] * (u["last_price"] or 1)
-            u["pct"] = u["amount"] / capital
-
-    text = "📊 *Как бы я распределил эти деньги:*\n\n"
-    allocated = 0.0
-    for item in used:
-        allocated += item["amount"]
-        text += f"• *{item['ticker']}* ({item.get('name', '')}): {item['amount']:,.0f} ₽ ({item['pct'] * 100:.0f}%)"
-        if item["shares"] > 0:
-            text += f" → {item['shares']} шт. по {item['last_price']:.0f} ₽"
-        risk = item.get("risk", {})
-        if risk:
-            sl = risk.get("stop_loss")
-            sl_pct = risk.get("stop_loss_pct")
-            var = risk.get("var_95")
-            if sl and sl_pct:
-                text += f"\n   ⛔️ Продавать при падении ниже {sl:.0f} ₽ (–{abs(sl_pct):.1f}%)"
-            if var:
-                text += f"\n   ⚠️ Риск дневного падения: до {var:.1f}%"
-        text += "\n"
-
-    leftover = round(capital - allocated, 2)
-    text += f"\n💰 *Итого:* {allocated:,.0f} из {capital:,.0f} ₽"
-    if leftover > 0:
-        text += f"\n💤 *Остаток:* {leftover:,.0f} ₽"
-    return text
+        await msg.edit_text("\u274c Не удалось рассчитать рекомендации. Убедитесь, что запущен `finn update`.")
 
 
 async def _ask_llm_general(update: Update, text: str):
-    await update.message.reply_text("🤔 Думаю...")
+    msg = await update.effective_message.reply_text("🤔 Думаю...")
     try:
+        system_content = personal.get("llm_system_prompt") or (
+            "Ты — финансовый ассистент. "
+            "Отвечай кратко, по делу, на русском. Называй конкретные тикеры и цены. "
+            "Всегда добавляй предупреждение о рисках."
+        )
         prompt = (
             f"Пользователь задал вопрос: {text}\n\n"
             "Ответь коротко и полезно — что купить, зачем, какие риски. "
@@ -848,17 +616,11 @@ async def _ask_llm_general(update: Update, text: str):
             "Не давай инвестиционных рекомендаций без оговорки о рисках."
         )
         messages = [
-            {
-                "role": "system",
-                "content": "Ты — финансовый ассистент. "
-                "Отвечай кратко, по делу, на русском. Называй конкретные тикеры и цены. "
-                "Всегда добавляй предупреждение о рисках.",
-            },
+            {"role": "system", "content": system_content},
             {"role": "user", "content": prompt},
         ]
 
         if settings.groq_api_key:
-            from groq import AsyncGroq
 
             client = AsyncGroq(api_key=settings.groq_api_key)
             response = await client.chat.completions.create(
@@ -869,7 +631,6 @@ async def _ask_llm_general(update: Update, text: str):
             )
             answer = response.choices[0].message.content
         else:
-            import httpx
 
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
@@ -888,171 +649,60 @@ async def _ask_llm_general(update: Update, text: str):
         if not answer:
             answer = "Не могу сформулировать ответ. Попробуйте уточнить вопрос или указать тикер через /analyze"
 
-        for chunk in _chunk_text(answer, 4096):
-            await update.message.reply_markdown(chunk)
+        chunks = _chunk_text(answer, 4096)
+        await msg.edit_text(chunks[0], parse_mode="Markdown")
+        for chunk in chunks[1:]:
+            await update.effective_message.reply_markdown(chunk)
     except Exception:
         logger.warning("LLM error", exc_info=True)
-        await update.message.reply_text(
+        await msg.edit_text(
             "Не смог ответить на вопрос. Попробуйте:\n"
             "• /analyze SBER — анализ конкретной акции\n"
             "• /allocate 50000 — куда вложить деньги"
         )
 
 
-def _simplify_reasons(reasons: list[str]) -> str:
-    if not reasons:
-        return ""
-
-    simple = []
-    for r in reasons:
-        r_lower = r.lower()
-
-        if "RSI" in r:
-            if "перепроданность" in r_lower:
-                simple.append("📉 Акция недооценена — потенциальный разворот вверх")
-            elif "перекупленность" in r_lower:
-                simple.append("📈 Акция переоценена — возможна коррекция")
-            else:
-                simple.append("📊 Нейтральный баланс спроса и предложения")
-        elif "macd" in r_lower:
-            if "положитель" in r_lower:
-                simple.append("🟢 Краткосрочный тренд восходящий")
-            elif "отрицатель" in r_lower:
-                simple.append("🔴 Краткосрочный тренд нисходящий")
-        elif "цена ниже" in r_lower:
-            simple.append("📉 Цена ниже средних значений — потенциальная зона для покупки")
-        elif "цена выше" in r_lower:
-            simple.append("📈 Цена выше средних значений — позитивный сигнал")
-        elif "bollinger" in r_lower:
-            if "отскок" in r_lower:
-                simple.append("🎯 Цена у нижней границы — возможен отскок вверх")
-            elif "коррекция" in r_lower:
-                simple.append("⚠️ Цена у верхней границы — возможна коррекция вниз")
-        elif "волатильность" in r_lower:
-            if "high" in r_lower:
-                simple.append("🌊 Высокая волатильность — повышенный риск")
-            elif "low" in r_lower:
-                simple.append("🌊 Низкая волатильность — рынок спокоен")
-            else:
-                simple.append("🌊 Нормальная волатильность")
-        elif "risk:" in r_lower or "sharpe" in r_lower:
-            continue
-        elif "ml-прогноз" in r_lower or "ml" in r_lower:
-            if "+" in r:
-                simple.append("🤖 Прогноз модели: умеренный рост")
-            elif "-" in r:
-                simple.append("🤖 Прогноз модели: возможное снижение")
-            else:
-                simple.append("🤖 Прогноз модели: без изменений")
-        elif "аномалии" in r_lower:
-            simple.append("⚠️ Обнаружены аномалии в фундаментальных показателях")
-        elif "геополитический" in r_lower:
-            simple.append("🌍 Повышенные геополитические риски")
-        elif "news" in r_lower or "новости" in r_lower:
-            if "позитив" in r_lower or ">" in r:
-                simple.append("📰 Новости положительные")
-            elif "негатив" in r_lower:
-                simple.append("📰 Новости негативные")
-        elif "макро:" in r_lower or "brent" in r_lower or "ключевая" in r_lower:
-            simple.append("🏛️ Макроэкономическая ситуация учитывается")
-
-    if not simple:
-        simple.append("↔️ Нейтральный сигнал")
-
-    return "\n".join("• " + s for s in simple[:4])
-
-
-def _find_tickers(text: str) -> list[str]:
-    text_lower = text.lower().strip()
-
-    matched = re.findall(r"([а-яёa-z]+)", text_lower)
-    for word in matched:
-        if word in RUSSIAN_NAMES:
-            return [RUSSIAN_NAMES[word]]
-
-    for phrase, ticker in RUSSIAN_NAMES.items():
-        if phrase in text_lower:
-            return [ticker]
-
-    try:
-        db = get_session()
-        try:
-            instruments = db.query(Instrument.ticker).all()
-            db_tickers = {r[0] for r in instruments}
-        finally:
-            db.close()
-    except Exception:
-        db_tickers = set()
-
-    words = re.findall(r"[A-Za-z0-9]{2,}", text.upper())
-    found = [w for w in words if w in db_tickers or w in RUSSIAN_NAMES.values()]
-    if found:
-        return found
-
-    return []
-
-
-def _chunk_text(text: str, max_len: int) -> list[str]:
-    if len(text) <= max_len:
-        return [text]
-    return [text[i : i + max_len] for i in range(0, len(text), max_len)]
-
-
 async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.db.models import Portfolio as PortModel
-    from src.db.models import Price
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
 
     db = get_session()
     try:
-        positions = db.query(PortModel).all()
-        if not positions:
-            await update.message.reply_text("Портфель пуст")
+        rows = get_portfolio_positions(db)
+        if not rows:
+            await update.effective_message.reply_text("Портфель пуст")
             return
 
         lines = ["\U0001f4ca Портфель:\n"]
         total = 0
-        for p in positions:
-            inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
-            price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
-            current = price.close if price else 0
-            value = current * p.quantity if current else 0
-            profit = ((current / p.avg_price) - 1) * 100 if current and p.avg_price else 0
-            emoji = "\U0001f7e2" if profit > 0 else "\U0001f534"
+        for r in rows:
+            emoji = "\U0001f7e2" if r["profit_pct"] > 0 else "\U0001f534"
             lines.append(
-                f"{emoji} {inst.ticker if inst else '?'}: {p.quantity:.1f} \u00d7 {current:.2f}"
-                f" = {value:.2f}\u20bd ({profit:+.1f}%)"
+                f"{emoji} {r['ticker']}: {r['quantity']:.1f} \u00d7 {r['current_price']:.2f}"
+                f" = {r['value']:.2f}\u20bd ({r['profit_pct']:+.1f}%)"
             )
-            total += value
+            total += r["value"]
 
         lines.append(f"\n\U0001f4b5 Всего: {total:.2f} \u20bd")
-        await update.message.reply_text("\n".join(lines))
+        await update.effective_message.reply_text("\n".join(lines))
     finally:
         db.close()
 
 
-async def add_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args or []
-    if len(args) < 2:
-        await update.message.reply_text("Укажите тикер и количество: /add SBER 10")
-        return
-    ticker = args[0].upper()
-    try:
-        qty = float(args[1].replace(",", "."))
-    except ValueError:
-        await update.message.reply_text("Количество должно быть числом: /add SBER 10")
-        return
-
-    from src.db.models import Instrument, Price
-    from src.db.models import Portfolio as PortModel
-
+async def _save_position(update: Update, ticker: str, qty: float, avg_price: float | None = None):
     db = get_session()
     try:
         inst = db.query(Instrument).filter_by(ticker=ticker).first()
         if not inst:
-            await update.message.reply_text(f"Инструмент {ticker} не найден в базе. Запустите `finn update {ticker}`.")
+            await update.effective_message.reply_text(
+                f"Инструмент {ticker} не найден в базе. Запустите `finn update {ticker}`."
+            )
             return
-        price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-        avg_price = price.close if price else 0
+        if avg_price is None:
+            price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
+            avg_price = price.close if price else 0
 
         existing = db.query(PortModel).filter_by(instrument_id=inst.id).first()
         if existing:
@@ -1061,23 +711,98 @@ async def add_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 total_qty = existing.quantity
                 existing.avg_price = (existing.avg_price * (total_qty - qty) + avg_price * qty) / total_qty
             db.commit()
-            await update.message.reply_text(f"✅ {ticker}: добавлено {qty} шт. (всего {existing.quantity:.1f} шт.)")
+            await update.effective_message.reply_text(f"✅ {ticker}: добавлено {qty} шт. (всего {existing.quantity:.1f} шт.)")
         else:
             pos = PortModel(instrument_id=inst.id, quantity=qty, avg_price=avg_price)
             db.add(pos)
             db.commit()
-            await update.message.reply_text(f"✅ {ticker}: {qty} шт. добавлено в портфель")
-    except Exception as e:
+            await update.effective_message.reply_text(f"✅ {ticker}: {qty} шт. добавлено в портфель")
+    except Exception:
         db.rollback()
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+        logger.warning("Save position error", exc_info=True)
+        await update.effective_message.reply_text("❌ Не удалось добавить позицию. Попробуйте позже.")
     finally:
         db.close()
 
 
+async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return ConversationHandler.END
+    if not await _check_cooldown(update):
+        return ConversationHandler.END
+    args = context.args or []
+    if len(args) >= 2:
+        ticker = args[0].upper()
+        try:
+            qty = float(args[1].replace(",", "."))
+        except ValueError:
+            await update.effective_message.reply_text("Количество должно быть числом: /add SBER 10")
+            return ConversationHandler.END
+        await _save_position(update, ticker, qty)
+        return ConversationHandler.END
+
+    await update.effective_message.reply_text("Введите *тикер* инструмента (например, SBER):", parse_mode="Markdown")
+    return TICKER
+
+
+async def add_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return ConversationHandler.END
+    context.user_data["add_ticker"] = update.effective_message.text.strip().upper()
+    await update.effective_message.reply_text("Введите *количество* (например, 10):", parse_mode="Markdown")
+    return QUANTITY
+
+
+async def add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return ConversationHandler.END
+    try:
+        qty = float(update.effective_message.text.strip().replace(",", "."))
+        context.user_data["add_qty"] = qty
+    except ValueError:
+        await update.effective_message.reply_text("Количество должно быть числом. Попробуйте ещё раз:", parse_mode="Markdown")
+        return QUANTITY
+    await update.effective_message.reply_text(
+        "Введите *среднюю цену* (или отправьте `-` для автоматической):",
+        parse_mode="Markdown",
+    )
+    return PRICE
+
+
+async def add_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return ConversationHandler.END
+    text = update.effective_message.text.strip()
+    if text == "-":
+        avg_price = None
+    else:
+        try:
+            avg_price = float(text.replace(",", "."))
+        except ValueError:
+            await update.effective_message.reply_text("Цена должна быть числом или `-`. Попробуйте ещё раз:", parse_mode="Markdown")
+            return PRICE
+
+    ticker = context.user_data.get("add_ticker", "")
+    qty = context.user_data.get("add_qty", 0)
+    context.user_data.clear()
+    await _save_position(update, ticker, qty, avg_price)
+    return ConversationHandler.END
+
+
+async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.effective_message.reply_text("❌ Добавление отменено")
+    return ConversationHandler.END
+
+
 async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
     args = context.args or []
     if len(args) < 1:
-        await update.message.reply_text("Укажите тикер: /remove SBER")
+        await update.effective_message.reply_text("Укажите тикер: /remove SBER")
         return
     ticker = args[0].upper()
     qty = None
@@ -1087,36 +812,37 @@ async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             pass
 
-    from src.db.models import Instrument
-    from src.db.models import Portfolio as PortModel
-
     db = get_session()
     try:
         inst = db.query(Instrument).filter_by(ticker=ticker).first()
         if not inst:
-            await update.message.reply_text(f"Инструмент {ticker} не найден")
+            await update.effective_message.reply_text(f"Инструмент {ticker} не найден")
             return
         existing = db.query(PortModel).filter_by(instrument_id=inst.id).first()
         if not existing:
-            await update.message.reply_text(f"{ticker} нет в портфеле")
+            await update.effective_message.reply_text(f"{ticker} нет в портфеле")
             return
         if qty and qty < existing.quantity:
             existing.quantity -= qty
             db.commit()
-            await update.message.reply_text(f"✅ {ticker}: продано {qty} шт. (осталось {existing.quantity:.1f} шт.)")
+            await update.effective_message.reply_text(f"✅ {ticker}: продано {qty} шт. (осталось {existing.quantity:.1f} шт.)")
         else:
             db.delete(existing)
             db.commit()
-            await update.message.reply_text(f"✅ {ticker}: полностью удалён из портфеля")
-    except Exception as e:
+            await update.effective_message.reply_text(f"✅ {ticker}: полностью удалён из портфеля")
+    except Exception:
         db.rollback()
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+        logger.warning("Remove position error", exc_info=True)
+        await update.effective_message.reply_text("❌ Не удалось удалить позицию. Попробуйте позже.")
     finally:
         db.close()
 
 
 async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.collectors.cbr import CBRCollector
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
 
     cbr = CBRCollector()
     try:
@@ -1126,13 +852,17 @@ async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for r in rates:
             if r["code"] in majors:
                 lines.append(f"  {r['code']}: {r['value']:.2f} \u20bd")
-        await update.message.reply_text("\n".join(lines))
-    except Exception as e:
-        await update.message.reply_text(f"\u274c Ошибка: {e}")
+        await update.effective_message.reply_text("\n".join(lines))
+    except Exception:
+        logger.warning("Rates error", exc_info=True)
+        await update.effective_message.reply_text("\u274c Не удалось получить курсы. Попробуйте позже.")
 
 
 async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from src.db.models import GeoRiskScore
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
 
     db = get_session()
     try:
@@ -1147,11 +877,11 @@ async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if score.score > 3
                 else "\U0001f7e2 НИЗКИЙ"
             )
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"\U0001f30d Геополитический риск: {score.score}/10 ({level})\nДата: {score.date}"
             )
         else:
-            await update.message.reply_text("Нет данных. Запустите daily update.")
+            await update.effective_message.reply_text("Нет данных. Запустите daily update.")
     finally:
         db.close()
 
@@ -1160,7 +890,6 @@ async def broadcast_signal(n):
     if app is None:
         logger.warning("Bot not running, skipping signal broadcast")
         return
-    from src.notifications.service import NotificationService, format_signal_text
 
     ns = NotificationService()
     text = format_signal_text(n)
@@ -1176,7 +905,6 @@ async def broadcast_dividends():
     if app is None:
         logger.warning("Bot not running, skipping dividend broadcast")
         return
-    from src.notifications.service import NotificationService
 
     ns = NotificationService()
     dividends = ns.get_upcoming_dividends(days_ahead=14)
@@ -1200,7 +928,6 @@ async def broadcast_daily_summary():
     if app is None:
         logger.warning("Bot not running, skipping daily summary broadcast")
         return
-    from src.notifications.service import NotificationService, format_daily_summary_text
 
     ns = NotificationService()
     summary = ns.get_daily_summary()
@@ -1216,6 +943,162 @@ async def broadcast_daily_summary():
 app: Optional[Application] = None
 
 
+async def correlation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
+    tickers = list(context.args) if context.args else None
+    text = correlation_table(tickers)
+    for chunk in _chunk_text(text, 4096):
+        await update.effective_message.reply_markdown(chunk)
+
+
+async def whatif(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
+    args = context.args or []
+    if not args:
+        await update.effective_message.reply_text(
+            "Укажите сценарий:\n"
+            "• `/whatif SBER -0.2` — падение SBER на 20%\n"
+            "• `/whatif oil40` — нефть по $40\n"
+            "• `/whatif rate25` — ставка 25%\n"
+            "• `/whatif rubdown20` — рубль -20%\n"
+            "• `/whatif sanctions2022` — санкции 2022\n"
+            "• `/whatif covid2020` — COVID-19"
+        )
+        return
+
+    portfolio_value = 1_000_000
+
+    macro_scenarios = {"oil40", "rate25", "rubdown20", "sanctions2022", "covid2020"}
+    if args[0] in macro_scenarios:
+        text = whatif_macro(args[0], portfolio_value)
+    else:
+        ticker = args[0].upper()
+        try:
+            shock = float(args[1]) if len(args) > 1 else -0.1
+        except ValueError:
+            await update.effective_message.reply_text("Шок должен быть числом, например -0.2")
+            return
+        text = whatif_scenario(ticker, shock, portfolio_value)
+
+    for chunk in _chunk_text(text, 4096):
+        await update.effective_message.reply_markdown(chunk)
+
+
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
+
+    from src.config import personal
+
+    db = get_session()
+    try:
+        row = db.query(UserSetting).filter_by(key="risk_profile").first()
+        current = row.value if row else "balanced"
+
+        if context.args:
+            new_profile = context.args[0].lower()
+            if new_profile not in ("conservative", "balanced", "aggressive"):
+                await update.effective_message.reply_text("Доступные профили: conservative, balanced, aggressive")
+                return
+
+            allocator.set_profile(new_profile)
+            if row:
+                row.value = new_profile
+            else:
+                db.add(UserSetting(key="risk_profile", value=new_profile))
+            db.commit()
+            names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
+            await update.effective_message.reply_text(f"✅ Профиль изменён на *{names[new_profile]}*")
+        else:
+            names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
+            desc = {
+                "conservative": "50% ETF, 25% облигации, 20% дивидендные, 5% рост",
+                "balanced": "40% ETF, 30% дивидендные, 20% облигации, 10% рост",
+                "aggressive": "40% рост, 25% ETF, 25% дивидендные, 10% облигации",
+            }
+            text = f"📊 *Личные настройки*\n\n"
+            text += f"👤 Профиль риска: *{names.get(current, current)}*\n"
+
+            p_capital = personal.get("capital", 100_000)
+            p_tickers = personal.get("favorite_tickers", [])
+            p_horizon = personal.get("investment_horizon", "medium")
+            horizon_label = {"short": "Краткосрочный", "medium": "Среднесрочный", "long": "Долгосрочный"}
+            text += f"💰 Капитал: {p_capital:,.0f} ₽\n"
+            text += f"📅 Горизонт: {horizon_label.get(p_horizon, p_horizon)}\n"
+            if p_tickers:
+                text += f"⭐ Избранные: {', '.join(p_tickers[:10])}\n"
+
+            text += "\n*Сменить профиль:*\n"
+            for k, name in names.items():
+                text += f"• `/profile {k}` — {name} ({desc[k]})\n"
+            await update.effective_message.reply_markdown(text)
+    finally:
+        db.close()
+
+
+async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
+    msg = await update.effective_message.reply_text("📄 Генерирую отчёт...")
+    try:
+        from src.reports.weekly_pdf import generate_weekly_report
+
+        png_bytes = generate_weekly_report()
+        if png_bytes is None:
+            await msg.edit_text("❌ Не удалось сформировать отчёт. Нужно больше данных.")
+            return
+        await msg.delete()
+        await update.effective_message.reply_photo(
+            photo=png_bytes,
+            caption="📊 Отчёт за 120 дней",
+        )
+    except Exception:
+        logger.warning("Report error", exc_info=True)
+        await msg.edit_text("❌ Ошибка формирования отчёта.")
+
+
+async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
+    from src.execution.audit import get_trade_history
+    from src.risk.guards import get_day_pnl
+
+    pnl, pnl_pct = get_day_pnl()
+    trades = get_trade_history(limit=10)
+    text = f"📊 *P&L*\n\n"
+    text += f"Сегодня: {pnl:+,.0f} ₽ ({pnl_pct:+.2%})\n\n"
+    if trades:
+        text += "*Последние сделки:*\n"
+        for t in trades[:5]:
+            emoji = "🟢" if t["pnl"] and t["pnl"] >= 0 else "🔴"
+            text += f"{emoji} {t['ticker']} {t['direction']} {t['quantity']}шт @ {t['price']:.2f}"
+            if t["pnl"]:
+                text += f" ({t['pnl']:+.0f} ₽)"
+            text += "\n"
+    if not trades:
+        text += "Сделок пока нет."
+    for chunk in _chunk_text(text, 4096):
+        await update.effective_message.reply_markdown(chunk)
+
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.error("Unhandled error: %s", context.error, exc_info=context.error)
+    if update and update.effective_message:
+        await update.effective_message.reply_text("Произошла внутренняя ошибка. Попробуйте позже.")
+
+
 async def run_bot():
     global app
     if not settings.telegram_bot_token:
@@ -1223,6 +1106,8 @@ async def run_bot():
         return
 
     app = Application.builder().token(settings.telegram_bot_token).build()
+
+    app.add_error_handler(error_handler)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", start))
@@ -1237,13 +1122,27 @@ async def run_bot():
     app.add_handler(CommandHandler("daily", daily))
     app.add_handler(CommandHandler("stress", stress))
     app.add_handler(CommandHandler("backtest", backtest))
-    app.add_handler(CommandHandler("add", add_position))
+    app.add_handler(
+        ConversationHandler(
+            entry_points=[CommandHandler("add", add_start)],
+            states={
+                TICKER: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_ticker)],
+                QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_quantity)],
+                PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_price)],
+            },
+            fallbacks=[CommandHandler("cancel", add_cancel)],
+        )
+    )
     app.add_handler(CommandHandler("remove", remove_position))
     app.add_handler(CommandHandler("history", history))
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("sectors", sectors))
     app.add_handler(CommandHandler("top", top))
     app.add_handler(CommandHandler("export", export_portfolio))
+    app.add_handler(CommandHandler("correlation", correlation))
+    app.add_handler(CommandHandler("whatif", whatif))
+    app.add_handler(CommandHandler("report", report))
+    app.add_handler(CommandHandler("pnl", pnl))
 
     app.add_handler(CallbackQueryHandler(button_callback))
 

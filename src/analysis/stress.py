@@ -181,4 +181,62 @@ class StressTester:
             if worst < -0.3:
                 text += f"   ⚠️ Сильнее всего: {r['details'][0]['ticker']} ({worst:.0%})\n"
             text += "\n"
+        text += format_var_section(self.positions)
+        text += format_sector_concentration(self.positions)
         return text
+
+
+def format_var_section(positions: list[dict]) -> str:
+    amounts = [p.get("amount", 0) for p in positions if p.get("amount", 0) > 0]
+    if len(amounts) < 5:
+        return ""
+
+    import numpy as np
+
+    arr = np.array(amounts)
+    total = arr.sum()
+    weights = arr / total if total > 0 else arr
+
+    # simulate portfolio returns
+    rng = np.random.default_rng(42)
+    sim_returns = rng.normal(0, 0.02, size=(10000, len(weights)))
+    port_returns = sim_returns @ weights
+    port_returns.sort()
+
+    var_95 = float(np.percentile(port_returns, 5))
+    cvar_95 = float(port_returns[port_returns <= np.percentile(port_returns, 5)].mean())
+    var_99 = float(np.percentile(port_returns, 1))
+
+    text = (
+        f"\n*📊 VaR / CVaR (нормальное распределение)*\n"
+        f"   VaR(95%): {var_95:.1%} ({total * abs(var_95):,.0f} ₽)\n"
+        f"   CVaR(95%): {cvar_95:.1%} ({total * abs(cvar_95):,.0f} ₽)\n"
+        f"   VaR(99%): {var_99:.1%} ({total * abs(var_99):,.0f} ₽)\n"
+    )
+    return text
+
+
+def format_sector_concentration(positions: list[dict]) -> str:
+    sector_map: dict[str, float] = {}
+    total = 0
+    for p in positions:
+        sector = p.get("sector", "Прочее")
+        amt = p.get("amount", 0)
+        sector_map[sector] = sector_map.get(sector, 0) + amt
+        total += amt
+
+    if not sector_map or total == 0:
+        return ""
+
+    sorted_sectors = sorted(sector_map.items(), key=lambda x: x[1], reverse=True)
+    text = "\n*🏭 Концентрация по секторам*\n"
+    for sector, amt in sorted_sectors:
+        pct = amt / total
+        bar = "█" * int(pct * 20) + "░" * (20 - int(pct * 20))
+        emoji = "🔴" if pct > 0.4 else "🟡" if pct > 0.25 else "🟢"
+        text += f"{emoji} {sector}: {pct:.0%} {bar}\n"
+
+    # HHI index
+    hhi = sum((amt / total) ** 2 for amt in sector_map.values())
+    text += f"\n   HHI: {hhi:.3f} {'🔴 >0.3' if hhi > 0.3 else '🟢 <0.3'}\n"
+    return text

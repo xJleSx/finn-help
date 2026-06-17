@@ -1,0 +1,55 @@
+import logging
+from datetime import datetime, timezone
+
+from src.brokers.tbank import TBankClient
+from src.config import settings
+from src.db.connection import get_session
+from src.db.models import Instrument, Portfolio as PortModel
+
+logger = logging.getLogger(__name__)
+
+
+async def sync_portfolio_from_broker(account_id: str = "") -> dict:
+    if not settings.tinkoff_token:
+        return {"status": "no_token", "positions_synced": 0}
+
+    use_sandbox = settings.tinkoff_sandbox
+    stats = {"status": "ok", "positions_synced": 0, "errors": []}
+
+    async with TBankClient(use_sandbox=use_sandbox) as client:
+        accounts = await client.get_accounts()
+        if not accounts:
+            return {"status": "no_accounts", **stats}
+
+        target = account_id or accounts[0]["id"]
+        positions = await client.get_portfolio(target)
+
+    db = get_session()
+    try:
+        for pos in positions:
+            try:
+                ticker = pos["ticker"]
+                inst = db.query(Instrument).filter_by(ticker=ticker).first()
+                if not inst:
+                    logger.warning("Instrument %s not found in local DB, skipping", ticker)
+                    continue
+
+                qty = pos["quantity"]
+                avg_price = pos["average_price"]
+
+                existing = db.query(PortModel).filter_by(instrument_id=inst.id).first()
+                if existing:
+                    existing.quantity = qty
+                    existing.avg_price = avg_price
+                else:
+                    db.add(PortModel(instrument_id=inst.id, quantity=qty, avg_price=avg_price))
+                stats["positions_synced"] += 1
+            except Exception as e:
+                stats["errors"].append(str(e))
+                logger.warning("Sync error for position: %s", e)
+        db.commit()
+    finally:
+        db.close()
+
+    logger.info("Synced %d positions from broker", stats["positions_synced"])
+    return stats

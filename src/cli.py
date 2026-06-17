@@ -10,9 +10,11 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from src.analysis.personal_backtest import run_personal_backtest
 from src.analysis.service import analysis_service
 from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
+from src.config import personal
 from src.db.connection import get_session, init_db
 from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Portfolio, Price
 from src.llm.router import llm
@@ -530,11 +532,75 @@ def seed_portfolio(
 
 
 @app.command()
+def full_cycle():
+    """Полный цикл: update → train → backtest → report"""
+    from datetime import datetime, timezone
+
+    console.print("[bold]🚀 Запуск полного цикла[/bold]")
+    start = datetime.now(timezone.utc)
+
+    # 1. Update data
+    console.print("\n[bold cyan]1/4 Обновление данных...[/bold cyan]")
+    import asyncio
+
+    async def _update():
+        async with MOEXCollector() as moex:
+            tickers = personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP", "YNDX", "TATN"])
+            for t in tickers:
+                await moex.get_history(t, days=365)
+                console.print(f"  ✓ {t}")
+            await CBRCollector().get_rates()
+
+    asyncio.run(_update())
+
+    # 2. Train models
+    console.print("\n[bold cyan]2/4 Обучение моделей...[/bold cyan]")
+    try:
+        asyncio.run(analysis_service.update_all())
+        console.print("  ✓ Модели обновлены")
+    except Exception as e:
+        logger.warning("Train error: %s", e)
+        console.print("  [yellow]⚠ Обучение пропущено[/yellow]")
+
+    # 3. Personal backtest
+    console.print("\n[bold cyan]3/4 Персональный бэктест...[/bold cyan]")
+    result = run_personal_backtest()
+    console.print(result.summary())
+
+    # 4. Report
+    console.print("\n[bold cyan]4/4 Результаты[/bold cyan]")
+    elapsed = (datetime.now(timezone.utc) - start).total_seconds()
+    console.print(f"\n[green]✅ Цикл завершён за {elapsed:.0f}с[/green]")
+
+    # equity curve to CSV
+    csv_path = f"data/full_cycle_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    try:
+        ec = result.equity_curve
+        if ec:
+            import csv
+            with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.DictWriter(f, fieldnames=["date", "portfolio", "benchmark"])
+                w.writeheader()
+                w.writerows(ec)
+            console.print(f"  📄 Equity curve saved → {csv_path}")
+    except Exception:
+        pass
+
+
+@app.command()
 def bot():
     """Запустить Telegram бота"""
     from src.interfaces.telegram import run_bot
 
     asyncio.run(run_bot())
+
+
+@app.command()
+def scheduler():
+    """Запустить фоновый scheduler (обновление каждый час)"""
+    from src.scheduler.service import run_forever
+
+    asyncio.run(run_forever())
 
 
 def main():

@@ -308,3 +308,52 @@ class FeatureCache(Base):
         UniqueConstraint("ticker", "feature_type", "date", name="uq_feature_cache"),
         Index("ix_feature_ticker_type", "ticker", "feature_type"),
     )
+
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    id = Column(Integer, primary_key=True)
+    ticker = Column(String(20), nullable=False, index=True)
+    direction = Column(String(10), nullable=False)  # BUY / SELL
+    quantity = Column(Integer, nullable=False)
+    price = Column(Float, nullable=True)
+    order_type = Column(String(10), default="market")  # market / limit
+    status = Column(String(30), default="pending")  # pending / approved / submitted / filled / partial / rejected / cancelled
+    mode = Column(String(20), default="manual")  # dry_run / manual / auto
+    reason = Column(Text, default="")
+    order_id_ext = Column(String(100), nullable=True)  # external order ID
+    figi = Column(String(50), nullable=True)
+    commission = Column(Float, nullable=True)
+    executed_price = Column(Float, nullable=True)
+    executed_quantity = Column(Integer, nullable=True)
+    stop_loss = Column(Float, nullable=True)
+    take_profit = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_orders_status", "status"),
+        Index("ix_orders_created", "created_at"),
+    )
+
+
+class TradeLog(Base):
+    __tablename__ = "trade_log"
+
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)
+    ticker = Column(String(20), nullable=False, index=True)
+    direction = Column(String(10), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    price = Column(Float, nullable=False)
+    commission = Column(Float, nullable=True)
+    slippage = Column(Float, nullable=True)
+    pnl = Column(Float, nullable=True)  # realised P&L
+    reason = Column(Text, default="")
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        Index("ix_trade_log_tkr", "ticker"),
+        Index("ix_trade_log_ct", "created_at"),
+    )
