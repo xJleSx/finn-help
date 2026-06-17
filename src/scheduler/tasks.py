@@ -45,9 +45,17 @@ async def _collect_prices(db: Session) -> set[int]:
     updated_ids: set[int] = set()
     async with MOEXCollector() as moex:
         instruments = db.query(Instrument).all()
+        if not instruments:
+            return updated_ids
+
+        from sqlalchemy import func as sqlfunc
+        last_dates = dict(
+            db.query(Price.instrument_id, sqlfunc.max(Price.date)).group_by(Price.instrument_id).all()
+        )
+
         for inst in instruments:
-            last = db.query(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-            from_date = last[0].isoformat() if last else (date.today() - timedelta(days=365)).isoformat()
+            last_dt = last_dates.get(inst.id)
+            from_date = last_dt.isoformat() if last_dt else (date.today() - timedelta(days=365)).isoformat()
             board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
             history = await moex.get_history(inst.ticker, from_date=from_date, board=board)
             new_count = 0
@@ -79,9 +87,17 @@ async def _collect_prices(db: Session) -> set[int]:
 async def _collect_dividends(db: Session):
     async with MOEXCollector() as moex:
         instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
+        if not instruments:
+            return
+
+        from sqlalchemy import func as sqlfunc
+        last_dates = dict(
+            db.query(Dividend.instrument_id, sqlfunc.max(Dividend.date)).group_by(Dividend.instrument_id).all()
+        )
+
         for inst in instruments:
-            last = db.query(Dividend.date).filter_by(instrument_id=inst.id).order_by(Dividend.date.desc()).first()
-            if last and (date.today() - last[0]).days < 365:
+            last_dt = last_dates.get(inst.id)
+            if last_dt and (date.today() - last_dt).days < 365:
                 continue
             try:
                 dividends = await moex.get_dividends(inst.ticker)
@@ -114,8 +130,22 @@ def _compute_indicators(db: Session, instrument_ids: set[int] | None = None):
     if instrument_ids is not None:
         q = q.filter(Instrument.id.in_(instrument_ids))
     instruments = q.all()
+    if not instruments:
+        return
+
+    ids = [inst.id for inst in instruments]
+    all_prices = (
+        db.query(Price)
+        .filter(Price.instrument_id.in_(ids))
+        .order_by(Price.instrument_id, Price.date)
+        .all()
+    )
+    prices_by_inst: dict[int, list[Price]] = {}
+    for p in all_prices:
+        prices_by_inst.setdefault(p.instrument_id, []).append(p)
+
     for inst in instruments:
-        prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
+        prices = prices_by_inst.get(inst.id, [])
         if len(prices) < 50:
             continue
         df = pd.DataFrame(

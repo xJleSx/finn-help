@@ -29,7 +29,7 @@ def audit_log_order(entry: dict):
         with open(file_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
             f.flush()
-        os.fsync(f.fileno())
+            os.fsync(f.fileno())
     except Exception as e:
         logger.error("Failed to write audit log: %s", e)
 

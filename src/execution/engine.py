@@ -57,6 +57,7 @@ def get_mode() -> TradeMode:
 
 
 def get_log(limit: int = 20) -> list[dict]:
+    entries = list(_execution_log)[-limit:]
     return [
         {
             "ticker": r.ticker,
@@ -69,7 +70,7 @@ def get_log(limit: int = 20) -> list[dict]:
             "order_id": r.order_id,
             "time": r.created_at.isoformat(),
         }
-        for r in _execution_log[-limit:]
+        for r in entries
     ]
 
 

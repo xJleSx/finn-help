@@ -15,9 +15,11 @@ from src.db.models import User
 
 logger = logging.getLogger(__name__)
 
-SECRET_KEY = settings.jwt_secret or settings.groq_api_key or "dev-secret-change-in-production"
+if not settings.jwt_secret:
+    raise ValueError("JWT_SECRET is not set. Set it in .env or environment variables.")
+SECRET_KEY = settings.jwt_secret
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
