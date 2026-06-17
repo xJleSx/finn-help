@@ -28,10 +28,10 @@ async def sync_portfolio_from_broker(account_id: str = "") -> dict:
     try:
         for pos in positions:
             try:
-                ticker = pos["ticker"]
-                inst = db.query(Instrument).filter_by(ticker=ticker).first()
+                figi = pos["figi"]
+                inst = db.query(Instrument).filter_by(figi=figi).first()
                 if not inst:
-                    logger.warning("Instrument %s not found in local DB, skipping", ticker)
+                    logger.warning("Instrument with figi %s not found in local DB, skipping", figi)
                     continue
 
                 qty = pos["quantity"]

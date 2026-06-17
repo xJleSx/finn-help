@@ -32,6 +32,7 @@ class Instrument(Base):
     instrument_type = Column(String(20), nullable=False, default="stock")
     lot_size = Column(Integer, default=1)
     currency = Column(String(3), default="RUB")
+    figi = Column(String(50), index=True)
     moex_uid = Column(String(50))
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

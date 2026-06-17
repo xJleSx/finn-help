@@ -44,8 +44,16 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
                 )
                 db.add(p)
                 new_count += 1
+            else:
+                exists.high = max(exists.high, c["high"]) if exists.high else c["high"]
+                exists.low = min(exists.low, c["low"]) if exists.low else c["low"]
+                exists.close = c["close"]
+                if exists.volume:
+                    exists.volume += c["volume"]
+                else:
+                    exists.volume = c["volume"]
         db.commit()
-        logger.info("Added %d candles for %s (%s)", new_count, ticker, interval)
+        logger.info("Added/updated %d candles for %s (%s)", new_count, ticker, interval)
     finally:
         db.close()
     return new_count
@@ -58,13 +66,12 @@ async def update_all_favorites(interval: str = "5min", days: int = 5) -> dict:
 
     tickers = personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP", "YNDX", "TATN"])
 
-    # get figi mapping from instruments table
     db = get_session()
     try:
         figi_map: dict[str, str] = {}
         for t in tickers:
             inst = db.query(Instrument).filter_by(ticker=t).first()
-            if inst and hasattr(inst, "figi") and inst.figi:
+            if inst and inst.figi:
                 figi_map[t] = inst.figi
     finally:
         db.close()

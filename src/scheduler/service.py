@@ -41,10 +41,11 @@ async def _send_hourly_notification(start: datetime):
 
                 ns = NotificationService()
                 for uid, cid in ns.get_subscribers("daily"):
+                    target_chat = cid or uid
                     try:
-                        await bot_app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+                        await bot_app.bot.send_message(chat_id=target_chat, text=text, parse_mode="Markdown")
                     except Exception as e:
-                        logger.warning("Failed to send hourly notification to %d: %s", uid, e)
+                        logger.warning("Failed to send hourly notification to chat %d: %s", target_chat, e)
             else:
                 logger.info("Hourly summary:\n%s", text)
         finally:
@@ -79,9 +80,10 @@ async def run_forever(interval: int = UPDATE_INTERVAL):
 
                     ns = NotificationService()
                     for uid, cid in ns.get_subscribers("daily"):
+                        target_chat = cid or uid
                         try:
                             await bot_app.bot.send_message(
-                                chat_id=uid,
+                                chat_id=target_chat,
                                 text=f"⚠️ *Ошибка обновления*: {e}",
                                 parse_mode="Markdown",
                             )

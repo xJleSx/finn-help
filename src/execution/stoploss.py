@@ -5,7 +5,6 @@ from typing import Optional
 from src.config import personal, settings
 from src.db.connection import get_session
 from src.db.models import Order as OrderModel
-from src.execution.engine import execute_order
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +12,26 @@ logger = logging.getLogger(__name__)
 class PositionTracker:
     def __init__(self):
         self._positions: dict[str, dict] = {}
+        self._restore_from_db()
+
+    def _restore_from_db(self):
+        db = get_session()
+        try:
+            filled = db.query(OrderModel).filter(
+                OrderModel.status.in_(["filled", "partial"]),
+                OrderModel.direction == "BUY",
+            ).all()
+            for o in filled:
+                self._positions[o.ticker] = {
+                    "shares": o.quantity or 0,
+                    "avg_price": o.price or 0.0,
+                    "sl": o.stop_loss,
+                    "tp": o.take_profit,
+                }
+        except Exception:
+            pass
+        finally:
+            db.close()
 
     def update(self, ticker: str, direction: str, quantity: int, price: float):
         if ticker not in self._positions:
@@ -33,6 +52,26 @@ class PositionTracker:
                 self._positions[ticker]["sl"] = self._positions[ticker]["avg_price"] * (1 - abs(sl_pct))
             if tp_pct is not None:
                 self._positions[ticker]["tp"] = self._positions[ticker]["avg_price"] * (1 + abs(tp_pct))
+            self._persist_sl_tp(ticker)
+
+    def _persist_sl_tp(self, ticker: str):
+        pos = self._positions.get(ticker)
+        if not pos:
+            return
+        db = get_session()
+        try:
+            orders = db.query(OrderModel).filter(
+                OrderModel.ticker == ticker,
+                OrderModel.status.in_(["filled", "partial"]),
+            ).all()
+            for o in orders:
+                o.stop_loss = pos.get("sl")
+                o.take_profit = pos.get("tp")
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
 
     def check_triggers(self, ticker: str, current_price: float) -> Optional[str]:
         pos = self._positions.get(ticker)
@@ -51,6 +90,8 @@ class PositionTracker:
         return None
 
     async def execute_triggers(self, ticker: str, current_price: float) -> Optional[str]:
+        from src.execution.engine import execute_order as _execute_order
+
         trigger = self.check_triggers(ticker, current_price)
         if not trigger:
             return None
@@ -59,7 +100,7 @@ class PositionTracker:
         if not pos or pos["shares"] == 0:
             return None
 
-        await execute_order(
+        await _execute_order(
             ticker=ticker,
             direction="SELL",
             quantity=pos["shares"],
