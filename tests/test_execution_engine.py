@@ -97,6 +97,7 @@ async def test_execute_auto_no_token(mock_settings):
 async def test_execute_auto_success(mock_tbank, mock_settings):
     mock_settings.tinkoff_token = "test_token"
     mock_settings.tinkoff_sandbox = True
+    mock_settings.enable_trading = True
 
     mock_client = AsyncMock()
     mock_client.get_accounts = AsyncMock(return_value=[{"id": "acc_1"}])
@@ -154,6 +155,7 @@ async def test_approve_order():
     eng._execution_log.append(r)
 
     with (
+        patch("src.execution.engine.settings.enable_trading", True),
         patch("src.execution.engine.execute_order", new_callable=AsyncMock) as mock_exec,
         patch("src.db.connection.get_session") as mock_get_session,
     ):

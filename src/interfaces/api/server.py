@@ -26,7 +26,6 @@ from src.interfaces.api.auth import (
 from src.interfaces.api.routes_instruments import router as instruments_router
 from src.interfaces.api.routes_portfolio import router as portfolio_router
 from src.interfaces.api.routes_market import router as market_router
-from src.execution.engine import set_mode, TradeMode
 from src.scheduler.service import run_forever, stop as stop_scheduler
 
 logger = logging.getLogger(__name__)
@@ -36,9 +35,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings.tinkoff_token and settings.tinkoff_sandbox:
-        await set_mode(TradeMode.AUTO)
-        logger.info("Trade mode set to AUTO (sandbox)")
+    logger.info("Trade mode: DRY_RUN (set ENABLE_TRADING=true to enable AUTO)")
     scheduler_task = asyncio.create_task(run_forever())
     yield
     stop_scheduler()
