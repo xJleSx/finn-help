@@ -256,9 +256,9 @@ class SignalFusionEngine:
 
         confidence = min(confidence, 1.0)
 
-        if weighted_score > 0.2:
+        if weighted_score > 0.02:
             action = "BUY"
-        elif weighted_score < -0.2:
+        elif weighted_score < -0.02:
             action = "SELL"
         else:
             action = "HOLD"
@@ -328,7 +328,7 @@ class SignalFusionEngine:
         return action
 
     def _calc_max_position(self, action: str, geo_risk: float, fund_risk: float, user_id: Optional[str] = None) -> int:
-        base = {"BUY": 30, "CAUTIOUS_BUY": 15, "HOLD": 10, "SELL": 5, "NEUTRAL": 10}
+        base = {"BUY": 50, "CAUTIOUS_BUY": 25, "HOLD": 10, "SELL": 5, "NEUTRAL": 10}
         pct = base.get(action, 10)
         if user_id:
             from src.user_profile import profile_manager

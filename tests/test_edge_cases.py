@@ -1,8 +1,10 @@
-"""Parametrized tests for ensemble, sector, backtest edge cases"""
+"""Parametrized tests for ensemble, sector, backtest, API, allocator, profile edge cases"""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -289,3 +291,221 @@ class TestBacktestEdgeCases:
         assert mc.simulations == 500
         assert isinstance(mc.mean_return, float)
         assert isinstance(mc.var_95, float)
+
+
+class TestAPIEdgeCases:
+    def test_allocate_zero_capital(self, mock_client, mock_db):
+        resp = mock_client.post("/api/portfolio/allocate", json={"capital": 0})
+        assert resp.status_code in (200, 422)
+
+    def test_allocate_negative_capital(self, mock_client, mock_db):
+        resp = mock_client.post("/api/portfolio/allocate", json={"capital": -1000})
+        assert resp.status_code in (200, 422)
+
+    def test_allocate_missing_capital(self, mock_client, mock_db):
+        resp = mock_client.post("/api/portfolio/allocate", json={})
+        assert resp.status_code in (200, 422)
+
+    def test_allocate_string_capital(self, mock_client, mock_db):
+        resp = mock_client.post("/api/portfolio/allocate", json={"capital": "abc"})
+        assert resp.status_code in (200, 422)
+
+    def test_invalid_json_body(self, mock_client, mock_db):
+        resp = mock_client.post("/api/portfolio/allocate", data="not json", headers={"Content-Type": "application/json"})
+        assert resp.status_code in (200, 422)
+
+    def test_unknown_route_returns_404(self, mock_client, mock_db):
+        resp = mock_client.get("/api/this-does-not-exist")
+        assert resp.status_code == 404
+
+    def test_method_not_allowed(self, mock_client, mock_db):
+        resp = mock_client.delete("/api/health")
+        assert resp.status_code == 405
+
+
+class TestAllocatorEdgeCases:
+    def test_allocate_zero_capital(self, db_session):
+        from src.portfolio.allocator import PortfolioAllocator
+
+        pa = PortfolioAllocator()
+        result = pa.allocate(0.0, db=db_session)
+        assert isinstance(result, dict)
+
+    def test_allocate_negative_capital(self, db_session):
+        from src.portfolio.allocator import PortfolioAllocator
+
+        pa = PortfolioAllocator()
+        result = pa.allocate(-1000.0, db=db_session)
+        assert isinstance(result, dict)
+
+    def test_allocate_tiny_capital(self, db_session):
+        from src.portfolio.allocator import PortfolioAllocator
+
+        pa = PortfolioAllocator()
+        result = pa.allocate(1.0, db=db_session)
+        assert isinstance(result, dict)
+
+    def test_set_invalid_profile(self):
+        from src.portfolio.allocator import PortfolioAllocator
+
+        pa = PortfolioAllocator()
+        pa.set_profile("nonexistent_profile")
+        assert pa.profile == "balanced"
+
+
+class TestProfileEdgeCases:
+    def test_user_profile_from_dict_missing_fields(self):
+        from src.user_profile import UserProfile
+
+        profile = UserProfile.from_dict({"user_id": "test_user"})
+        assert profile.risk_profile == "balanced"
+
+    def test_user_profile_from_dict_corrupted_preferences(self):
+        from src.user_profile import UserProfile
+
+        profile = UserProfile.from_dict({"user_id": "test_user", "risk_profile": "aggressive", "preferences": None})
+        assert profile.preferences is None or isinstance(profile.preferences, dict)
+
+    def test_profile_manager_get_creates_default_on_missing(self):
+        from src.user_profile import UserProfileManager
+
+        mgr = UserProfileManager()
+        profile = mgr.get("__test_edge_new__")
+        assert profile is not None
+        assert profile.user_id == "__test_edge_new__"
+        mgr.delete("__test_edge_new__")
+
+    def test_profile_manager_list_empty_after_cleanup(self):
+        from src.user_profile import UserProfileManager
+
+        mgr = UserProfileManager()
+        mgr.delete("__test_nonexistent__")
+        profiles = mgr.list_profiles()
+        assert isinstance(profiles, list)
+
+
+class TestReportsEdgeCases:
+    def test_generate_portfolio_csv_empty_list(self):
+        from src.reports import generate_portfolio_csv
+
+        result = generate_portfolio_csv([])
+        assert isinstance(result, str)
+
+    def test_generate_signals_csv_empty_list(self):
+        from src.reports import generate_signals_csv
+
+        result = generate_signals_csv([])
+        assert isinstance(result, str)
+
+    def test_generate_analysis_csv_empty_data(self):
+        from src.reports import generate_analysis_csv
+
+        result = generate_analysis_csv("SBER", {}, [])
+        assert isinstance(result, str)
+
+    def test_generate_portfolio_csv_missing_keys(self):
+        from src.reports import generate_portfolio_csv
+
+        result = generate_portfolio_csv([{"ticker": "SBER"}])
+        assert "SBER" in result
+
+
+class TestModelRegistryEdgeCases:
+    def test_get_metrics_nonexistent(self):
+        from src.model_registry import get_model_metrics
+
+        result = get_model_metrics("__nonexistent_model_test__")
+        assert result == {}
+
+    def test_delete_nonexistent_model(self):
+        from src.model_registry import delete_model
+
+        delete_model("__nonexistent_model_test__")
+
+    def test_list_models_empty_registry(self, tmp_path):
+        from src.model_registry import MODEL_DIR, REGISTRY_FILE, list_models
+        import src.model_registry as mr
+
+        original_dir = MODEL_DIR
+        original_reg = REGISTRY_FILE
+        new_dir = tmp_path / "models"
+        new_dir.mkdir(parents=True, exist_ok=True)
+        mr.MODEL_DIR = new_dir
+        mr.REGISTRY_FILE = new_dir / "registry.json"
+        try:
+            models = list_models()
+            assert models == []
+        finally:
+            mr.MODEL_DIR = original_dir
+            mr.REGISTRY_FILE = original_reg
+
+
+class TestTelegramEdgeCases:
+    def test_analysis_cache_miss(self):
+        from src.interfaces.telegram import analysis_cache, CACHE_TTL
+
+        key = "__test_cache_miss__"
+        cached = analysis_cache.get(key)
+        assert cached is None
+
+    def test_analysis_cache_ttl_expired(self):
+        from src.interfaces.telegram import analysis_cache, CACHE_TTL
+
+        import time
+
+        key = "__test_cache_expired__"
+        analysis_cache[key] = (time.time() - CACHE_TTL - 10, {}, "test")
+        now = time.time()
+        cached = analysis_cache.get(key)
+        assert (now - cached[0]) >= CACHE_TTL
+
+
+class TestRiskGuardsEdgeCases:
+    def test_check_leverage_zero(self):
+        from src.risk.guards import check_leverage
+
+        ok, msg = check_leverage(0.0)
+        assert ok is True
+
+    def test_check_leverage_exact_limit(self):
+        from src.risk.guards import check_leverage
+
+        ok, msg = check_leverage(1.0)
+        assert ok is True
+
+    def test_check_leverage_above_limit(self):
+        from src.risk.guards import check_leverage
+
+        ok, msg = check_leverage(1.5)
+        assert ok is False
+
+    def test_check_var_limit_zero(self):
+        from src.risk.guards import check_var_limit
+
+        ok, msg = check_var_limit(0.0)
+        assert ok is True
+
+    def test_check_var_limit_exact(self):
+        from src.risk.guards import check_var_limit
+
+        ok, msg = check_var_limit(0.05)
+        assert ok is True
+
+    def test_check_var_limit_above(self):
+        from src.risk.guards import check_var_limit
+
+        ok, msg = check_var_limit(0.10)
+        assert ok is False
+
+    def test_drawdown_returns_zero(self):
+        from src.risk.guards import current_drawdown
+
+        dd = current_drawdown()
+        assert dd == 0.0
+
+    def test_drawdown_after_reset(self):
+        from src.risk.guards import reset_peak, current_drawdown
+
+        reset_peak(100.0)
+        dd = current_drawdown()
+        assert dd == 0.0

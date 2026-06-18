@@ -4,17 +4,61 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from src.model_registry import save_model, load_model as load_from_registry
+
 logger = logging.getLogger(__name__)
 
 
 class ProphetPredictor:
-    def __init__(self):
+    def __init__(self, ticker: str = ""):
         self._model: Optional = None
+        self._ticker = ticker
+
+    @property
+    def model_name(self) -> str:
+        return f"prophet_{self._ticker}" if self._ticker else "prophet"
+
+    def save(self, metrics: Optional[dict] = None) -> str:
+        if self._model is None:
+            raise ValueError("No trained model to save")
+        return save_model(self._model, self.model_name, metrics=metrics)
+
+    def load(self, version: Optional[str] = None):
+        self._model = load_from_registry(self.model_name, version=version)
+        return self._model
+
+    def train(self, df: pd.DataFrame) -> bool:
+        if df.empty or len(df) < 30:
+            return False
+        self._model = self._fit(df)
+        if self._model is not None:
+            self.save(metrics={"rows": len(df), "ticker": self._ticker})
+            return True
+        return False
 
     def predict(self, df: pd.DataFrame, days_ahead: int = 10) -> dict:
         if df.empty or len(df) < 30:
             return {"target_price": None, "confidence": 0.0, "signal_score": 0.0}
 
+        if self._model is None:
+            try:
+                self.load()
+            except (ValueError, FileNotFoundError):
+                pass
+
+        if self._model is not None:
+            try:
+                return self._predict_with_model(df, days_ahead)
+            except Exception:
+                logger.warning("Loaded Prophet model failed, retraining", exc_info=True)
+
+        self._model = self._fit(df)
+        if self._model is None:
+            return {"target_price": None, "confidence": 0.0, "signal_score": 0.0}
+        self.save(metrics={"rows": len(df), "ticker": self._ticker})
+        return self._predict_with_model(df, days_ahead)
+
+    def _fit(self, df: pd.DataFrame):
         from prophet import Prophet
 
         trend_df = df[["date", "close"]].copy()
@@ -30,9 +74,16 @@ class ProphetPredictor:
             changepoint_prior_scale=0.01,
         )
         model.fit(trend_df)
+        return model
 
-        future = model.make_future_dataframe(periods=days_ahead)
-        forecast = model.predict(future)
+    def _predict_with_model(self, df: pd.DataFrame, days_ahead: int = 10) -> dict:
+        trend_df = df[["date", "close"]].copy()
+        trend_df.columns = ["ds", "y"]
+        trend_df["ds"] = pd.to_datetime(trend_df["ds"])
+        trend_df["y"] = trend_df["y"].clip(lower=0.01)
+
+        future = self._model.make_future_dataframe(periods=days_ahead)
+        forecast = self._model.predict(future)
 
         last_date = trend_df["ds"].max()
         future_forecast = forecast[forecast["ds"] > last_date]

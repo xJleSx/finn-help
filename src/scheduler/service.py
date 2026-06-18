@@ -6,7 +6,7 @@ from src.scheduler.tasks import daily_update
 
 logger = logging.getLogger(__name__)
 
-UPDATE_INTERVAL = 3600  # 1 hour
+UPDATE_INTERVAL = 300  # 5 min (aggressive 24h mode)
 
 _running = False
 

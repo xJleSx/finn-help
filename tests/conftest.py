@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from typing import AsyncGenerator
+from unittest.mock import AsyncMock, MagicMock
 
 os.environ.setdefault("JWT_SECRET", "test-secret-not-for-production")
 
@@ -98,6 +99,60 @@ async def async_client(async_in_memory_db) -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 
+    app.dependency_overrides.clear()
+
+
+# ── Mock fixtures for edge-case tests ───────────────────────────────────────
+
+
+class AsyncMagicMock(MagicMock):
+    """MagicMock that supports async/await like AsyncMock."""
+
+    async def __call__(self, *args, **kwargs):
+        return super().__call__(*args, **kwargs)
+
+    def __await__(self):
+        async def _():
+            return self
+
+        return _().__await__()
+
+
+@pytest.fixture
+def mock_db():
+    m = AsyncMagicMock()
+    m.execute = AsyncMock()
+    m.execute.return_value = AsyncMagicMock()
+    m.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
+    m.execute.return_value.scalars = MagicMock()
+    m.execute.return_value.scalars.return_value.all = MagicMock(return_value=[])
+    return m
+
+
+@pytest.fixture
+def mock_client(mock_db):
+    from src.db.models import User
+    from src.interfaces.api.auth import get_current_user, get_db, require_user
+    from src.interfaces.api.server import app
+
+    def override_get_db():
+        yield mock_db
+
+    mock_user = User(id=1, username="test", hashed_password="x", role="user", is_active=True, risk_profile="balanced")
+
+    async def override_user():
+        return mock_user
+
+    async def override_anon():
+        return None
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_anon
+    app.dependency_overrides[require_user] = override_user
+
+    from fastapi.testclient import TestClient
+
+    yield TestClient(app)
     app.dependency_overrides.clear()
 
 

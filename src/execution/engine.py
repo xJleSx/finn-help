@@ -13,6 +13,22 @@ from src.execution.stoploss import position_tracker
 logger = logging.getLogger(__name__)
 
 
+def _notify_trade(record: "OrderRecord", reason: str = ""):
+    try:
+        from src.interfaces.telegram import broadcast_trade
+        asyncio.ensure_future(broadcast_trade(
+            ticker=record.ticker,
+            direction=record.direction,
+            quantity=record.quantity,
+            price=record.price,
+            status=record.status,
+            reason=reason,
+            order_id=record.order_id or "",
+        ))
+    except Exception:
+        logger.exception("Failed to schedule trade broadcast")
+
+
 class TradeMode(Enum):
     DRY_RUN = "dry_run"
     MANUAL = "manual"
@@ -43,6 +59,7 @@ class OrderRecord:
 
 _execution_log: "deque[OrderRecord]" = deque(maxlen=1000)
 _mode_lock = asyncio.Lock()
+_mode = TradeMode.DRY_RUN
 
 
 async def set_mode(mode: TradeMode):
@@ -103,6 +120,7 @@ async def execute_order(
         position_tracker.update(ticker, direction, quantity, record.price)
         _execution_log.append(record)
         record.db_id = save_order(record)
+        _notify_trade(record, reason)
         return record
 
     if not settings.tinkoff_token and _mode == TradeMode.AUTO:
@@ -230,6 +248,8 @@ async def execute_order(
 
     _execution_log.append(record)
     record.db_id = save_order(record)
+
+    _notify_trade(record, reason)
     return record
 
 

@@ -61,7 +61,6 @@ dev = [
 
 [tool.coverage.run]
 source = ["src"]
-omit = ["*/cli.py", "*/telegram.py", "*/telegram_helpers.py", "*/notifications/*", "*/reports.py", "*/user_profile.py", "*/model_registry.py"]
 
 [tool.coverage.report]
 fail_under = 40

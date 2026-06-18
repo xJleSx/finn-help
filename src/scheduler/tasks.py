@@ -5,11 +5,13 @@ from datetime import date, timedelta
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from src.brokers.tbank import TBankClient
+from src.config import settings
 from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.collectors.news import NewsCollector
 from src.db.connection import get_session
-from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Price
+from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Portfolio as PortModel, Price
 from src.geo.risk_scorer import GeoRiskScorer
 from src.geo.sentiment_divergence import SentimentDivergenceDetector
 from src.signal.engine import SignalFusionEngine
@@ -32,7 +34,11 @@ async def daily_update():
         news_list = await _collect_news(db)
         await _compute_geo_risk(db, news_list)
         await _collect_macro(db)
-        signals = await _generate_signals(db, updated_ids=updated_ids)
+        from src.db.models import Signal as SignalModel
+        from sqlalchemy import func
+        db.query(SignalModel).filter(func.date(SignalModel.date) == date.today()).delete()
+        db.commit()
+        signals = await _generate_signals(db, updated_ids=None)
         await _notify_signals(signals)
         logger.info("Daily update cycle completed")
     except Exception as e:
@@ -187,25 +193,50 @@ def _compute_indicators(db: Session, instrument_ids: set[int] | None = None):
 
 
 async def _collect_news(db: Session) -> list[dict]:
+    from src.db.models import NewsInstrument
+
     collector = NewsCollector()
     news_list = await collector.fetch_all(max_per_feed=5)
+
+    ticker_map: dict[str, int] = {}
+    for inst in db.query(Instrument).all():
+        ticker_map[inst.ticker.upper()] = inst.id
+
+    saved_news: list[News] = []
     for item in news_list:
         exists = db.query(News).filter_by(url=item["url"]).first()
-        if not exists:
-            detail = item.get("sentiment_detail", {})
-            n = News(
-                url=item["url"],
-                title=item["title"],
-                summary=item["summary"],
-                source_type=item["source_type"],
-                source_name=item["source_name"],
-                published_at=item["published_at"],
-                sentiment_score=item.get("sentiment_score"),
-                sentiment_weighted=item.get("sentiment_weighted"),
-                sentiment_bert_score=detail.get("bert_score"),
-                source_weight=detail.get("source_weight"),
-            )
-            db.add(n)
+        if exists:
+            saved_news.append(exists)
+            continue
+        detail = item.get("sentiment_detail", {})
+        n = News(
+            url=item["url"],
+            title=item["title"],
+            summary=item["summary"],
+            source_type=item["source_type"],
+            source_name=item["source_name"],
+            published_at=item["published_at"],
+            sentiment_score=item.get("sentiment_score"),
+            sentiment_weighted=item.get("sentiment_weighted"),
+            sentiment_bert_score=detail.get("bert_score"),
+            source_weight=detail.get("source_weight"),
+        )
+        db.add(n)
+        db.flush()
+        saved_news.append(n)
+
+    for n in saved_news:
+        search_text = f"{n.title or ''} {n.summary or ''}".upper()
+        for ticker, inst_id in ticker_map.items():
+            if len(ticker) >= 2 and ticker in search_text:
+                exists = (
+                    db.query(NewsInstrument)
+                    .filter_by(news_id=n.id, instrument_id=inst_id)
+                    .first()
+                )
+                if not exists:
+                    db.add(NewsInstrument(news_id=n.id, instrument_id=inst_id))
+
     db.commit()
     return news_list
 
@@ -269,6 +300,7 @@ async def _collect_macro(db: Session):
 
 async def _notify_signals(signals: list[dict]):
     from src.interfaces.telegram import broadcast_daily_summary, broadcast_dividends, broadcast_signal
+    from src.execution.engine import execute_order
 
     for s in signals:
         n = _to_signal_notification(s)
@@ -276,6 +308,51 @@ async def _notify_signals(signals: list[dict]):
             await broadcast_signal(n)
         except Exception as e:
             logger.warning(f"Broadcast failed for {s['ticker']}: {e}")
+
+        if settings.tinkoff_token and s["action"] in ("BUY", "SELL"):
+            try:
+                db = get_session()
+                inst = db.query(Instrument).filter(
+                    (Instrument.ticker == s["ticker"]) | (Instrument.isin == s["ticker"])
+                ).first()
+                price_row = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first() if inst else None
+                last_price = price_row.close if price_row else 0
+                lot = inst.lot_size or 1 if inst else 1
+                figi = inst.figi if inst else None
+
+                if s["action"] == "BUY" and last_price > 0 and inst and figi:
+                    async with TBankClient(use_sandbox=settings.tinkoff_sandbox) as tbank:
+                        accounts = await tbank.get_accounts()
+                        if accounts:
+                            balance = await tbank.get_account_balance(accounts[0]["id"])
+                            pct = s.get("max_portfolio_pct", 10) / 100
+                            amount_to_spend = balance * pct
+                            quantity = int(amount_to_spend / last_price)
+                            quantity = (quantity // lot) * lot
+                            if quantity >= lot and amount_to_spend > 0:
+                                await execute_order(
+                                    ticker=inst.ticker,
+                                    direction="BUY",
+                                    quantity=quantity,
+                                    price=last_price,
+                                    figi=figi,
+                                    reason="; ".join(s.get("reasons", [])),
+                                )
+                elif s["action"] == "SELL":
+                    existing = db.query(PortModel).filter_by(instrument_id=inst.id).first() if inst else None
+                    if existing and existing.quantity > 0 and inst and figi:
+                        await execute_order(
+                            ticker=inst.ticker,
+                            direction="SELL",
+                            quantity=int(existing.quantity),
+                            price=last_price,
+                            figi=figi,
+                            reason="; ".join(s.get("reasons", [])),
+                        )
+            except Exception as e:
+                logger.warning(f"Trade execution failed for {s['ticker']}: {e}")
+            finally:
+                db.close()
 
     try:
         await broadcast_dividends()

@@ -29,7 +29,7 @@ def _save_registry(registry: dict):
 def save_model(model: Any, name: str, metrics: Optional[dict] = None, params: Optional[dict] = None) -> str:
     import cloudpickle
 
-    version = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    version = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     model_path = MODEL_DIR / f"{name}__{version}.pkl"
     meta = {
         "name": name,

@@ -37,12 +37,12 @@ async def sync_portfolio_from_broker(account_id: str = "") -> dict:
                 qty = pos["quantity"]
                 avg_price = pos["average_price"]
 
-                existing = db.query(PortModel).filter_by(instrument_id=inst.id).first()
+                existing = db.query(PortModel).filter_by(user_id=1, instrument_id=inst.id).first()
                 if existing:
                     existing.quantity = qty
                     existing.avg_price = avg_price
                 else:
-                    db.add(PortModel(instrument_id=inst.id, quantity=qty, avg_price=avg_price))
+                    db.add(PortModel(user_id=1, instrument_id=inst.id, quantity=qty, avg_price=avg_price))
                 stats["positions_synced"] += 1
             except Exception as e:
                 stats["errors"].append(str(e))

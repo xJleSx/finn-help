@@ -1,65 +1,15 @@
+import asyncio
 import logging
 from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.constants import KNOWN_DIVIDEND_STOCKS, SAFE_BONDS, SAFE_ETFS, SECTOR_LIMITS, SECTOR_NAMES
 from src.db.connection import get_session
 from src.db.models import Dividend, Instrument, Price
 
 logger = logging.getLogger(__name__)
-
-
-KNOWN_DIVIDEND_STOCKS = {
-    "SBER": "dividend",
-    "GAZP": "dividend",
-    "LKOH": "dividend",
-    "VTBR": "dividend",
-    "MOEX": "growth",
-    "NLMK": "dividend",
-    "MGNT": "dividend",
-    "MTSS": "dividend",
-    "SNGS": "dividend",
-    "SNGSP": "dividend",
-    "TATN": "dividend",
-    "RTKM": "dividend",
-    "PHOR": "dividend",
-    "AFKS": "growth",
-}
-
-SECTOR_NAMES = {
-    "SBER": "Банки",
-    "GAZP": "Нефть и газ",
-    "LKOH": "Нефть и газ",
-    "VTBR": "Банки",
-    "MOEX": "Финансы",
-}
-
-SAFE_ETFS = [
-    "FXRL",
-    "SBMX",
-    "TMOS",
-    "AKIM",
-    "RUSB",
-    "TRUR",
-]
-
-SAFE_BONDS = [
-    "SU26238RMFS5",
-    "SU26243RMFS2",
-    "SU26248RMFS1",
-]
-
-
-SECTOR_LIMITS = {
-    "Нефть и газ": 0.35,
-    "Банки": 0.25,
-    "Финансы": 0.20,
-    "Металлы": 0.20,
-    "Телеком": 0.15,
-    "IT": 0.15,
-    "Потреб": 0.20,
-}
 
 
 class PortfolioAllocator:
@@ -257,35 +207,34 @@ class PortfolioAllocator:
             )
         return result
 
-    def _score_candidates(
+    def _filter_candidates_by_category(self, instruments: list[dict], category: str) -> list[dict]:
+        if category == "etf":
+            return [i for i in instruments if i["type"] == "etf" and i["last_price"]]
+        if category == "dividend":
+            return [i for i in instruments if i["type"] == "stock" and i["is_dividend"] and i["last_price"]]
+        if category == "bond":
+            return [i for i in instruments if i["type"] == "bond" and i["last_price"]]
+        if category == "growth":
+            return [i for i in instruments if i["type"] == "stock" and i["is_growth"] and i["last_price"]]
+        return []
+
+    def _score_candidates_core(
         self,
-        instruments: list[dict],
+        candidates: list[dict],
         category: str,
         budget: float,
-        existing: list[dict],
-        db,
+        existing_tickers: set[str],
+        existing_tickers_list: list[str],
+        risk_fn,
+        penalty_fn,
+        dividend_fn,
+        volume_fn,
     ) -> list[dict]:
-        existing_tickers = set(e["ticker"] for e in existing)
-        existing_tickers_list = list(existing_tickers)
-
-        if category == "etf":
-            candidates = [i for i in instruments if i["type"] == "etf" and i["last_price"]]
-        elif category == "dividend":
-            candidates = [i for i in instruments if i["type"] == "stock" and i["is_dividend"] and i["last_price"]]
-        elif category == "bond":
-            candidates = [i for i in instruments if i["type"] == "bond" and i["last_price"]]
-        elif category == "growth":
-            candidates = [i for i in instruments if i["type"] == "stock" and i["is_growth"] and i["last_price"]]
-        else:
-            return []
-
-        from src.analysis.correlation import correlation as corr_analyzer
-
         for c in candidates:
             score = 0.0
             reason_parts = []
 
-            risk = _item_risk(c, db, budget)
+            risk = risk_fn(c, budget)
             c["risk"] = risk
 
             var_95 = risk.get("var_95", 0) or 0
@@ -309,7 +258,7 @@ class PortfolioAllocator:
                 score += 1.0
                 reason_parts.append("уже в портфеле")
 
-            penalty = corr_analyzer.diversification_penalty(c["ticker"], existing_tickers_list, db)
+            penalty = penalty_fn(c["ticker"], existing_tickers_list)
             if penalty > 0:
                 score -= penalty
                 reason_parts.append("высокая корреляция с портфелем")
@@ -321,14 +270,14 @@ class PortfolioAllocator:
                 score += 1.0
                 reason_parts.append(f"див. доходность {c['div_yield']:.1f}%")
 
-            upcoming = self._upcoming_dividend_score(c, db)
+            upcoming = dividend_fn(c)
             if upcoming["bonus"]:
                 score += upcoming["bonus"]
                 reason_parts.append(upcoming["reason"])
 
             if category == "etf":
-                volume_score = self._volume_score(c, db)
-                score += volume_score
+                vs = volume_fn(c)
+                score += vs
                 if c["ticker"] in SAFE_ETFS:
                     score += 2.0
                     reason_parts.append("надёжный БПИФ")
@@ -347,6 +296,34 @@ class PortfolioAllocator:
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates
+
+    def _score_candidates(
+        self,
+        instruments: list[dict],
+        category: str,
+        budget: float,
+        existing: list[dict],
+        db,
+    ) -> list[dict]:
+        existing_tickers = set(e["ticker"] for e in existing)
+        existing_tickers_list = list(existing_tickers)
+        candidates = self._filter_candidates_by_category(instruments, category)
+        if not candidates:
+            return []
+
+        from src.analysis.correlation import correlation as corr_analyzer
+
+        return self._score_candidates_core(
+            candidates,
+            category,
+            budget,
+            existing_tickers,
+            existing_tickers_list,
+            risk_fn=lambda c, b: _item_risk(c, db, b),
+            penalty_fn=lambda t, tl: corr_analyzer.diversification_penalty(t, tl, db),
+            dividend_fn=lambda c: self._upcoming_dividend_score(c, db),
+            volume_fn=lambda c: self._volume_score(c, db),
+        )
 
     def _upcoming_dividend_score(self, inst: dict, db) -> dict:
         try:
@@ -469,7 +446,7 @@ class PortfolioAllocator:
 
                 sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
 
-                risk = _item_risk_sync(item, capital)
+                risk = await _item_risk_async(item, db, capital)
                 category_items.append(
                     {
                         "ticker": item["ticker"],
@@ -588,25 +565,23 @@ class PortfolioAllocator:
     ) -> list[dict]:
         existing_tickers = set(e["ticker"] for e in existing)
         existing_tickers_list = list(existing_tickers)
-
-        if category == "etf":
-            candidates = [i for i in instruments if i["type"] == "etf" and i["last_price"]]
-        elif category == "dividend":
-            candidates = [i for i in instruments if i["type"] == "stock" and i["is_dividend"] and i["last_price"]]
-        elif category == "bond":
-            candidates = [i for i in instruments if i["type"] == "bond" and i["last_price"]]
-        elif category == "growth":
-            candidates = [i for i in instruments if i["type"] == "stock" and i["is_growth"] and i["last_price"]]
-        else:
+        candidates = self._filter_candidates_by_category(instruments, category)
+        if not candidates:
             return []
 
         from src.analysis.correlation import correlation as corr_analyzer
 
-        for c in candidates:
+        risk_results = await asyncio.gather(*[_item_risk_async(c, db, budget) for c in candidates])
+        penalty_results = await asyncio.gather(
+            *[corr_analyzer.diversification_penalty_async(c["ticker"], existing_tickers_list, db) for c in candidates]
+        )
+        dividend_results = await asyncio.gather(*[self._upcoming_dividend_score_async(c, db) for c in candidates])
+        volume_results = await asyncio.gather(*[self._volume_score_async(c, db) for c in candidates])
+
+        for c, risk, penalty, div, vol in zip(candidates, risk_results, penalty_results, dividend_results, volume_results):
             score = 0.0
             reason_parts = []
 
-            risk = _item_risk_sync(c, budget)
             c["risk"] = risk
 
             var_95 = risk.get("var_95", 0) or 0
@@ -630,7 +605,6 @@ class PortfolioAllocator:
                 score += 1.0
                 reason_parts.append("уже в портфеле")
 
-            penalty = await corr_analyzer.diversification_penalty_async(c["ticker"], existing_tickers_list, db)
             if penalty > 0:
                 score -= penalty
                 reason_parts.append("высокая корреляция с портфелем")
@@ -642,14 +616,12 @@ class PortfolioAllocator:
                 score += 1.0
                 reason_parts.append(f"див. доходность {c['div_yield']:.1f}%")
 
-            upcoming = await self._upcoming_dividend_score_async(c, db)
-            if upcoming["bonus"]:
-                score += upcoming["bonus"]
-                reason_parts.append(upcoming["reason"])
+            if div["bonus"]:
+                score += div["bonus"]
+                reason_parts.append(div["reason"])
 
             if category == "etf":
-                volume_score = await self._volume_score_async(c, db)
-                score += volume_score
+                score += vol
                 if c["ticker"] in SAFE_ETFS:
                     score += 2.0
                     reason_parts.append("надёжный БПИФ")
@@ -723,7 +695,26 @@ def _item_risk(item: dict, db, capital: float = 100_000) -> dict:
 
 
 def _item_risk_sync(item: dict, capital: float = 100_000) -> dict:
-    return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0, "risk_score": 0.5}
+    from src.db.connection import get_session
+
+    db = get_session()
+    try:
+        return _item_risk(item, db, capital)
+    finally:
+        db.close()
+
+
+async def _item_risk_async(item: dict, db: AsyncSession, capital: float = 100_000) -> dict:
+    result = await db.execute(
+        select(Price).where(Price.instrument_id == item["id"]).order_by(Price.date.desc()).limit(60)
+    )
+    prices = result.scalars().all()
+    if len(prices) < 10:
+        return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
+    close_vals = [p.close for p in prices if p.close]
+    if len(close_vals) < 10:
+        return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
+    return _compute_risk_from_closes(close_vals, item, capital)
 
 
 def _compute_risk_from_closes(close_vals: list[float], item: dict, capital: float) -> dict:
