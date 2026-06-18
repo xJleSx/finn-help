@@ -272,6 +272,7 @@ class Subscription(Base):
     notify_daily = Column(Boolean, default=True)
     notify_geo = Column(Boolean, default=False)
     notify_dividend = Column(Boolean, default=False)
+    notify_trade = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.now())
 
     __table_args__ = (UniqueConstraint("user_id", name="uq_subscription_user"),)

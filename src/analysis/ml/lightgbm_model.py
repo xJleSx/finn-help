@@ -1,13 +1,44 @@
 import logging
+from typing import Optional
 
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+from src.model_registry import save_model, load_model as load_from_registry
+
 logger = logging.getLogger(__name__)
 
 
 class LightGBMClassifier:
+    def __init__(self, ticker: str = ""):
+        self._model: Optional = None
+        self._ticker = ticker
+
+    @property
+    def model_name(self) -> str:
+        return f"lgb_{self._ticker}" if self._ticker else "lgb"
+
+    def save(self, metrics: Optional[dict] = None) -> str:
+        if self._model is None:
+            raise ValueError("No trained model to save")
+        return save_model(self._model, self.model_name, metrics=metrics)
+
+    def load(self, version: Optional[str] = None):
+        self._model = load_from_registry(self.model_name, version=version)
+        return self._model
+
+    def train(self, df: pd.DataFrame) -> bool:
+        features = self._prepare_features(df)
+        if features.empty or len(features) < 30:
+            return False
+        model = self._train_on_the_fly(df, features)
+        if model is None:
+            return False
+        self._model = model
+        self.save(metrics={"rows": len(features), "ticker": self._ticker})
+        return True
+
     def predict(self, df: pd.DataFrame) -> dict:
         if df.empty or len(df) < 60:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
@@ -16,7 +47,19 @@ class LightGBMClassifier:
         if features.empty or len(features) < 30:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
 
-        model = self._train_on_the_fly(df, features)
+        model = self._model
+        if model is None:
+            try:
+                model = self.load()
+            except (ValueError, FileNotFoundError):
+                pass
+
+        if model is None:
+            model = self._train_on_the_fly(df, features)
+            if model is not None:
+                self._model = model
+                self.save(metrics={"rows": len(features), "ticker": self._ticker})
+
         if model is None:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
 

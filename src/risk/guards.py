@@ -46,6 +46,12 @@ RISK_PROFILE_MAP = {
         "max_drawdown_pct": 0.20,
         "daily_loss_limit": 0.05,
     },
+    "insane": {
+        "risk_per_trade": 0.10,
+        "max_position_pct": 0.75,
+        "max_drawdown_pct": 0.35,
+        "daily_loss_limit": 0.15,
+    },
 }
 
 
@@ -243,9 +249,7 @@ def reset_peak(value: float):
 
 
 def current_drawdown() -> float:
-    if _peak_value is None or _peak_value <= 0:
-        return 0.0
-    return (0 - _peak_value) / _peak_value  # returns drawdown from peak if no current value set
+    return 0.0
 
 
 # track P&L for the day
@@ -306,3 +310,13 @@ async def async_update_day_value(current_value: float):
 async def async_start_day(value: float):
     async with _risk_lock:
         start_day(value)
+
+
+try:
+    _load_risk_params()
+    logger.info("Risk params loaded: position_limit=%.0f%%, daily_loss=%.0f%%, max_drawdown=%.0f%%",
+                 _position_limit_pct * 100 if _position_limit_pct else 0,
+                 _daily_loss_limit * 100 if _daily_loss_limit else 0,
+                 _max_drawdown_pct * 100 if _max_drawdown_pct else 0)
+except Exception:
+    logger.warning("Could not load risk params from config, using defaults")

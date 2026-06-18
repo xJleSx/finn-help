@@ -26,21 +26,33 @@ class AnalysisService:
         self.volatility = VolatilityRegimeDetector()
         self.mtf = MultiTimeframeAnalyzer()
 
-    @property
-    def prophet(self):
-        if self._prophet is None:
+    def _get_prophet(self, ticker: str = ""):
+        key = f"prophet_{ticker}"
+        if not hasattr(self, "_prophet_cache"):
+            self._prophet_cache = {}
+        if key not in self._prophet_cache:
             from src.analysis.ml.prophet_model import ProphetPredictor
 
-            self._prophet = ProphetPredictor()
-        return self._prophet
+            self._prophet_cache[key] = ProphetPredictor(ticker=ticker)
+        return self._prophet_cache[key]
+
+    @property
+    def prophet(self):
+        return self._get_prophet()
+
+    def _get_ensemble(self, ticker: str = ""):
+        key = f"ensemble_{ticker}"
+        if not hasattr(self, "_ensemble_cache"):
+            self._ensemble_cache = {}
+        if key not in self._ensemble_cache:
+            from src.analysis.ml.ensemble import EnsemblePredictor
+
+            self._ensemble_cache[key] = EnsemblePredictor(ticker=ticker)
+        return self._ensemble_cache[key]
 
     @property
     def ensemble(self):
-        if self._ensemble is None:
-            from src.analysis.ml.ensemble import EnsemblePredictor
-
-            self._ensemble = EnsemblePredictor()
-        return self._ensemble
+        return self._get_ensemble()
 
     def _price_df(self, prices: list[Price]) -> pd.DataFrame:
         return pd.DataFrame(
@@ -75,12 +87,12 @@ class AnalysisService:
     def _dividend_df(self, divs: list[Dividend]) -> pd.DataFrame:
         return pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
 
-    def _compute_ml(self, df: pd.DataFrame, ind_df: pd.DataFrame) -> dict | None:
+    def _compute_ml(self, df: pd.DataFrame, ind_df: pd.DataFrame, ticker: str = "") -> dict | None:
         if len(df) < 60:
             return None
         try:
-            pr = self.prophet.predict(df)
-            ensemble = self.ensemble.predict(ind_df)
+            pr = self._get_prophet(ticker).predict(df)
+            ensemble = self._get_ensemble(ticker).predict(ind_df)
             ml = pr
             ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble.get("confidence", 0))
             ml["xgb_action"] = ensemble.get("xgb_action", "NEUTRAL")
@@ -148,7 +160,7 @@ class AnalysisService:
         div_df = self._dividend_df(divs)
         fund = self.fundamental.analyze(df, div_df)
 
-        ml = self._compute_ml(df, ind_df) if with_ml else None
+        ml = self._compute_ml(df, ind_df, ticker=ticker) if with_ml else None
         geo = await self._load_geo(db)
         macro_context = await self._load_macro(db)
         sentiment = await self._load_sentiment(db)
@@ -254,7 +266,7 @@ class AnalysisService:
                 div_df = self._dividend_df(divs)
                 fund = self.fundamental.analyze(df, div_df)
 
-                ml = self._compute_ml(df, ind_df) if with_ml else None
+                ml = self._compute_ml(df, ind_df, ticker=str(inst.ticker or "")) if with_ml else None
                 geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
                 geo = {"score": geo_row.score} if geo_row else {"score": 0.0}
 
@@ -302,6 +314,49 @@ class AnalysisService:
                 logger.warning("analyze_all_sync failed for %s: %s", inst.ticker, e)
                 continue
         return signals
+
+    def train_models(self, db, ticker: str | None = None) -> dict[str, bool]:
+        q = select(Instrument)
+        if ticker:
+            q = q.where(Instrument.ticker == ticker.upper())
+        result = db.execute(q)
+        instruments = result.scalars().all()
+
+        all_results: dict[str, bool] = {}
+        for inst in instruments:
+            sym = str(inst.ticker or "")
+            prices = (
+                db.query(Price)
+                .filter_by(instrument_id=inst.id)
+                .order_by(Price.date)
+                .all()
+            )
+            if len(prices) < 60:
+                logger.info("Skipping %s: only %d prices", sym, len(prices))
+                continue
+            df = self._price_df(prices)
+
+            ind_rows = (
+                db.query(Indicator)
+                .filter_by(instrument_id=inst.id)
+                .order_by(Indicator.date)
+                .all()
+            )
+            if len(ind_rows) < 2:
+                logger.info("Skipping %s: no indicators", sym)
+                continue
+            ind_df = self._indicator_df(ind_rows)
+            ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
+
+            ensemble = self._get_ensemble(sym)
+            results = ensemble.train_all(df)
+            all_results[sym] = all(results.values())
+            logger.info(
+                "Model training for %s: %s",
+                sym,
+                "OK" if all_results[sym] else "partial",
+            )
+        return all_results
 
 
 analysis_service = AnalysisService()

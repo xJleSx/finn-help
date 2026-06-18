@@ -1,26 +1,33 @@
 import logging
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 from src.analysis.ml.walk_forward import adjust_confidence_by_oos, walk_forward_validate
+from src.model_registry import save_model, load_model as load_from_registry
 
 logger = logging.getLogger(__name__)
 
 
 class EnsemblePredictor:
-    def __init__(self):
+    def __init__(self, ticker: str = ""):
         self._xgb = None
         self._lgb = None
         self._cat = None
         self._meta = None
+        self._ticker = ticker
+
+    @property
+    def model_name(self) -> str:
+        return f"ensemble_{self._ticker}" if self._ticker else "ensemble"
 
     @property
     def xgb(self):
         if self._xgb is None:
             from src.analysis.ml.xgboost_model import XGBoostClassifier
 
-            self._xgb = XGBoostClassifier()
+            self._xgb = XGBoostClassifier(ticker=self._ticker)
         return self._xgb
 
     @property
@@ -28,7 +35,7 @@ class EnsemblePredictor:
         if self._lgb is None:
             from src.analysis.ml.lightgbm_model import LightGBMClassifier
 
-            self._lgb = LightGBMClassifier()
+            self._lgb = LightGBMClassifier(ticker=self._ticker)
         return self._lgb
 
     @property
@@ -36,7 +43,7 @@ class EnsemblePredictor:
         if self._cat is None:
             from src.analysis.ml.catboost_model import CatBoostClassifierModel
 
-            self._cat = CatBoostClassifierModel()
+            self._cat = CatBoostClassifierModel(ticker=self._ticker)
         return self._cat
 
     def _get_weights(self, oos_list: list[dict]) -> list[float]:
@@ -123,6 +130,55 @@ class EnsemblePredictor:
             "walk_forward": oos_agg,
             "weights": [round(w, 3) for w in weights[: len(results)]],
         }
+
+    def train_all(self, df: pd.DataFrame) -> dict[str, bool]:
+        results = {}
+        for name in ("xgb", "lgb", "cat"):
+            try:
+                model = getattr(self, name)
+                results[name] = model.train(df)
+            except Exception as e:
+                logger.warning("Ensemble %s training failed: %s", name, e)
+                results[name] = False
+        return results
+
+    def save_meta(self, metrics: Optional[dict] = None) -> str:
+        meta_data = {
+            "meta": self._meta,
+            "ticker": self._ticker,
+        }
+        return save_model(meta_data, self.model_name, metrics=metrics)
+
+    def load_meta(self, version: Optional[str] = None):
+        data = load_from_registry(self.model_name, version=version)
+        self._meta = data.get("meta")
+        return self._meta
+
+    def save_all(self) -> dict[str, str]:
+        versions = {}
+        for name in ("xgb", "lgb", "cat"):
+            try:
+                versions[name] = getattr(self, name).save()
+            except Exception as e:
+                logger.warning("Failed to save %s: %s", name, e)
+        try:
+            versions["meta"] = self.save_meta()
+        except Exception as e:
+            logger.warning("Failed to save meta: %s", e)
+        return versions
+
+    def load_all(self) -> bool:
+        success = True
+        for name in ("xgb", "lgb", "cat"):
+            try:
+                getattr(self, name).load()
+            except Exception:
+                success = False
+        try:
+            self.load_meta()
+        except Exception:
+            success = False
+        return success
 
     def _stacking_predict(self, df: pd.DataFrame, base_preds: list[dict]) -> float | None:
         try:

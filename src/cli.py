@@ -210,7 +210,7 @@ async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True)
         divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
         div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
         fund = analysis_service.fundamental.analyze(pdf, div_df)
-        ml = analysis_service._compute_ml(pdf, idf) if with_ml else None
+        ml = analysis_service._compute_ml(pdf, idf, ticker=ticker.upper()) if with_ml else None
         geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
         geo = {"score": geo_row.score} if geo_row else {"score": 0.0}
 
@@ -426,7 +426,7 @@ def macro():
 @app.command()
 def sectors():
     """Показать распределение инструментов по секторам"""
-    from src.portfolio.allocator import SECTOR_NAMES
+    from src.constants import SECTOR_NAMES
 
     db = get_session()
     try:
@@ -532,6 +532,30 @@ def seed_portfolio(
 
 
 @app.command()
+def train_models(
+    ticker: Optional[str] = typer.Argument(None, help="Тикер (например, SBER), все если не указан"),
+):
+    """Обучить и сохранить ML-модели для инструментов"""
+    db = get_session()
+    try:
+        with console.status("Обучение моделей..."):
+            results = analysis_service.train_models(db, ticker=ticker)
+        success = sum(1 for v in results.values() if v)
+        total = len(results)
+        if total == 0:
+            console.print("[yellow]Нет инструментов для обучения[/yellow]")
+            return
+        table = Table(title=f"🤖 Обучение моделей: {success}/{total} OK")
+        table.add_column("Тикер", style="cyan")
+        table.add_column("Результат", style="yellow")
+        for t, ok in sorted(results.items()):
+            table.add_row(t, "[green]✓[/green]" if ok else "[red]✗[/red]")
+        console.print(table)
+    finally:
+        db.close()
+
+
+@app.command()
 def full_cycle():
     """Полный цикл: update → train → backtest → report"""
     from datetime import datetime, timezone
@@ -556,8 +580,14 @@ def full_cycle():
     # 2. Train models
     console.print("\n[bold cyan]2/4 Обучение моделей...[/bold cyan]")
     try:
-        asyncio.run(analysis_service.update_all())
-        console.print("  ✓ Модели обновлены")
+        db = get_session()
+        try:
+            results = analysis_service.train_models(db)
+            success = sum(1 for v in results.values() if v)
+            total = len(results)
+            console.print(f"  ✓ Модели обучены: {success}/{total} инструментов")
+        finally:
+            db.close()
     except Exception as e:
         logger.warning("Train error: %s", e)
         console.print("  [yellow]⚠ Обучение пропущено[/yellow]")

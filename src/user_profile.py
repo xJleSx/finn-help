@@ -3,37 +3,12 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.constants import RISK_PROFILES
+
 logger = logging.getLogger(__name__)
 
 PROFILES_DIR = Path(__file__).resolve().parents[2] / "data" / "profiles"
 PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-
-RISK_PROFILES = {
-    "conservative": {
-        "label": "Консервативный",
-        "weights": {"technical": 0.30, "fundamental": 0.25, "geo": 0.20, "ml": 0.08, "sentiment": 0.07, "mtf": 0.10},
-        "max_position_pct": 10,
-        "min_confidence": 0.4,
-        "geo_threshold": 6.0,
-        "description": "Низкий риск, приоритет фундаментального анализа и геополитики",
-    },
-    "balanced": {
-        "label": "Умеренный",
-        "weights": {"technical": 0.35, "fundamental": 0.18, "geo": 0.17, "ml": 0.13, "sentiment": 0.12, "mtf": 0.05},
-        "max_position_pct": 20,
-        "min_confidence": 0.3,
-        "geo_threshold": 7.0,
-        "description": "Сбалансированный риск, стандартные веса",
-    },
-    "aggressive": {
-        "label": "Агрессивный",
-        "weights": {"technical": 0.40, "fundamental": 0.10, "geo": 0.10, "ml": 0.20, "sentiment": 0.15, "mtf": 0.05},
-        "max_position_pct": 35,
-        "min_confidence": 0.2,
-        "geo_threshold": 8.0,
-        "description": "Высокий риск, упор на технический и ML анализ",
-    },
-}
 
 
 @dataclass

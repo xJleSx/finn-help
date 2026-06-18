@@ -8,14 +8,14 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 try:
-    from tinkoff.invest import (
+    from t_tech.invest import (
         AsyncClient,
         CandleInterval,
         InstrumentType,
         OrderDirection,
         OrderType,
     )
-    from tinkoff.invest.constants import INVEST_GRPC_API, INVEST_GRPC_API_SANDBOX
+    from t_tech.invest.constants import INVEST_GRPC_API, INVEST_GRPC_API_SANDBOX
 
     HAS_SDK = True
 except ImportError:
@@ -32,18 +32,21 @@ class TBankClient:
             raise ValueError("TINKOFF_TOKEN not set in .env")
         self._use_sandbox = use_sandbox
         self._client: Optional[AsyncClient] = None
+        self._raw_client: Optional[AsyncClient] = None
 
     def _target(self):
         return INVEST_GRPC_API_SANDBOX if self._use_sandbox else INVEST_GRPC_API
 
     async def __aenter__(self):
-        self._client = await AsyncClient(self._token, target=self._target()).__aenter__()
+        self._raw_client = AsyncClient(self._token, target=self._target())
+        self._client = await self._raw_client.__aenter__()
         return self
 
     async def __aexit__(self, *args):
-        if self._client:
-            await self._client.__aexit__(*args)
+        if self._raw_client:
+            await self._raw_client.__aexit__(*args)
             self._client = None
+            self._raw_client = None
 
     async def get_accounts(self) -> list[dict]:
         if not self._client:
@@ -55,7 +58,7 @@ class TBankClient:
                 "type": a.type,
                 "name": a.name,
                 "status": a.status,
-                "opened_date": str(a.opened_date) if a.HasField("opened_date") else None,
+                "opened_date": str(a.opened_date) if a.opened_date else None,
             }
             for a in resp.accounts
         ]
@@ -78,6 +81,16 @@ class TBankClient:
                     }
                 )
         return positions
+
+    async def get_account_balance(self, account_id: str) -> float:
+        if not self._client:
+            raise RuntimeError("Client not initialized")
+        resp = await self._client.operations.get_portfolio(account_id=account_id)
+        total = 0.0
+        for p in resp.positions:
+            if p.instrument_type == "currency":
+                total += self._money(p.quantity)
+        return total
 
     async def get_candles(
         self,
@@ -145,10 +158,25 @@ class TBankClient:
             "direction": "BUY" if resp.direction == 1 else "SELL",
             "type": "market" if resp.order_type == 1 else "limit",
             "executed_price": self._money(resp.executed_order_price),
-            "total_commission": self._money(resp.total_commission),
+            "total_commission": self._money(resp.executed_commission),
             "executed_quantity": resp.lots_executed,
             "status": str(resp.execution_report_status),
         }
+
+    async def sandbox_pay_in(self, account_id: str, amount: float, currency: str = "RUB") -> dict:
+        if not self._client:
+            raise RuntimeError("Client not initialized")
+        from t_tech.invest.grpc.sandbox_pb2 import SandboxPayInRequest as ProtoRequest
+
+        req = ProtoRequest()
+        req.account_id = account_id
+        req.amount.units = int(amount)
+        req.amount.nano = int(round((amount - int(amount)) * 1e9))
+        req.amount.currency = currency
+        resp = await self._client.sandbox.stub.SandboxPayIn(
+            request=req, metadata=self._client.sandbox.metadata
+        )
+        return {"units": resp.balance.units, "nano": resp.balance.nano, "currency": resp.balance.currency}
 
     async def cancel_order(self, account_id: str, order_id: str) -> bool:
         if not self._client:
@@ -205,7 +233,7 @@ class TBankClient:
 
     @staticmethod
     def _to_quotation(val: float):
-        from tinkoff.invest import Quotation
+        from t_tech.invest import Quotation
         units = int(val)
         nano = int(round((val - units) * 1e9))
         return Quotation(units=units, nano=nano)

@@ -67,7 +67,7 @@ def format_daily_summary_text(n: DailySummaryNotification) -> str:
 class NotificationService:
     # --- Subscriptions ---
 
-    VALID_NOTIFY_TYPES = frozenset({"signal", "daily", "geo", "dividend"})
+    VALID_NOTIFY_TYPES = frozenset({"signal", "daily", "geo", "dividend", "trade"})
 
     def subscribe(self, user_id: int, chat_id: int, notify_type: str = "daily") -> None:
         if notify_type not in self.VALID_NOTIFY_TYPES:

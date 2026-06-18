@@ -29,6 +29,7 @@ from src.analysis.whatif import whatif_macro, whatif_scenario
 from src.cli import run_analysis
 from src.collectors.cbr import CBRCollector
 from src.config import personal, settings
+from src.constants import CACHE_TTL, COOLDOWN_SECONDS, MAX_CACHE_SIZE
 from src.db.connection import get_session
 from src.db.models import GeoRiskScore, Instrument, Price, Signal as SignalModel, UserSetting
 from src.db.models import Portfolio as PortModel
@@ -52,11 +53,8 @@ from src.reports import generate_portfolio_csv
 logger = logging.getLogger(__name__)
 
 analysis_cache: OrderedDict[str, tuple[float, dict, str]] = OrderedDict()
-CACHE_TTL = 300
-MAX_CACHE_SIZE = 100
 
 _user_cooldowns: dict[int, float] = {}
-COOLDOWN_SECONDS = 5
 
 TICKER, QUANTITY, PRICE = range(3)
 
@@ -665,25 +663,73 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _check_cooldown(update):
         return
 
+    msg = await update.effective_message.reply_text("⏳ Синхронизация с T-Bank...")
+    try:
+        from src.brokers.sync import sync_portfolio_from_broker
+        sync_result = await sync_portfolio_from_broker()
+        if sync_result.get("status") == "no_token":
+            await msg.edit_text("❌ TINKOFF_TOKEN не настроен")
+            return
+        if sync_result.get("status") == "no_accounts":
+            await msg.edit_text("❌ Нет счетов в T-Bank")
+            return
+    except Exception as e:
+        logger.warning("Sync failed: %s", e)
+
     db = get_session()
     try:
         rows = get_portfolio_positions(db)
         if not rows:
-            await update.effective_message.reply_text("Портфель пуст")
-            return
+            try:
+                from src.brokers.tbank import TBankClient
+                async with TBankClient(use_sandbox=settings.tinkoff_sandbox) as tbank:
+                    accounts = await tbank.get_accounts()
+                    if accounts:
+                        balance = await tbank.get_account_balance(accounts[0]["id"])
+                        await msg.edit_text(
+                            f"📭 *Портфель пуст*\n\n"
+                            f"💵 Доступно: {balance:,.0f} ₽\n\n"
+                            f"Сигналы пока не дают BUY/SELL.\n"
+                            f"Текущие сигналы: `/portfolio` (обновляется раз в час)",
+                            parse_mode="Markdown"
+                        )
+                        return
+                await msg.edit_text("📭 Портфель пуст. Нет счетов в T-Bank.")
+                return
+            except Exception as e:
+                logger.warning("Failed to get balance: %s", e)
+                await msg.edit_text("📭 Портфель пуст. Нет позиций.")
+                return
 
-        lines = ["\U0001f4ca Портфель:\n"]
-        total = 0
+        lines = ["📊 *Портфель (T-Bank)*\n"]
+        total_value = 0.0
+        total_cost = 0.0
         for r in rows:
-            emoji = "\U0001f7e2" if r["profit_pct"] > 0 else "\U0001f534"
-            lines.append(
-                f"{emoji} {r['ticker']}: {r['quantity']:.1f} \u00d7 {r['current_price']:.2f}"
-                f" = {r['value']:.2f}\u20bd ({r['profit_pct']:+.1f}%)"
-            )
-            total += r["value"]
+            qty = r["quantity"]
+            avg = r["avg_price"]
+            cur = r["current_price"]
+            val = r["value"]
+            cost = avg * qty
+            pnl = val - cost
+            pnl_pct = ((cur / avg) - 1) * 100 if avg > 0 else 0.0
+            emoji = "🟢" if pnl >= 0 else "🔴"
 
-        lines.append(f"\n\U0001f4b5 Всего: {total:.2f} \u20bd")
-        await update.effective_message.reply_text("\n".join(lines))
+            lines.append(
+                f"{emoji} *{r['ticker']}*: {qty:.0f} шт × {cur:.2f} ₽\n"
+                f"   Средняя: {avg:.2f} | Стоимость: {val:,.0f} ₽\n"
+                f"   P&L: {pnl:+,.0f} ₽ ({pnl_pct:+.1f}%)"
+            )
+            total_value += val
+            total_cost += cost
+
+        total_pnl = total_value - total_cost
+        total_pnl_pct = ((total_value / total_cost) - 1) * 100 if total_cost > 0 else 0.0
+        total_emoji = "🟢" if total_pnl >= 0 else "🔴"
+        lines.append(
+            f"\n{total_emoji} *Итого:* {total_value:,.0f} ₽"
+            f" | P&L: {total_pnl:+,.0f} ₽ ({total_pnl_pct:+.1f}%)"
+        )
+        await msg.edit_text("\n".join(lines), parse_mode="Markdown")
     finally:
         db.close()
 
@@ -885,6 +931,22 @@ async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
+async def _ns_get_subscribers(ns: NotificationService, notify_type: str = "signal") -> list[tuple[int, int]]:
+    return await asyncio.to_thread(ns.get_subscribers, notify_type)
+
+
+async def _ns_get_upcoming_dividends(ns: NotificationService, days_ahead: int = 14) -> list:
+    return await asyncio.to_thread(ns.get_upcoming_dividends, days_ahead)
+
+
+async def _ns_get_daily_summary(ns: NotificationService):
+    return await asyncio.to_thread(ns.get_daily_summary)
+
+
+async def _ns_save_notification(ns: NotificationService, uid: int, notify_type: str, text: str, title: str = ""):
+    await asyncio.to_thread(ns.save_notification, uid, notify_type, text, title)
+
+
 async def broadcast_signal(n):
     if app is None:
         logger.warning("Bot not running, skipping signal broadcast")
@@ -892,10 +954,11 @@ async def broadcast_signal(n):
 
     ns = NotificationService()
     text = format_signal_text(n)
-    for uid, cid in ns.get_subscribers("signal"):
+    subscribers = await _ns_get_subscribers(ns, "signal")
+    for uid, cid in subscribers:
         try:
             await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
-            ns.save_notification(uid, "signal", text, title=n.ticker)
+            await _ns_save_notification(ns, uid, "signal", text, title=n.ticker)
         except Exception as e:
             logger.warning(f"Failed to send signal to {uid}: {e}")
 
@@ -906,10 +969,11 @@ async def broadcast_dividends():
         return
 
     ns = NotificationService()
-    dividends = ns.get_upcoming_dividends(days_ahead=14)
+    dividends = await _ns_get_upcoming_dividends(ns, days_ahead=14)
     if not dividends:
         return
-    for uid, cid in ns.get_subscribers("dividend"):
+    subscribers = await _ns_get_subscribers(ns, "dividend")
+    for uid, cid in subscribers:
         for d in dividends:
             text = (
                 f"💵 *{d.ticker}* — дивиденды {d.amount:.0f} ₽/акц"
@@ -918,7 +982,7 @@ async def broadcast_dividends():
             )
             try:
                 await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
-                ns.save_notification(uid, "dividend", text, title=d.ticker)
+                await _ns_save_notification(ns, uid, "dividend", text, title=d.ticker)
             except Exception as e:
                 logger.warning(f"Failed to send dividend to {uid}: {e}")
 
@@ -929,14 +993,50 @@ async def broadcast_daily_summary():
         return
 
     ns = NotificationService()
-    summary = ns.get_daily_summary()
+    summary = await _ns_get_daily_summary(ns)
     text = format_daily_summary_text(summary)
-    for uid, cid in ns.get_subscribers("daily"):
+    subscribers = await _ns_get_subscribers(ns, "daily")
+    for uid, cid in subscribers:
         try:
             await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
-            ns.save_notification(uid, "daily", text, title="Ежедневная сводка")
+            await _ns_save_notification(ns, uid, "daily", text, title="Ежедневная сводка")
         except Exception as e:
             logger.warning(f"Failed to send daily to {uid}: {e}")
+
+
+async def broadcast_trade(
+    ticker: str,
+    direction: str,
+    quantity: int,
+    price: float,
+    status: str,
+    reason: str = "",
+    order_id: str = "",
+    portfolio_value: Optional[float] = None,
+):
+    if app is None:
+        logger.warning("Bot not running, skipping trade broadcast")
+        return
+
+    emoji = "🟢" if direction == "BUY" else "🔴"
+    text = (
+        f"{emoji} *{ticker}* — {direction} {quantity} шт. по {price:.2f} ₽\n"
+        f"Статус: {status}"
+    )
+    if reason:
+        text += f"\n📌 Причина: {reason}"
+    if order_id:
+        text += f"\n🆔 Заявка: `{order_id[:12]}...`"
+    if portfolio_value is not None:
+        text += f"\n💵 Портфель: {portfolio_value:,.0f} ₽"
+
+    ns = NotificationService()
+    for uid, cid in ns.get_subscribers("trade"):
+        try:
+            await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+            ns.save_notification(uid, "trade", text, title=ticker)
+        except Exception as e:
+            logger.warning(f"Failed to send trade to {uid}: {e}")
 
 
 app: Optional[Application] = None
