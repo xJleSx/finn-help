@@ -358,7 +358,10 @@ async def run_execution_loop(interval: int = 300):
             if await market_hours_check():
                 await _check_daily_pnl()
 
-                if not await async_is_kill_switch_active():
+                if not settings.enable_trading:
+                    if _trades_today > 0 and _last_reset_day != datetime.now(timezone.utc).strftime("%Y-%m-%d"):
+                        reset_daily_counters()
+                elif not await async_is_kill_switch_active():
                     await _process_signals()
                     await _check_stop_losses()
 

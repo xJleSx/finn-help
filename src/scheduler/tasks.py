@@ -309,7 +309,7 @@ async def _notify_signals(signals: list[dict]):
         except Exception as e:
             logger.warning(f"Broadcast failed for {s['ticker']}: {e}")
 
-        if settings.tinkoff_token and s["action"] in ("BUY", "SELL"):
+        if settings.enable_trading and settings.tinkoff_token and s["action"] in ("BUY", "SELL"):
             try:
                 db = get_session()
                 inst = db.query(Instrument).filter(

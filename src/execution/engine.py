@@ -10,6 +10,8 @@ from src.config import personal, settings
 from src.execution.audit import log_trade, save_order, update_order_status
 from src.execution.stoploss import position_tracker
 
+_TRADING_ENABLED: bool | None = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -123,12 +125,19 @@ async def execute_order(
         _notify_trade(record, reason)
         return record
 
-    if not settings.tinkoff_token and _mode == TradeMode.AUTO:
-        record.status = "failed"
-        logger.error("No TINKOFF_TOKEN set — cannot execute AUTO mode order")
-        _execution_log.append(record)
-        record.db_id = save_order(record)
-        return record
+    if _mode == TradeMode.AUTO:
+        if not settings.enable_trading:
+            record.status = "failed"
+            logger.error("Trading disabled — set ENABLE_TRADING=true to use AUTO mode")
+            _execution_log.append(record)
+            record.db_id = save_order(record)
+            return record
+        if not settings.tinkoff_token:
+            record.status = "failed"
+            logger.error("No TINKOFF_TOKEN set — cannot execute AUTO mode order")
+            _execution_log.append(record)
+            record.db_id = save_order(record)
+            return record
 
     if _mode == TradeMode.MANUAL:
         record.status = "pending_approval"
@@ -254,6 +263,9 @@ async def execute_order(
 
 
 async def approve_order(ticker: str, direction: str, quantity: int) -> Optional[OrderRecord]:
+    if not settings.enable_trading:
+        logger.warning("Cannot approve order — trading disabled (ENABLE_TRADING=true)")
+        return None
     async with _mode_lock:
         for r in reversed(_execution_log):
             if (

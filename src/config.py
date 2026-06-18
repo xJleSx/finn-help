@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     cors_credentials: bool = True
     rate_limit_per_minute: int = 0
     ssl_tbank_verify: bool = True
+    enable_trading: bool = False
+    max_trades_per_day: int = 5
 
     moex_iss_url: str = "https://iss.moex.com/iss"
     cbr_url: str = "https://www.cbr.ru/scripts/XML_daily.asp"
