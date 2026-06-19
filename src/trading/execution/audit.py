@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -12,7 +14,7 @@ logger = logging.getLogger(__name__)
 AUDIT_DIR = Path(__file__).resolve().parents[2] / "data" / "audit"
 
 
-def _ensure_audit_dir():
+def _ensure_audit_dir() -> None:
     AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -21,7 +23,7 @@ def _audit_log_file() -> Path:
     return AUDIT_DIR / f"orders_{datetime.now(timezone.utc).strftime('%Y_%m')}.jsonl"
 
 
-def audit_log_order(entry: dict):
+def audit_log_order(entry: dict[str, object]) -> None:
     file_path = _audit_log_file()
     entry["_timestamp"] = datetime.now(timezone.utc).isoformat()
     entry["_id"] = f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}_{os.urandom(4).hex()}"
@@ -34,7 +36,7 @@ def audit_log_order(entry: dict):
         logger.error("Failed to write audit log: %s", e)
 
 
-def save_order(order: "OrderRecord") -> int:
+def save_order(order: "OrderRecord") -> int:  # type: ignore[name-defined]
     db = get_session()
     try:
         from src.trading.execution.engine import OrderRecord
@@ -85,7 +87,7 @@ def log_trade(
     pnl: float = 0.0,
     reason: str = "",
     order_id: int = 0,
-):
+) -> None:
     db = get_session()
     try:
         t = TradeLog(
@@ -123,7 +125,7 @@ def log_trade(
         db.close()
 
 
-def get_trade_history(limit: int = 50) -> list[dict]:
+def get_trade_history(limit: int = 50) -> list[dict[str, object]]:
     db = get_session()
     try:
         trades = db.query(TradeLog).order_by(TradeLog.created_at.desc()).limit(limit).all()
@@ -145,7 +147,7 @@ def get_trade_history(limit: int = 50) -> list[dict]:
         db.close()
 
 
-def get_order_history(limit: int = 50) -> list[dict]:
+def get_order_history(limit: int = 50) -> list[dict[str, object]]:
     db = get_session()
     try:
         orders = db.query(OrderModel).order_by(OrderModel.created_at.desc()).limit(limit).all()
@@ -172,7 +174,7 @@ def get_order_history(limit: int = 50) -> list[dict]:
         db.close()
 
 
-def update_order_status(order_id: int, status: str, **kwargs):
+def update_order_status(order_id: int, status: str, **kwargs: object) -> None:
     db = get_session()
     try:
         o = db.query(OrderModel).filter_by(id=order_id).first()

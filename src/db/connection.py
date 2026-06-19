@@ -4,7 +4,7 @@ from typing import AsyncGenerator
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import scoped_session, sessionmaker
+from sqlalchemy.orm import Session, scoped_session, sessionmaker
 
 from src.config import settings
 
@@ -69,15 +69,15 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
 SyncSessionLocal = scoped_session(sessionmaker(bind=sync_engine))
 
 
-def get_session():
+def get_session() -> Session:
     return SyncSessionLocal()
 
 
-def close_session():
+def close_session() -> None:
     SyncSessionLocal.remove()
 
 
-def init_db():
+def init_db() -> None:
     from alembic.config import Config
 
     from alembic import command

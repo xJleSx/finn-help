@@ -9,7 +9,7 @@ from src.db.models import Instrument, Portfolio as PortModel
 logger = logging.getLogger(__name__)
 
 
-async def sync_portfolio_from_broker(account_id: str = "") -> dict:
+async def sync_portfolio_from_broker(account_id: str = "") -> dict[str, object]:
     if not settings.tinkoff_token:
         return {"status": "no_token", "positions_synced": 0}
 
