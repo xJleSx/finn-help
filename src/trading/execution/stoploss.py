@@ -10,11 +10,11 @@ logger = logging.getLogger(__name__)
 
 
 class PositionTracker:
-    def __init__(self):
-        self._positions: dict[str, dict] = {}
+    def __init__(self) -> None:
+        self._positions: dict[str, dict[str, object]] = {}
         self._restore_from_db()
 
-    def _restore_from_db(self):
+    def _restore_from_db(self) -> None:
         db = get_session()
         try:
             filled = db.query(OrderModel).filter(
@@ -33,7 +33,7 @@ class PositionTracker:
         finally:
             db.close()
 
-    def update(self, ticker: str, direction: str, quantity: int, price: float):
+    def update(self, ticker: str, direction: str, quantity: int, price: float) -> None:
         if ticker not in self._positions:
             self._positions[ticker] = {"shares": 0, "avg_price": 0.0, "sl": None, "tp": None}
         pos = self._positions[ticker]
@@ -47,7 +47,7 @@ class PositionTracker:
                 pos["avg_price"] = 0.0
                 self._positions.pop(ticker, None)
 
-    def set_sl_tp(self, ticker: str, sl_pct: Optional[float] = None, tp_pct: Optional[float] = None):
+    def set_sl_tp(self, ticker: str, sl_pct: Optional[float] = None, tp_pct: Optional[float] = None) -> None:
         if ticker in self._positions:
             if sl_pct is not None:
                 self._positions[ticker]["sl"] = self._positions[ticker]["avg_price"] * (1 - abs(sl_pct))
@@ -55,7 +55,7 @@ class PositionTracker:
                 self._positions[ticker]["tp"] = self._positions[ticker]["avg_price"] * (1 + abs(tp_pct))
             self._persist_sl_tp(ticker)
 
-    def _persist_sl_tp(self, ticker: str):
+    def _persist_sl_tp(self, ticker: str) -> None:
         pos = self._positions.get(ticker)
         if not pos:
             return

@@ -38,7 +38,7 @@ _KEY_TRADES = "loop_trades_today"
 _KEY_RESET_DAY = "loop_reset_day"
 
 
-def _load_daily_counters():
+def _load_daily_counters() -> None:
     global _trades_today, _last_reset_day
     db = get_session()
     try:
@@ -52,7 +52,7 @@ def _load_daily_counters():
         db.close()
 
 
-def _save_daily_counters():
+def _save_daily_counters() -> None:
     db = get_session()
     try:
         existing = db.query(UserSetting).filter(UserSetting.key == _KEY_TRADES).first()
@@ -72,13 +72,13 @@ def _save_daily_counters():
         db.close()
 
 
-def set_max_trades_per_day(n: int):
+def set_max_trades_per_day(n: int) -> None:
     global _max_trades_per_day
     _max_trades_per_day = n
     logger.info("Max trades per day set to %d", n)
 
 
-def reset_daily_counters():
+def reset_daily_counters() -> None:
     global _trades_today, _last_reset_day
     _trades_today = 0
     _last_reset_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -121,7 +121,7 @@ async def market_hours_check() -> bool:
     return False
 
 
-async def _check_var():
+async def _check_var() -> tuple[bool, str]:
     db = get_session()
     try:
         from src.db.models import Portfolio, Price
@@ -199,7 +199,10 @@ async def _check_news(ticker: str) -> tuple[bool, str]:
         db.close()
 
 
-async def _process_signals():
+async def _process_signals() -> None:
+    from sqlalchemy.orm import joinedload
+
+    from src.db.models import Instrument as InstModel
     from src.db.models import Signal as SignalModel
 
     db = get_session()
@@ -207,12 +210,17 @@ async def _process_signals():
         today = datetime.now(timezone.utc).date()
         signals = (
             db.query(SignalModel)
+            .options(joinedload(SignalModel.instrument))
             .filter(SignalModel.date >= today)
             .order_by(SignalModel.confidence.desc())
             .all()
         )
 
         for s in signals:
+            if not s.instrument:
+                continue
+            ticker = s.instrument.ticker
+
             if not await market_hours_check():
                 logger.info("Market closed, skipping signal processing")
                 return
@@ -227,27 +235,26 @@ async def _process_signals():
                 logger.warning("VaR limit exceeded: %s", var_msg)
                 return
 
-            lq_ok, lq_msg = await _check_liquidity(s.ticker)
+            lq_ok, lq_msg = await _check_liquidity(ticker)
             if not lq_ok:
-                logger.warning("Liquidity check failed for %s: %s", s.ticker, lq_msg)
+                logger.warning("Liquidity check failed for %s: %s", ticker, lq_msg)
                 continue
 
-            ns_ok, ns_msg = await _check_news(s.ticker)
+            ns_ok, ns_msg = await _check_news(ticker)
             if not ns_ok:
-                logger.warning("News sentiment check failed for %s: %s", s.ticker, ns_msg)
+                logger.warning("News sentiment check failed for %s: %s", ticker, ns_msg)
                 continue
 
             if s.action in ("BUY", "CAUTIOUS_BUY"):
                 result = await execute_order(
-                    ticker=s.ticker,
+                    ticker=ticker,
                     direction="BUY",
                     quantity=10,
-                    price=s.price if hasattr(s, "price") and s.price else None,
                     reason=f"Signal: {s.action} ({s.confidence:.0%})",
                 )
             elif s.action == "SELL":
                 result = await execute_order(
-                    ticker=s.ticker,
+                    ticker=ticker,
                     direction="SELL",
                     quantity=10,
                     reason=f"Signal: {s.action} ({s.confidence:.0%})",
@@ -263,7 +270,7 @@ async def _process_signals():
         db.close()
 
 
-async def _check_stop_losses():
+async def _check_stop_losses() -> None:
     db = get_session()
     try:
         from src.db.models import Instrument, Price
@@ -282,7 +289,7 @@ async def _check_stop_losses():
         db.close()
 
 
-async def _check_daily_pnl():
+async def _check_daily_pnl() -> None:
     db = get_session()
     try:
         from src.db.models import Portfolio as PortModel, Price
@@ -308,22 +315,22 @@ async def _check_daily_pnl():
         db.close()
 
 
-async def _rebalance_portfolio():
+async def _rebalance_portfolio() -> None:
     db = get_session()
     try:
         from src.notifications.service import NotificationService
         ns = NotificationService()
         alerts = ns.check_rebalance(db)
         for alert in alerts:
-            if abs(alert.drift_pct) < 0.02:
+            if abs(alert.deviation_pct) < 0.02:
                 continue
-            direction = "BUY" if alert.drift_pct < 0 else "SELL"
-            qty = max(1, int(abs(alert.drift_pct) * 100))
+            direction = "BUY" if alert.deviation_pct < 0 else "SELL"
+            qty = max(1, int(abs(alert.deviation_pct) * 100))
             await execute_order(
                 ticker=alert.ticker,
                 direction=direction,
                 quantity=qty,
-                reason=f"rebalance: {alert.target_weight:.0%} target, drift {alert.drift_pct:+.1%}",
+                reason=f"rebalance: {alert.target_pct:.0%} target, drift {alert.deviation_pct:+.1%}",
             )
     except Exception as e:
         logger.warning("Rebalance error: %s", e)
@@ -331,7 +338,7 @@ async def _rebalance_portfolio():
         db.close()
 
 
-async def run_execution_loop(interval: int = 300):
+async def run_execution_loop(interval: int = 300) -> None:
     global _running
     if _running:
         logger.warning("Execution loop already running")
@@ -375,7 +382,7 @@ async def run_execution_loop(interval: int = 300):
         await asyncio.sleep(interval)
 
 
-def stop():
+def stop() -> None:
     global _running
     _running = False
     logger.info("Execution loop stopping")

@@ -52,6 +52,7 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "ruff>=0.9.0",
+    "mypy>=1.15.0",
     "pytest>=9.1.0",
     "pytest-asyncio>=1.4.0",
     "pytest-httpx>=0.36.2",
@@ -73,6 +74,20 @@ exclude_also = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+show_error_codes = true
+warn_unused_ignores = true
+exclude = ["tests/", "alembic/", "src/analysis/ml/prophet_model.py"]
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+
+[[tool.mypy.overrides]]
+module = ["t_tech.*", "prophet.*", "groq.*"]
+ignore_missing_imports = true
+
+
 
 [tool.ruff]
 line-length = 120

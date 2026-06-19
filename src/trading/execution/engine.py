@@ -15,7 +15,7 @@ _TRADING_ENABLED: bool | None = None
 logger = logging.getLogger(__name__)
 
 
-def _notify_trade(record: "OrderRecord", reason: str = ""):
+def _notify_trade(record: "OrderRecord", reason: str = "") -> None:
     try:
         from src.interfaces.telegram import broadcast_trade
         asyncio.ensure_future(broadcast_trade(
@@ -64,7 +64,7 @@ _mode_lock = asyncio.Lock()
 _mode = TradeMode.DRY_RUN
 
 
-async def set_mode(mode: TradeMode):
+async def set_mode(mode: TradeMode) -> None:
     global _mode
     async with _mode_lock:
         _mode = mode
@@ -75,7 +75,7 @@ def get_mode() -> TradeMode:
     return _mode
 
 
-def get_log(limit: int = 20) -> list[dict]:
+def get_log(limit: int = 20) -> list[dict[str, object]]:
     entries = list(_execution_log)[-limit:]
     return [
         {

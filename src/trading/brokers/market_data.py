@@ -59,7 +59,7 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
     return new_count
 
 
-async def update_all_favorites(interval: str = "5min", days: int = 5) -> dict:
+async def update_all_favorites(interval: str = "5min", days: int = 5) -> dict[str, int]:
     stats: dict[str, int] = {}
     if not settings.tinkoff_token:
         return stats

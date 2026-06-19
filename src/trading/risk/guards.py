@@ -55,7 +55,7 @@ RISK_PROFILE_MAP = {
 }
 
 
-def _load_risk_params():
+def _load_risk_params() -> None:
     profile = (personal.get("risk_profile") or "balanced").lower()
     mapping = RISK_PROFILE_MAP.get(profile, RISK_PROFILE_MAP["balanced"])
     global _position_limit_pct, _daily_loss_limit, _max_drawdown_pct
@@ -78,13 +78,13 @@ def max_drawdown_pct() -> float:
     return _max_drawdown_pct
 
 
-def activate_kill_switch(reason: str = ""):
+def activate_kill_switch(reason: str = "") -> None:
     global _kill_switch_active
     _kill_switch_active = True
     logger.warning("KILL SWITCH ACTIVATED%s", f": {reason}" if reason else "")
 
 
-def deactivate_kill_switch():
+def deactivate_kill_switch() -> None:
     global _kill_switch_active
     _kill_switch_active = False
     logger.info("Kill switch deactivated")
@@ -94,13 +94,13 @@ def is_kill_switch_active() -> bool:
     return _kill_switch_active
 
 
-def set_daily_loss_limit(pct: float):
+def set_daily_loss_limit(pct: float) -> None:
     global _daily_loss_limit
     _daily_loss_limit = pct
     logger.info("Daily loss limit set to %.1f%%", pct * 100)
 
 
-def set_max_drawdown_pct(pct: float):
+def set_max_drawdown_pct(pct: float) -> None:
     global _max_drawdown_pct
     _max_drawdown_pct = pct
     logger.info("Max drawdown set to %.1f%%", pct * 100)
@@ -114,7 +114,7 @@ def check_daily_loss(day_return_pct: float) -> bool:
     return False
 
 
-def set_max_position_pct(pct: float):
+def set_max_position_pct(pct: float) -> None:
     global _position_limit_pct
     _position_limit_pct = pct
     logger.info("Max position size set to %.1f%%", pct * 100)
@@ -170,11 +170,11 @@ def compute_position_shares(
     return min(max(shares, 1), max_shares)
 
 
-VAR_LIMIT = 0.05
-_MAX_LEVERAGE = 1.0
+VAR_LIMIT: float = 0.05
+_MAX_LEVERAGE: float = 1.0
 
 
-def set_max_leverage(n: float):
+def set_max_leverage(n: float) -> None:
     global _MAX_LEVERAGE
     _MAX_LEVERAGE = n
 
@@ -185,7 +185,7 @@ def check_leverage(current_leverage: float) -> tuple[bool, str]:
     return True, f"Плечо {current_leverage:.1f}x в пределах {_MAX_LEVERAGE:.1f}x"
 
 
-def set_var_limit(pct: float):
+def set_var_limit(pct: float) -> None:
     global VAR_LIMIT
     VAR_LIMIT = pct
 
@@ -196,11 +196,11 @@ def check_var_limit(var_95: float) -> tuple[bool, str]:
     return True, f"VaR(95%) {var_95:.1%} в пределах {VAR_LIMIT:.1%}"
 
 
-MIN_DAILY_VOLUME = 1_000_000
+MIN_DAILY_VOLUME: float = 1_000_000.0
 MIN_LIQUIDITY_RATIO = 2
 
 
-def set_min_volume(vol: float):
+def set_min_volume(vol: float) -> None:
     global MIN_DAILY_VOLUME
     MIN_DAILY_VOLUME = vol
 
@@ -243,7 +243,7 @@ def update_drawdown(current_value: float) -> float:
     return dd
 
 
-def reset_peak(value: float):
+def reset_peak(value: float) -> None:
     global _peak_value
     _peak_value = value
 
@@ -257,14 +257,14 @@ _day_start_value: Optional[float] = None
 _current_day_value: Optional[float] = None
 
 
-def start_day(portfolio_value: float):
+def start_day(portfolio_value: float) -> None:
     global _day_start_value, _current_day_value
     _day_start_value = portfolio_value
     _current_day_value = portfolio_value
     logger.info("Day start value: %.2f", portfolio_value)
 
 
-def update_day_value(current_value: float):
+def update_day_value(current_value: float) -> None:
     global _current_day_value
     _current_day_value = current_value
 
@@ -287,12 +287,12 @@ async def async_update_drawdown(current_value: float) -> float:
         return update_drawdown(current_value)
 
 
-async def async_activate_kill_switch(reason: str = ""):
+async def async_activate_kill_switch(reason: str = "") -> None:
     async with _risk_lock:
         activate_kill_switch(reason)
 
 
-async def async_deactivate_kill_switch():
+async def async_deactivate_kill_switch() -> None:
     async with _risk_lock:
         deactivate_kill_switch()
 
@@ -302,12 +302,12 @@ async def async_is_kill_switch_active() -> bool:
         return is_kill_switch_active()
 
 
-async def async_update_day_value(current_value: float):
+async def async_update_day_value(current_value: float) -> None:
     async with _risk_lock:
         update_day_value(current_value)
 
 
-async def async_start_day(value: float):
+async def async_start_day(value: float) -> None:
     async with _risk_lock:
         start_day(value)
 

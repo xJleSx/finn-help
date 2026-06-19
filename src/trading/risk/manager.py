@@ -12,7 +12,7 @@ def historical_var(returns: np.ndarray, confidence: float = 0.95) -> float:
         return 0.0
     return float(abs(np.percentile(returns, (1 - confidence) * 100)))
 
-def compute_var(price_series: list[float], confidence: float = 0.95) -> dict:
+def compute_var(price_series: list[float], confidence: float = 0.95) -> dict[str, float]:
     arr = np.array(price_series, dtype=float)
     if len(arr) < 10:
         return {"var_95": 0.0, "var_99": 0.0, "cvar_95": 0.0}
@@ -31,7 +31,7 @@ def compute_var(price_series: list[float], confidence: float = 0.95) -> dict:
     }
 
 
-def compute_stop_loss(price: float, atr: float | None, multiplier: float = 2.0) -> dict | None:
+def compute_stop_loss(price: float, atr: float | None, multiplier: float = 2.0) -> dict[str, float] | None:
     if atr is None or atr <= 0 or price <= 0:
         return None
     stop_distance = atr * multiplier
@@ -42,7 +42,7 @@ def compute_stop_loss(price: float, atr: float | None, multiplier: float = 2.0) 
     }
 
 
-def compute_concentration_limit(capital: float, price: float, max_position_pct: float = 20.0) -> dict:
+def compute_concentration_limit(capital: float, price: float, max_position_pct: float = 20.0) -> dict[str, float | int]:
     if price <= 0:
         return {"shares": 0, "amount": 0.0, "max_pct": max_position_pct}
     max_amount = capital * max_position_pct / 100
@@ -89,7 +89,7 @@ def compute_position_size(
     win_rate: float = 0.0,
     avg_win_pct: float = 0.0,
     avg_loss_pct: float = 0.0,
-) -> dict:
+) -> dict[str, float | int | str]:
     if price <= 0:
         return {"shares": 0, "amount": 0.0, "risk_amount": 0.0}
 
