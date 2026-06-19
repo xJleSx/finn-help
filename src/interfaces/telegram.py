@@ -665,7 +665,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = await update.effective_message.reply_text("⏳ Синхронизация с T-Bank...")
     try:
-        from src.brokers.sync import sync_portfolio_from_broker
+        from src.trading.brokers.sync import sync_portfolio_from_broker
         sync_result = await sync_portfolio_from_broker()
         if sync_result.get("status") == "no_token":
             await msg.edit_text("❌ TINKOFF_TOKEN не настроен")
@@ -681,7 +681,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows = get_portfolio_positions(db)
         if not rows:
             try:
-                from src.brokers.tbank import TBankClient
+                from src.trading.brokers.tbank import TBankClient
                 async with TBankClient(use_sandbox=settings.tinkoff_sandbox) as tbank:
                     accounts = await tbank.get_accounts()
                     if accounts:
@@ -1175,8 +1175,8 @@ async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if not await _check_cooldown(update):
         return
-    from src.execution.audit import get_trade_history
-    from src.risk.guards import get_day_pnl
+    from src.trading.execution.audit import get_trade_history
+    from src.trading.risk.guards import get_day_pnl
 
     pnl, pnl_pct = get_day_pnl()
     trades = get_trade_history(limit=10)

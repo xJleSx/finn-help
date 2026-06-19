@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.risk.guards import (
+from src.trading.risk.guards import (
     _daily_loss_limit,
     _kill_switch_active,
     _max_drawdown_pct,
@@ -36,7 +36,7 @@ from src.risk.guards import (
 
 @pytest.fixture(autouse=True)
 def reset_guards():
-    import src.risk.guards as g
+    import src.trading.risk.guards as g
 
     g._kill_switch_active = False
     g._daily_loss_limit = None
@@ -210,7 +210,7 @@ def test_drawdown_triggers_kill_switch():
 
 
 def test_drawdown_no_peak():
-    from src.risk.guards import current_drawdown
+    from src.trading.risk.guards import current_drawdown
 
     dd = current_drawdown()
     assert dd == 0.0

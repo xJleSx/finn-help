@@ -91,7 +91,7 @@ class PositionTracker:
         return None
 
     async def execute_triggers(self, ticker: str, current_price: float) -> Optional[str]:
-        from src.execution.engine import execute_order as _execute_order
+        from src.trading.execution.engine import execute_order as _execute_order
 
         trigger = self.check_triggers(ticker, current_price)
         if not trigger:

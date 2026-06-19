@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from src.execution.engine import (
+from src.trading.execution.engine import (
     TradeMode,
     cancel_pending,
     execute_order,
@@ -18,7 +18,7 @@ from src.execution.engine import (
 
 @pytest.fixture(autouse=True)
 def reset_engine():
-    import src.execution.engine as eng
+    import src.trading.execution.engine as eng
 
     async def _reset():
         async with eng._mode_lock:
@@ -77,7 +77,7 @@ async def test_execute_manual():
 
 
 @pytest.mark.asyncio
-@patch("src.execution.engine.settings")
+@patch("src.trading.execution.engine.settings")
 async def test_execute_auto_no_token(mock_settings):
     mock_settings.tinkoff_token = ""
     await set_mode(TradeMode.AUTO)
@@ -92,8 +92,8 @@ async def test_execute_auto_no_token(mock_settings):
 
 
 @pytest.mark.asyncio
-@patch("src.execution.engine.settings")
-@patch("src.execution.engine.TBankClient")
+@patch("src.trading.execution.engine.settings")
+@patch("src.trading.execution.engine.TBankClient")
 async def test_execute_auto_success(mock_tbank, mock_settings):
     mock_settings.tinkoff_token = "test_token"
     mock_settings.tinkoff_sandbox = True
@@ -111,7 +111,7 @@ async def test_execute_auto_success(mock_tbank, mock_settings):
     )
     mock_tbank.return_value.__aenter__.return_value = mock_client
 
-    import src.execution.engine as eng
+    import src.trading.execution.engine as eng
 
     async def _set():
         async with eng._mode_lock:
@@ -123,7 +123,7 @@ async def test_execute_auto_success(mock_tbank, mock_settings):
 
     with (
         patch("src.db.connection.get_session") as mock_get_session,
-        patch("src.execution.engine.personal", {"execution": {"delay_ms": 0}}),
+        patch("src.trading.execution.engine.personal", {"execution": {"delay_ms": 0}}),
     ):
         mock_db = MagicMock()
         mock_inst = MagicMock()
@@ -147,16 +147,16 @@ async def test_execute_auto_success(mock_tbank, mock_settings):
 
 @pytest.mark.asyncio
 async def test_approve_order():
-    from src.execution.engine import approve_order
-    import src.execution.engine as eng
+    from src.trading.execution.engine import approve_order
+    import src.trading.execution.engine as eng
 
     r = eng.OrderRecord(ticker="VTBR", direction="BUY", quantity=20, price=0.05, mode=TradeMode.MANUAL)
     r.status = "pending_approval"
     eng._execution_log.append(r)
 
     with (
-        patch("src.execution.engine.settings.enable_trading", True),
-        patch("src.execution.engine.execute_order", new_callable=AsyncMock) as mock_exec,
+        patch("src.trading.execution.engine.settings.enable_trading", True),
+        patch("src.trading.execution.engine.execute_order", new_callable=AsyncMock) as mock_exec,
         patch("src.db.connection.get_session") as mock_get_session,
     ):
         fake_record = MagicMock()
@@ -171,7 +171,7 @@ async def test_approve_order():
 
 
 def test_cancel_pending():
-    import src.execution.engine as eng
+    import src.trading.execution.engine as eng
 
     r = eng.OrderRecord(ticker="TEST", direction="BUY", quantity=1, price=100, mode=TradeMode.MANUAL)
     r.status = "pending_approval"

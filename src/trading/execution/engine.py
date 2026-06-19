@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from src.brokers.tbank import TBankClient
+from src.trading.brokers.tbank import TBankClient
 from src.config import personal, settings
-from src.execution.audit import log_trade, save_order, update_order_status
-from src.execution.stoploss import position_tracker
+from src.trading.execution.audit import log_trade, save_order, update_order_status
+from src.trading.execution.stoploss import position_tracker
 
 _TRADING_ENABLED: bool | None = None
 
@@ -228,7 +228,7 @@ async def execute_order(
                         instrument_id=(inst.id if inst else 0)
                     ).order_by(_IndicatorModel.date.desc()).first()
                     if latest and latest.atr and latest.atr > 0 and record.price > 0:
-                        from src.risk.manager import compute_stop_loss as _compute_sl
+                        from src.trading.risk.manager import compute_stop_loss as _compute_sl
                         atr_result = _compute_sl(record.price, latest.atr, multiplier=2.0)
                         if atr_result and atr_result["stop_loss_pct"]:
                             sl_pct = abs(atr_result["stop_loss_pct"]) / 100

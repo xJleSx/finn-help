@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from src.brokers.tbank import TBankClient
+from src.trading.brokers.tbank import TBankClient
 from src.config import settings
 from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
@@ -300,7 +300,7 @@ async def _collect_macro(db: Session):
 
 async def _notify_signals(signals: list[dict]):
     from src.interfaces.telegram import broadcast_daily_summary, broadcast_dividends, broadcast_signal
-    from src.execution.engine import execute_order
+    from src.trading.execution.engine import execute_order
 
     for s in signals:
         n = _to_signal_notification(s)
