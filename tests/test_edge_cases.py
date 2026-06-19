@@ -509,3 +509,56 @@ class TestRiskGuardsEdgeCases:
         reset_peak(100.0)
         dd = current_drawdown()
         assert dd == 0.0
+
+    def test_risk_per_trade_default(self):
+        from src.trading.risk.guards import risk_per_trade
+
+        rate = risk_per_trade()
+        assert 0 < rate <= 0.20
+
+    def test_max_position_pct_default(self):
+        from src.trading.risk.guards import max_position_pct
+
+        pct = max_position_pct()
+        assert 0 < pct <= 1.0
+
+    def test_max_drawdown_pct_default(self):
+        from src.trading.risk.guards import max_drawdown_pct
+
+        pct = max_drawdown_pct()
+        assert pct > 0
+
+    def test_set_min_volume(self):
+        import src.trading.risk.guards as guards
+
+        original = guards.MIN_DAILY_VOLUME
+        guards.set_min_volume(500_000.0)
+        assert guards.MIN_DAILY_VOLUME == 500_000.0
+        guards.set_min_volume(original)
+
+    def test_compute_position_shares_zero_risk(self):
+        from src.trading.risk.guards import compute_position_shares
+
+        result = compute_position_shares(
+            portfolio_value=100_000, risk_per_trade=0.02, stop_loss_pct=0.0, current_price=0.0
+        )
+        assert result >= 1
+
+    def test_compute_volatility_target_zero_current(self):
+        from src.trading.risk.guards import compute_volatility_target
+
+        result = compute_volatility_target(target_vol=0.25, current_vol=0.0)
+        assert result == 1.0
+
+    def test_compute_volatility_target_normal(self):
+        from src.trading.risk.guards import compute_volatility_target
+
+        result = compute_volatility_target(target_vol=0.25, current_vol=0.50)
+        assert result == 0.5
+
+    def test_get_day_pnl_no_start(self):
+        from src.trading.risk.guards import get_day_pnl
+
+        pnl, pct = get_day_pnl()
+        assert pnl == 0.0
+        assert pct == 0.0

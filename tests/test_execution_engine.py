@@ -146,6 +146,108 @@ async def test_execute_auto_success(mock_tbank, mock_settings):
 
 
 @pytest.mark.asyncio
+@patch("src.trading.execution.engine.settings")
+async def test_execute_auto_trading_disabled(mock_settings):
+    mock_settings.enable_trading = False
+    mock_settings.tinkoff_token = "test_token"
+    await set_mode(TradeMode.AUTO)
+    record = await execute_order(
+        ticker="SBER",
+        direction="BUY",
+        quantity=10,
+        price=250.0,
+        reason="test_disabled",
+    )
+    assert record.status == "failed"
+
+
+@pytest.mark.asyncio
+@patch("src.trading.execution.engine.settings")
+@patch("src.trading.execution.engine.TBankClient")
+async def test_execute_auto_no_figi(mock_tbank, mock_settings):
+    mock_settings.enable_trading = True
+    mock_settings.tinkoff_token = "test_token"
+    mock_settings.tinkoff_sandbox = True
+
+    import src.trading.execution.engine as eng
+
+    async def _set():
+        async with eng._mode_lock:
+            eng._mode = TradeMode.AUTO
+
+    import asyncio
+
+    await _set()
+
+    with (
+        patch("src.db.connection.get_session") as mock_get_session,
+        patch("src.trading.execution.engine.personal", {"execution": {"delay_ms": 0}}),
+    ):
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_get_session.return_value = mock_db
+
+        record = await execute_order(
+            ticker="SBER",
+            direction="BUY",
+            quantity=5,
+            price=250.0,
+            reason="test_no_figi",
+        )
+        assert record.status == "failed"
+
+
+@pytest.mark.asyncio
+@patch("src.trading.execution.engine.settings")
+@patch("src.trading.execution.engine.TBankClient")
+async def test_execute_auto_quantity_less_than_lot(mock_tbank, mock_settings):
+    mock_settings.enable_trading = True
+    mock_settings.tinkoff_token = "test_token"
+    mock_settings.tinkoff_sandbox = True
+
+    import src.trading.execution.engine as eng
+
+    async def _set():
+        async with eng._mode_lock:
+            eng._mode = TradeMode.AUTO
+
+    import asyncio
+
+    await _set()
+
+    with (
+        patch("src.db.connection.get_session") as mock_get_session,
+        patch("src.trading.execution.engine.personal", {"execution": {"delay_ms": 0}}),
+    ):
+        mock_db = MagicMock()
+        mock_inst = MagicMock()
+        mock_inst.figi = "BBG000000001"
+        mock_inst.lot_size = 10
+        mock_inst.id = 1
+        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_inst
+        mock_get_session.return_value = mock_db
+
+        record = await execute_order(
+            ticker="SBER",
+            direction="BUY",
+            quantity=5,
+            price=250.0,
+            figi="BBG000000001",
+            reason="test_small_qty",
+        )
+        assert record.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_approve_order_trading_disabled():
+    from src.trading.execution.engine import approve_order
+
+    with patch("src.trading.execution.engine.settings.enable_trading", False):
+        result = await approve_order(ticker="VTBR", direction="BUY", quantity=20)
+        assert result is None
+
+
+@pytest.mark.asyncio
 async def test_approve_order():
     from src.trading.execution.engine import approve_order
     import src.trading.execution.engine as eng
@@ -180,6 +282,16 @@ def test_cancel_pending():
     assert cancel_pending("TEST") is True
 
     assert r.status == "cancelled"
+
+
+def test_cancel_pending_already_approved():
+    import src.trading.execution.engine as eng
+
+    r = eng.OrderRecord(ticker="TEST", direction="BUY", quantity=1, price=100, mode=TradeMode.MANUAL)
+    r.status = "filled"
+    eng._execution_log.append(r)
+
+    assert cancel_pending("TEST") is False
 
 
 def test_cancel_pending_not_found():
