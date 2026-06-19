@@ -462,49 +462,49 @@ class TestTelegramEdgeCases:
 
 class TestRiskGuardsEdgeCases:
     def test_check_leverage_zero(self):
-        from src.risk.guards import check_leverage
+        from src.trading.risk.guards import check_leverage
 
         ok, msg = check_leverage(0.0)
         assert ok is True
 
     def test_check_leverage_exact_limit(self):
-        from src.risk.guards import check_leverage
+        from src.trading.risk.guards import check_leverage
 
         ok, msg = check_leverage(1.0)
         assert ok is True
 
     def test_check_leverage_above_limit(self):
-        from src.risk.guards import check_leverage
+        from src.trading.risk.guards import check_leverage
 
         ok, msg = check_leverage(1.5)
         assert ok is False
 
     def test_check_var_limit_zero(self):
-        from src.risk.guards import check_var_limit
+        from src.trading.risk.guards import check_var_limit
 
         ok, msg = check_var_limit(0.0)
         assert ok is True
 
     def test_check_var_limit_exact(self):
-        from src.risk.guards import check_var_limit
+        from src.trading.risk.guards import check_var_limit
 
         ok, msg = check_var_limit(0.05)
         assert ok is True
 
     def test_check_var_limit_above(self):
-        from src.risk.guards import check_var_limit
+        from src.trading.risk.guards import check_var_limit
 
         ok, msg = check_var_limit(0.10)
         assert ok is False
 
     def test_drawdown_returns_zero(self):
-        from src.risk.guards import current_drawdown
+        from src.trading.risk.guards import current_drawdown
 
         dd = current_drawdown()
         assert dd == 0.0
 
     def test_drawdown_after_reset(self):
-        from src.risk.guards import reset_peak, current_drawdown
+        from src.trading.risk.guards import reset_peak, current_drawdown
 
         reset_peak(100.0)
         dd = current_drawdown()

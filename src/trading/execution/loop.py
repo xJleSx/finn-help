@@ -5,14 +5,14 @@ from typing import Optional
 
 from src.analysis.correlation_analysis import correlation_table
 from src.analysis.whatif import whatif_scenario
-from src.brokers.market_data import update_all_favorites
+from src.trading.brokers.market_data import update_all_favorites
 from src.config import personal, settings
 from src.db.connection import get_session
 from src.db.models import Order as OrderModel
 from src.db.models import UserSetting
-from src.execution.engine import OrderRecord, execute_order, get_log, set_mode
-from src.execution.stoploss import position_tracker
-from src.risk.guards import (
+from src.trading.execution.engine import OrderRecord, execute_order, get_log, set_mode
+from src.trading.execution.stoploss import position_tracker
+from src.trading.risk.guards import (
     async_activate_kill_switch,
     async_check_daily_loss,
     async_deactivate_kill_switch,

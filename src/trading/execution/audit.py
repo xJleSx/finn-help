@@ -37,7 +37,7 @@ def audit_log_order(entry: dict):
 def save_order(order: "OrderRecord") -> int:
     db = get_session()
     try:
-        from src.execution.engine import OrderRecord
+        from src.trading.execution.engine import OrderRecord
 
         o = OrderModel(
             ticker=order.ticker,

@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from src.brokers.tbank import TBankClient
+from src.trading.brokers.tbank import TBankClient
 from src.config import personal, settings
 from src.db.connection import get_session
 from src.db.models import Instrument, Price

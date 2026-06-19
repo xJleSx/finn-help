@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.risk.manager import (
+from src.trading.risk.manager import (
     compute_position_size,
     compute_stop_loss,
     compute_var,

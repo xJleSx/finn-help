@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.execution.stoploss import PositionTracker
+from src.trading.execution.stoploss import PositionTracker
 
 
 @pytest.fixture
@@ -87,7 +87,7 @@ async def test_execute_triggers(tracker):
     tracker.update("SBER", "BUY", 10, 250.0)
     tracker.set_sl_tp("SBER", sl_pct=0.05)
 
-    with patch("src.execution.engine.execute_order", new_callable=AsyncMock) as mock_exec:
+    with patch("src.trading.execution.engine.execute_order", new_callable=AsyncMock) as mock_exec:
         mock_exec.return_value = MagicMock()
         mock_exec.return_value.status = "filled"
 
@@ -101,7 +101,7 @@ async def test_execute_triggers_no_trigger(tracker):
     tracker.update("SBER", "BUY", 10, 250.0)
     tracker.set_sl_tp("SBER", sl_pct=0.05)
 
-    with patch("src.execution.engine.execute_order") as mock_exec:
+    with patch("src.trading.execution.engine.execute_order") as mock_exec:
         result = await tracker.execute_triggers("SBER", 250.0)
         assert result is None
         mock_exec.assert_not_called()
@@ -111,7 +111,7 @@ def test_persist_sl_tp(tracker):
     tracker.update("SBER", "BUY", 10, 250.0)
     tracker.set_sl_tp("SBER", sl_pct=0.05)
 
-    import src.execution.stoploss as sl
+    import src.trading.execution.stoploss as sl
     original = sl.get_session
     try:
         sl.get_session = MagicMock()
@@ -129,7 +129,7 @@ def test_persist_sl_tp(tracker):
 
 
 def test_restore_from_db():
-    import src.execution.stoploss as sl
+    import src.trading.execution.stoploss as sl
     original = sl.get_session
     try:
         sl.get_session = MagicMock()

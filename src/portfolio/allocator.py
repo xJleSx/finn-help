@@ -718,7 +718,7 @@ async def _item_risk_async(item: dict, db: AsyncSession, capital: float = 100_00
 
 
 def _compute_risk_from_closes(close_vals: list[float], item: dict, capital: float) -> dict:
-    from src.risk.manager import (
+    from src.trading.risk.manager import (
         compute_concentration_limit,
         compute_position_size,
         compute_risk_score,
