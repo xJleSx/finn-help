@@ -141,8 +141,8 @@ class AnalysisService:
 
             tickers = await db.execute(select(Instrument.ticker))
             all_tickers = [r[0] for r in tickers.all() if r[0]]
-            social_scores = [aggregator.get_ticker_sentiment(t) for t in all_tickers]
-            social_with_data = [s for s in social_scores if s["count"] > 0]
+            all_social = aggregator.get_all_ticker_sentiments(all_tickers)
+            social_with_data = [s for s in all_social.values() if s["count"] > 0]
         except Exception:
             social_with_data = []
 
