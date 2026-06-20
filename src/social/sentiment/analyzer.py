@@ -185,7 +185,7 @@ class SocialSentimentAnalyzer:
 
     @staticmethod
     def _parse_llm_response(raw: str) -> list[dict[str, Any]]:
-        if not raw or raw.strip() == "[]":
+        if not raw or raw.strip() in ("[]", ""):
             return []
         cleaned = raw.strip()
         if cleaned.startswith("```"):
@@ -195,12 +195,36 @@ class SocialSentimentAnalyzer:
         end = cleaned.rfind("]")
         if start != -1 and end != -1 and end > start:
             cleaned = cleaned[start : end + 1]
+        if not cleaned:
+            return []
+        # Attempt full parse first
         try:
             data = json.loads(cleaned)
             if isinstance(data, list):
                 return data
         except json.JSONDecodeError:
-            logger.warning("Failed to parse LLM JSON (len=%d): %s...", len(raw), raw[:150])
+            pass
+        # Fallback: try to extract partial objects with lenient parsing
+        try:
+            partials: list[dict[str, Any]] = []
+            decoder = json.JSONDecoder()
+            pos = 0
+            while pos < len(cleaned):
+                pos = cleaned.find("{", pos)
+                if pos == -1:
+                    break
+                try:
+                    obj, idx = decoder.raw_decode(cleaned, pos)
+                    if isinstance(obj, dict):
+                        partials.append(obj)
+                    pos = idx
+                except json.JSONDecodeError:
+                    pos += 1
+            if partials:
+                return partials
+        except Exception:
+            pass
+        logger.warning("Failed to parse LLM JSON (len=%d): %s...", len(raw), raw[:150])
         return []
 
 

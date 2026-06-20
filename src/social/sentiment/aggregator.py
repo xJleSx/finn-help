@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 def _time_weight(dt: object, now: datetime, half_life_days: float = 3.0) -> float:
     if not isinstance(dt, datetime):
         return 0.1
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     age = (now - dt).total_seconds() / 86400.0
     result: Any = 2.0 ** (-age / half_life_days)
     return cast(float, result)
