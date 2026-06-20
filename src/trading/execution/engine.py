@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from src.trading.brokers.tbank import TBankClient
 from src.config import personal, settings
-from src.trading.execution.audit import log_trade, save_order, update_order_status
+from src.trading.brokers.tbank import TBankClient
+from src.trading.execution.audit import log_trade, save_order
 from src.trading.execution.stoploss import position_tracker
 
 _TRADING_ENABLED: bool | None = None

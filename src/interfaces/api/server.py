@@ -17,16 +17,16 @@ from src.config import settings
 from src.db.models import User
 from src.interfaces.api.auth import (
     create_token,
-    get_current_user,
     get_db,
     hash_password,
     require_user,
     verify_password,
 )
 from src.interfaces.api.routes_instruments import router as instruments_router
-from src.interfaces.api.routes_portfolio import router as portfolio_router
 from src.interfaces.api.routes_market import router as market_router
-from src.scheduler.service import run_forever, stop as stop_scheduler
+from src.interfaces.api.routes_portfolio import router as portfolio_router
+from src.scheduler.service import run_forever
+from src.scheduler.service import stop as stop_scheduler
 
 logger = logging.getLogger(__name__)
 

@@ -92,7 +92,6 @@ def whatif_macro(shock_name: str, portfolio_value: float = 1_000_000) -> str:
 
 
 def _find_correlated(db, ticker: str, limit: int = 3) -> list[tuple[str, float]]:
-    import pandas as pd
 
     inst = db.query(Instrument).filter_by(ticker=ticker).first()
     if not inst:

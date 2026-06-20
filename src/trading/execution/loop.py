@@ -3,19 +3,15 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from src.analysis.correlation_analysis import correlation_table
-from src.analysis.whatif import whatif_scenario
-from src.trading.brokers.market_data import update_all_favorites
-from src.config import personal, settings
+from src.config import settings
 from src.db.connection import get_session
 from src.db.models import Order as OrderModel
 from src.db.models import UserSetting
-from src.trading.execution.engine import OrderRecord, execute_order, get_log, set_mode
+from src.trading.execution.engine import execute_order
 from src.trading.execution.stoploss import position_tracker
 from src.trading.risk.guards import (
-    async_activate_kill_switch,
+    _load_risk_params,
     async_check_daily_loss,
-    async_deactivate_kill_switch,
     async_is_kill_switch_active,
     async_start_day,
     async_update_day_value,
@@ -24,7 +20,6 @@ from src.trading.risk.guards import (
     check_news_sentiment,
     check_var_limit,
     get_day_pnl,
-    _load_risk_params,
 )
 
 logger = logging.getLogger(__name__)
@@ -202,7 +197,6 @@ async def _check_news(ticker: str) -> tuple[bool, str]:
 async def _process_signals() -> None:
     from sqlalchemy.orm import joinedload
 
-    from src.db.models import Instrument as InstModel
     from src.db.models import Signal as SignalModel
 
     db = get_session()
@@ -292,7 +286,8 @@ async def _check_stop_losses() -> None:
 async def _check_daily_pnl() -> None:
     db = get_session()
     try:
-        from src.db.models import Portfolio as PortModel, Price
+        from src.db.models import Portfolio as PortModel
+        from src.db.models import Price
 
         total = db.query(PortModel).all()
         current_value = 0.0

@@ -308,3 +308,108 @@ async def test_get_log():
     assert len(log) >= 2
     assert log[-1]["ticker"] == "B"
     assert log[-2]["ticker"] == "A"
+
+
+@pytest.mark.asyncio
+@patch("src.trading.execution.engine.settings")
+@patch("src.trading.execution.engine.TBankClient")
+async def test_execute_auto_no_accounts(mock_tbank, mock_settings):
+    mock_settings.enable_trading = True
+    mock_settings.tinkoff_token = "test_token"
+    mock_settings.tinkoff_sandbox = True
+
+    mock_client = AsyncMock()
+    mock_client.get_accounts = AsyncMock(return_value=[])
+    mock_tbank.return_value.__aenter__.return_value = mock_client
+
+    import src.trading.execution.engine as eng
+
+    async def _set():
+        async with eng._mode_lock:
+            eng._mode = TradeMode.AUTO
+
+    import asyncio
+
+    await _set()
+
+    with (
+        patch("src.db.connection.get_session") as mock_get_session,
+        patch("src.trading.execution.engine.personal", {"execution": {"delay_ms": 0}}),
+    ):
+        mock_db = MagicMock()
+        mock_inst = MagicMock()
+        mock_inst.figi = "BBG000000001"
+        mock_inst.lot_size = 1
+        mock_inst.id = 1
+        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_inst
+        mock_get_session.return_value = mock_db
+
+        record = await execute_order(
+            ticker="SBER",
+            direction="BUY",
+            quantity=5,
+            price=250.0,
+            figi="BBG000000001",
+            reason="test_no_accounts",
+        )
+        assert record.status == "failed"
+
+
+@pytest.mark.asyncio
+@patch("src.trading.execution.engine.settings")
+@patch("src.trading.execution.engine.TBankClient")
+async def test_execute_auto_exception(mock_tbank, mock_settings):
+    mock_settings.enable_trading = True
+    mock_settings.tinkoff_token = "test_token"
+    mock_settings.tinkoff_sandbox = True
+
+    mock_client = AsyncMock()
+    mock_client.get_accounts = AsyncMock(side_effect=Exception("API error"))
+    mock_tbank.return_value.__aenter__.return_value = mock_client
+
+    import src.trading.execution.engine as eng
+
+    async def _set():
+        async with eng._mode_lock:
+            eng._mode = TradeMode.AUTO
+
+    import asyncio
+
+    await _set()
+
+    with (
+        patch("src.db.connection.get_session") as mock_get_session,
+        patch("src.trading.execution.engine.personal", {"execution": {"delay_ms": 0}}),
+    ):
+        mock_db = MagicMock()
+        mock_inst = MagicMock()
+        mock_inst.figi = "BBG000000001"
+        mock_inst.lot_size = 1
+        mock_inst.id = 1
+        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_inst
+        mock_get_session.return_value = mock_db
+
+        record = await execute_order(
+            ticker="SBER",
+            direction="BUY",
+            quantity=5,
+            price=250.0,
+            figi="BBG000000001",
+            reason="test_exception",
+        )
+        assert record.status == "failed"
+
+
+def test_notify_trade_calls_broadcast():
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    import src.trading.execution.engine as eng
+
+    mock_telegram = MagicMock()
+    sys.modules["src.interfaces.telegram"] = mock_telegram
+
+    record = eng.OrderRecord(ticker="TEST", direction="BUY", quantity=1, price=100, mode=TradeMode.DRY_RUN)
+    with patch("src.trading.execution.engine.asyncio.ensure_future") as mock_future:
+        eng._notify_trade(record, reason="test")
+        mock_future.assert_called_once()

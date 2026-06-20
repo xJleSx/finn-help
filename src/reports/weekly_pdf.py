@@ -5,18 +5,16 @@ import numpy as np
 
 from src.analysis.personal_backtest import run_personal_backtest
 from src.config import personal
-from src.db.connection import get_session
-from src.db.models import Instrument, Price
 
 logger = logging.getLogger(__name__)
 
 
 def generate_weekly_report() -> bytes | None:
     import io
+
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
 
     try:
         bt = personal.get("backtest", {})
