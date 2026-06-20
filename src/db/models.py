@@ -376,6 +376,7 @@ class SocialPost(Base):
     raw_json = Column(JSON)
     processed = Column(Boolean, default=False)
     processed_at = Column(DateTime(timezone=True))
+    deferred = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
 
     __table_args__ = (

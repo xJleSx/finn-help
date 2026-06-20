@@ -1,39 +1,15 @@
-BATCH_ANALYSIS_PROMPT = """Ты — аналитик рыночного сентимента по российским акциям.
-Проанализируй посты из соцсети и для каждого определи настроение.
-
-Формат ответа — СТРОГИЙ JSON-массив:
-[
-  {{
-    "post_index": 0,
-    "ticker": "SBER",
-    "bullish_score": 0.0-1.0,
-    "bearish_score": 0.0-1.0,
-    "confidence": 0.0-1.0,
-    "reasoning": "объяснение"
-  }}
-]
-
-Посты для анализа:
-{posts_json}
+BATCH_ANALYSIS_PROMPT = """Анализируй настроение постов. Ответ — JSON-массив.
+Формат: [{{"post_index":N,"ticker":"TICKER","bullish":0-1,"bearish":0-1,"confidence":0-1,"reason":"2-3 слова"}}]
 
 Правила:
-- bullish_score — насколько автор позитивно оценивает перспективы тикера
-- bearish_score — насколько негативно
-- Если пост не про финансы/рынок — confidence: 0.0
-- Если про рынок в целом — ticker: null
-- Если упомянуто несколько тикеров — верни отдельный объект для каждого
-- Ответ должен быть валидным JSON без лишнего текста"""
+- Не про финансы → confidence:0, ticker:null
+- Рынок в целом → ticker:null
+- Несколько тикеров → отдельный объект на каждый
 
-AUTHOR_ANALYSIS_PROMPT = """Ты — аналитик, оценивающий стратегию автора в соцсети Пульс.
-Проанализируй данные автора и дай оценку.
+Посты:
+{posts_json}"""
 
-Данные:
-{author_data}
+AUTHOR_ANALYSIS_PROMPT = """Оцени автора Пульса. JSON:
+{{"reliability":0.0-1.0,"strategy":"long_term|short_term|mixed|unknown","risk":"low|medium|high","notes":"1 фраза"}}
 
-Ответь JSON:
-{{
-  "reliability_estimate": 0.0-1.0,
-  "strategy_type": "long_term" | "short_term" | "mixed" | "unknown",
-  "risk_level": "low" | "medium" | "high",
-  "notes": "краткое наблюдение"
-}}"""
+{author_data}"""

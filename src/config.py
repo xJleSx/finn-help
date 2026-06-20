@@ -10,7 +10,7 @@ load_dotenv()
 PERSONAL_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "personal_settings.yaml"
 
 
-def load_personal_settings() -> dict:
+def load_personal_settings() -> dict[str, object]:
     path = PERSONAL_CONFIG_PATH
     if path.exists():
         try:
@@ -26,6 +26,7 @@ def load_personal_settings() -> dict:
 class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    social_groq_model: str = "llama-3.1-8b-instant"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
     jwt_secret: str = ""

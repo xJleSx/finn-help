@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Any, cast
 
 from src.config import settings
 from src.llm import prompts
@@ -8,14 +8,14 @@ logger = logging.getLogger(__name__)
 
 
 class LLMRouter:
-    def __init__(self):
-        self._groq_client: Optional = None
+    def __init__(self) -> None:
+        self._groq_client: object | None = None
         self._use_groq = bool(settings.groq_api_key)
         self._groq_model = settings.groq_model
         self._ollama_model = settings.ollama_model
         self._ollama_url = settings.ollama_url
 
-    async def advise(self, signal: dict) -> str:
+    async def advise(self, signal: dict[str, object]) -> str:
         if self._use_groq:
             try:
                 return await self._groq_advise(signal)
@@ -24,7 +24,7 @@ class LLMRouter:
 
         return await self._ollama_advise(signal)
 
-    async def _groq_advise(self, signal: dict) -> str:
+    async def _groq_advise(self, signal: dict[str, object]) -> str:
         try:
             from groq import AsyncGroq
 
@@ -43,7 +43,7 @@ class LLMRouter:
             logger.warning("groq package not installed")
             return self._fallback_text(signal)
 
-    async def _ollama_advise(self, signal: dict) -> str:
+    async def _ollama_advise(self, signal: dict[str, object]) -> str:
         try:
             import httpx
 
@@ -60,8 +60,9 @@ class LLMRouter:
                 }
                 resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
                 resp.raise_for_status()
-                data = resp.json()
-                return data.get("message", {}).get("content", self._fallback_text(signal))
+                data: Any = resp.json()
+                result: Any = data.get("message", {}).get("content", self._fallback_text(signal))
+                return cast(str, result)
         except Exception as e:
             logger.warning(f"ollama failed: {e}")
             return self._fallback_text(signal)
@@ -78,14 +79,15 @@ class LLMRouter:
         from groq import AsyncGroq
 
         client = AsyncGroq(api_key=settings.groq_api_key)
+        output_limit = 2048
         response = await client.chat.completions.create(
-            model=self._groq_model,
+            model=settings.social_groq_model,
             messages=[
-                {"role": "system", "content": "Ты — анализатор рыночного сентимента. Отвечай строго в JSON."},
+                {"role": "system", "content": "Отвечай JSON-массивом. Компактно."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.1,
-            max_tokens=4096,
+            temperature=0.05,
+            max_tokens=output_limit,
         )
         return response.choices[0].message.content or "[]"
 
@@ -96,11 +98,11 @@ class LLMRouter:
             payload = {
                 "model": self._ollama_model,
                 "messages": [
-                    {"role": "system", "content": "Ты — анализатор рыночного сентимента. Отвечай строго в JSON."},
+                    {"role": "system", "content": "Отвечай JSON-массивом. Компактно."},
                     {"role": "user", "content": prompt},
                 ],
-                "temperature": 0.1,
-                "max_tokens": 4096,
+                "temperature": 0.05,
+                "max_tokens": 2048,
                 "stream": False,
             }
             resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
@@ -109,12 +111,12 @@ class LLMRouter:
             result: str = data.get("message", {}).get("content", "[]")
             return result
 
-    def _fallback_text(self, signal: dict) -> str:
-        action = signal.get("action", "NEUTRAL")
-        confidence = signal.get("confidence", 0)
-        ticker = signal.get("ticker", "?")
-        reasons = signal.get("reasons", [])
-        max_pct = signal.get("max_portfolio_pct", 10)
+    def _fallback_text(self, signal: dict[str, object]) -> str:
+        action: Any = signal.get("action", "NEUTRAL")
+        confidence: Any = signal.get("confidence", 0)
+        ticker: Any = signal.get("ticker", "?")
+        reasons: Any = signal.get("reasons", [])
+        max_pct: Any = signal.get("max_portfolio_pct", 10)
 
         text = f"📊 {ticker} — {action} (уверенность: {confidence:.0%})\n"
         for r in reasons:
@@ -123,4 +125,4 @@ class LLMRouter:
         return text
 
 
-llm = LLMRouter()
+llm: LLMRouter = LLMRouter()
