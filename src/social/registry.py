@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from src.config import personal
 from src.social.base import SocialDataSource
@@ -18,11 +19,11 @@ class SocialRegistry:
         return self._sources.get(name)
 
     def get_active(self) -> list[SocialDataSource]:
-        cfg = personal.get("social_sources", {})
+        cfg: dict[str, Any] = personal.get("social_sources", {})  # type: ignore[assignment]
         return [s for name, s in self._sources.items() if cfg.get(name, {}).get("enabled", False)]
 
     def build_from_config(self) -> None:
-        cfg = personal.get("social_sources", {})
+        cfg: dict[str, Any] = personal.get("social_sources", {})  # type: ignore[assignment]
         pulse_cfg = cfg.get("pulse", {})
         if pulse_cfg.get("enabled") and pulse_cfg.get("authors"):
             from src.social.pulse import PulseAdapter
