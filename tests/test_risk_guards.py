@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from src.trading.risk.guards import (
@@ -231,3 +233,132 @@ def test_day_pnl():
     pnl, pnl_pct = get_day_pnl()
     assert pnl == -10000
     assert pnl_pct == -0.10
+
+
+def test_get_day_pnl_no_start():
+    from src.trading.risk.guards import get_day_pnl as get_pnl
+
+    pnl, pnl_pct = get_pnl()
+    assert pnl == 0.0
+    assert pnl_pct == 0.0
+
+
+def test_max_drawdown_pct_default():
+    from src.trading.risk.guards import max_drawdown_pct as mdd
+
+    assert mdd() == 0.20
+
+
+def test_risk_per_trade():
+    from src.trading.risk.guards import risk_per_trade as rpt
+
+    result = rpt()
+    assert 0 < result <= 0.10
+
+
+def test_max_position_pct_default():
+    from src.trading.risk.guards import max_position_pct as mpp
+
+    with patch("src.trading.risk.guards.personal", {"risk_profile": "balanced"}):
+        result = mpp()
+        assert result == 0.25
+
+
+def test_max_position_pct_conservative():
+    from src.trading.risk.guards import max_position_pct as mpp
+
+    with patch("src.trading.risk.guards.personal", {"risk_profile": "conservative"}):
+        result = mpp()
+        assert result == 0.15
+
+
+def test_max_position_pct_aggressive():
+    from src.trading.risk.guards import max_position_pct as mpp
+
+    with patch("src.trading.risk.guards.personal", {"risk_profile": "aggressive"}):
+        result = mpp()
+        assert result == 0.35
+
+
+def test_reset_peak():
+    from src.trading.risk.guards import reset_peak, update_drawdown
+
+    update_drawdown(100000)
+    update_drawdown(90000)
+    dd_before = update_drawdown(90000)
+    assert dd_before < 0
+    reset_peak(90000)
+    dd_after = update_drawdown(90000)
+    assert dd_after == 0.0
+
+
+def test_set_min_volume():
+    import src.trading.risk.guards as g
+
+    g.set_min_volume(500000)
+    assert g.MIN_DAILY_VOLUME == 500000
+
+
+def test_check_daily_loss_no_limit():
+    assert check_daily_loss(-1.0) is False
+
+
+def test_news_sentiment_warning():
+    ok, msg = check_news_sentiment([-0.2, -0.15, -0.1])
+    assert ok is True
+    assert "⚠️" in msg
+
+
+def test_drawdown_negative_peak():
+    dd = update_drawdown(-1000)
+    assert dd == 0.0
+
+
+class TestAsyncGuards:
+    @pytest.mark.asyncio
+    async def test_async_check_daily_loss(self):
+        from src.trading.risk.guards import async_check_daily_loss
+
+        set_daily_loss_limit(0.05)
+        result = await async_check_daily_loss(-0.03)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_async_update_drawdown(self):
+        from src.trading.risk.guards import async_update_drawdown
+
+        result = await async_update_drawdown(100000)
+        assert result == 0.0
+
+    @pytest.mark.asyncio
+    async def test_async_activate_deactivate_kill_switch(self):
+        from src.trading.risk.guards import (
+            async_activate_kill_switch,
+            async_deactivate_kill_switch,
+            async_is_kill_switch_active,
+        )
+
+        active = await async_is_kill_switch_active()
+        assert active is False
+        await async_activate_kill_switch("async test")
+        active = await async_is_kill_switch_active()
+        assert active is True
+        await async_deactivate_kill_switch()
+        active = await async_is_kill_switch_active()
+        assert active is False
+
+    @pytest.mark.asyncio
+    async def test_async_update_day_value(self):
+        from src.trading.risk.guards import async_update_day_value, update_day_value
+
+        await async_update_day_value(50000)
+        from src.trading.risk.guards import _current_day_value
+
+        assert _current_day_value == 50000
+
+    @pytest.mark.asyncio
+    async def test_async_start_day(self):
+        import src.trading.risk.guards as g
+
+        await g.async_start_day(200000)
+        assert g._day_start_value == 200000

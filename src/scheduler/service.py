@@ -14,7 +14,9 @@ _running = False
 async def _send_hourly_notification(start: datetime):
     try:
         from src.db.connection import get_session
-        from src.db.models import Notification as NotificationModel, Price, Signal as SignalModel
+        from src.db.models import Notification as NotificationModel
+        from src.db.models import Price
+        from src.db.models import Signal as SignalModel
 
         db = get_session()
         try:

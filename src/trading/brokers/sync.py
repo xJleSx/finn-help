@@ -1,10 +1,10 @@
 import logging
-from datetime import datetime, timezone
 
-from src.trading.brokers.tbank import TBankClient
 from src.config import settings
 from src.db.connection import get_session
-from src.db.models import Instrument, Portfolio as PortModel
+from src.db.models import Instrument
+from src.db.models import Portfolio as PortModel
+from src.trading.brokers.tbank import TBankClient
 
 logger = logging.getLogger(__name__)
 

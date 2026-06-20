@@ -1,8 +1,6 @@
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
-from src.config import personal, settings
 from src.db.connection import get_session
 from src.db.models import Order as OrderModel
 

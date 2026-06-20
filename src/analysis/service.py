@@ -124,16 +124,50 @@ class AnalysisService:
         cutoff = datetime.now(timezone.utc) - timedelta(days=3)
         result = await db.execute(select(News).where(News.created_at >= cutoff))
         recent = result.scalars().all()
-        if not recent:
-            return {"score": 0.0, "divergence": 0.0, "source": "none"}
-        scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
-        mean = sum(scores) / len(scores)
-        variance = sum((s - mean) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
+        news_sentiment = {"score": 0.0, "divergence": 0.0, "source": "none", "count": 0}
+        if recent:
+            scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
+            mean_s = sum(scores) / len(scores)
+            variance = sum((s - mean_s) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
+            news_sentiment = {
+                "score": round(mean_s, 3),
+                "divergence": round(min(variance * 2, 1.0), 3),
+                "source": "rss",
+                "count": len(scores),
+            }
+
+        try:
+            from src.social.sentiment.aggregator import aggregator
+
+            tickers = await db.execute(select(Instrument.ticker))
+            all_tickers = [r[0] for r in tickers.all() if r[0]]
+            social_scores = [aggregator.get_ticker_sentiment(t) for t in all_tickers]
+            social_with_data = [s for s in social_scores if s["count"] > 0]
+        except Exception:
+            social_with_data = []
+
+        if not social_with_data:
+            return news_sentiment
+
+        avg_social = sum(s["score"] for s in social_with_data) / len(social_with_data)
+        total_count = sum(s["count"] for s in social_with_data)
+        all_social_scores = [s["score"] for s in social_with_data]
+        divergence = (
+            (max(all_social_scores) - min(all_social_scores)) / 2 if len(all_social_scores) > 1 else 0.0
+        )
+
+        if news_sentiment["count"] > 0:
+            combined = news_sentiment["score"] * 0.4 + avg_social * 0.6
+            source_str = "rss+social"
+        else:
+            combined = avg_social
+            source_str = "social"
+
         return {
-            "score": round(mean, 3),
-            "divergence": round(min(variance * 2, 1.0), 3),
-            "source": "rss",
-            "count": len(scores),
+            "score": round(combined, 3),
+            "divergence": round(min(divergence, 1.0), 3),
+            "source": source_str,
+            "count": news_sentiment["count"] + total_count,
         }
 
     async def analyze_single(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> dict:
@@ -278,18 +312,43 @@ class AnalysisService:
 
                 cutoff = datetime.now(timezone.utc) - timedelta(days=3)
                 recent = db.query(News).filter(News.created_at >= cutoff).all()
+                news_sentiment = {"score": 0.0, "divergence": 0.0, "source": "none", "count": 0}
                 if recent:
                     scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
-                    mean = sum(scores) / len(scores)
-                    variance = sum((s - mean) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
-                    sentiment = {
-                        "score": round(mean, 3),
+                    mean_s = sum(scores) / len(scores)
+                    variance = sum((s - mean_s) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
+                    news_sentiment = {
+                        "score": round(mean_s, 3),
                         "divergence": round(min(variance * 2, 1.0), 3),
                         "source": "rss",
                         "count": len(scores),
                     }
+
+                try:
+                    from src.social.sentiment.aggregator import aggregator
+
+                    inst_ticker = str(inst.ticker or "")
+                    social_entry = aggregator.get_ticker_sentiment(inst_ticker)
+                except Exception:
+                    social_entry = {"score": 0.0, "divergence": 0.0, "source": "social", "count": 0}
+
+                if social_entry["count"] > 0 and news_sentiment["count"] > 0:
+                    combined = news_sentiment["score"] * 0.4 + social_entry["score"] * 0.6
+                    sentiment = {
+                        "score": round(combined, 3),
+                        "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),
+                        "source": "rss+social",
+                        "count": news_sentiment["count"] + social_entry["count"],
+                    }
+                elif social_entry["count"] > 0:
+                    sentiment = {
+                        "score": round(social_entry["score"], 3),
+                        "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),
+                        "source": "social",
+                        "count": social_entry["count"],
+                    }
                 else:
-                    sentiment = {"score": 0.0, "divergence": 0.0, "source": "none"}
+                    sentiment = news_sentiment
 
                 volatility_regime = self.volatility.detect(df, ind_df)
                 risk_metrics = compute_risk_metrics(df["close"].tolist())

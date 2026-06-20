@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 from datetime import date, timedelta
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select

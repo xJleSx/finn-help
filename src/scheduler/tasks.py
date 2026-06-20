@@ -5,16 +5,17 @@ from datetime import date, timedelta
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from src.trading.brokers.tbank import TBankClient
-from src.config import settings
 from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.collectors.news import NewsCollector
+from src.config import settings
 from src.db.connection import get_session
-from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Portfolio as PortModel, Price
+from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Price
+from src.db.models import Portfolio as PortModel
 from src.geo.risk_scorer import GeoRiskScorer
 from src.geo.sentiment_divergence import SentimentDivergenceDetector
 from src.signal.engine import SignalFusionEngine
+from src.trading.brokers.tbank import TBankClient
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,12 @@ async def daily_update():
         news_list = await _collect_news(db)
         await _compute_geo_risk(db, news_list)
         await _collect_macro(db)
-        from src.db.models import Signal as SignalModel
+
+        await _collect_social_sentiment()
+
         from sqlalchemy import func
+
+        from src.db.models import Signal as SignalModel
         db.query(SignalModel).filter(func.date(SignalModel.date) == date.today()).delete()
         db.commit()
         signals = await _generate_signals(db, updated_ids=None)
@@ -296,6 +301,58 @@ async def _collect_macro(db: Session):
         if not exists:
             db.add(MacroIndicator(**item))
     db.commit()
+
+
+async def _collect_social_sentiment():
+    from src.social.registry import registry
+    from src.social.sentiment.analyzer import analyzer
+
+    try:
+        registry.build_from_config()
+        sources = registry.get_active()
+        if not sources:
+            logger.info("No active social sources, skipping social collection")
+            return
+
+        from src.db.connection import get_session
+        from src.db.models import SocialPost
+
+        for src in sources:
+            try:
+                posts = await src.fetch_posts()
+                db = get_session()
+                try:
+                    new_count = 0
+                    for post in posts:
+                        exists = db.query(SocialPost).filter_by(
+                            source=post.source, external_id=post.external_id
+                        ).first()
+                        if exists:
+                            continue
+                        sp = SocialPost(
+                            source=post.source,
+                            external_id=post.external_id,
+                            author_nick=post.author_nick,
+                            author_id=post.author_id,
+                            text=post.text,
+                            published_at=post.published_at,
+                            url=post.url,
+                            tickers_mentioned=post.tickers,
+                            raw_json=post.raw,
+                        )
+                        db.add(sp)
+                        new_count += 1
+                    db.commit()
+                    logger.info("Social %s: %d new posts", src.source_name, new_count)
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.error("Social collection failed for %s: %s", src.source_name, e)
+
+        count = await analyzer.process_new_posts()
+        logger.info("Social sentiment: %d signals created", count)
+    except Exception as e:
+        logger.error("Social sentiment cycle failed: %s", e)
 
 
 async def _notify_signals(signals: list[dict]):

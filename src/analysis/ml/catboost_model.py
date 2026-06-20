@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier
 
-from src.model_registry import save_model, load_model as load_from_registry
+from src.model_registry import load_model as load_from_registry
+from src.model_registry import save_model
 
 logger = logging.getLogger(__name__)
 

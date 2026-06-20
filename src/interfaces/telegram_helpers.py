@@ -1,13 +1,11 @@
 import logging
 import re
-from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.db.connection import get_session
-from src.db.models import Instrument
+from src.db.models import Instrument, Price
 from src.db.models import Portfolio as PortModel
-from src.db.models import Price
 
 logger = logging.getLogger(__name__)
 

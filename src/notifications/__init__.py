@@ -67,6 +67,17 @@ class DivergenceAlert:
 
 
 @dataclass
+class SocialSentimentAlert:
+    ticker: str
+    social_score: float
+    source: str
+    top_author: str
+    post_count: int
+    summary: str
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
 class RebalanceAlert:
     ticker: str
     current_pct: float

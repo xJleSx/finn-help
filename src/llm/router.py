@@ -66,6 +66,49 @@ class LLMRouter:
             logger.warning(f"ollama failed: {e}")
             return self._fallback_text(signal)
 
+    async def analyze_social(self, prompt: str) -> str:
+        if self._use_groq:
+            try:
+                return await self._groq_social(prompt)
+            except Exception as e:
+                logger.warning("Groq social failed: %s, trying local", e)
+        return await self._ollama_social(prompt)
+
+    async def _groq_social(self, prompt: str) -> str:
+        from groq import AsyncGroq
+
+        client = AsyncGroq(api_key=settings.groq_api_key)
+        response = await client.chat.completions.create(
+            model=self._groq_model,
+            messages=[
+                {"role": "system", "content": "Ты — анализатор рыночного сентимента. Отвечай строго в JSON."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content or "[]"
+
+    async def _ollama_social(self, prompt: str) -> str:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            payload = {
+                "model": self._ollama_model,
+                "messages": [
+                    {"role": "system", "content": "Ты — анализатор рыночного сентимента. Отвечай строго в JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 4096,
+                "stream": False,
+            }
+            resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            result: str = data.get("message", {}).get("content", "[]")
+            return result
+
     def _fallback_text(self, signal: dict) -> str:
         action = signal.get("action", "NEUTRAL")
         confidence = signal.get("confidence", 0)

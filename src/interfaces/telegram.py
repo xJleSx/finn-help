@@ -2,13 +2,11 @@ import asyncio
 import io
 import logging
 import time
+from collections import OrderedDict
 from typing import Optional
 
-from collections import OrderedDict
-
-from groq import AsyncGroq
 import httpx
-
+from groq import AsyncGroq
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -21,18 +19,21 @@ from telegram.ext import (
 )
 
 from src.analysis.backtest import backtest_allocation
-from src.analysis.sector import sector_analyzer
 from src.analysis.correlation_analysis import correlation_table
-from src.analysis.personal_backtest import run_personal_backtest
-from src.analysis.stress import StressTester, format_portfolio_for_stress, format_sector_concentration, format_var_section
+from src.analysis.sector import sector_analyzer
+from src.analysis.stress import (
+    StressTester,
+    format_portfolio_for_stress,
+)
 from src.analysis.whatif import whatif_macro, whatif_scenario
 from src.cli import run_analysis
 from src.collectors.cbr import CBRCollector
 from src.config import personal, settings
 from src.constants import CACHE_TTL, COOLDOWN_SECONDS, MAX_CACHE_SIZE
 from src.db.connection import get_session
-from src.db.models import GeoRiskScore, Instrument, Price, Signal as SignalModel, UserSetting
+from src.db.models import GeoRiskScore, Instrument, Price, UserSetting
 from src.db.models import Portfolio as PortModel
+from src.db.models import Signal as SignalModel
 from src.interfaces.telegram_helpers import (
     ACTION_EMOJI,
     _chunk_text,
@@ -883,6 +884,67 @@ async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
+async def social_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    args = context.args
+    ticker = args[0].upper() if args else None
+    if not ticker:
+        await update.effective_message.reply_text(
+            "Использование: /social TICKER\nПример: /social SBER"
+        )
+        return
+
+    from src.social.sentiment.aggregator import aggregator
+
+    result = aggregator.get_ticker_sentiment(ticker)
+    if result["count"] == 0:
+        await update.effective_message.reply_text(f"\U0001f50e Нет social-данных для {ticker}")
+        return
+
+    emoji = "\U0001f7e2" if result["score"] > 0.1 else "\U0001f534" if result["score"] < -0.1 else "\U0001f7e1"
+    await update.effective_message.reply_text(
+        f"{emoji} Social Sentiment — {ticker}\n"
+        f"  Score: {result['score']:.3f}\n"
+        f"  Расхождение: {result['divergence']:.3f}\n"
+        f"  Постов проанализировано: {result['count']}\n"
+        f"  Средняя уверенность: {result.get('avg_confidence', 0):.3f}"
+    )
+
+
+async def pulse(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    args = context.args
+    author = args[0] if args else None
+    if not author:
+        from src.config import personal
+
+        authors = personal.get("social_sources", {}).get("pulse", {}).get("authors", [])
+        await update.effective_message.reply_text(
+            "Отслеживаемые авторы Пульса:\n" + "\n".join(f"  @{a}" for a in authors)
+        )
+        return
+
+    from src.social.registry import registry
+
+    registry.build_from_config()
+    src = registry.get("pulse")
+    if not src:
+        await update.effective_message.reply_text("Пульс не настроен")
+        return
+
+    stats = await src.fetch_author_stats(author)
+    if stats:
+        await update.effective_message.reply_text(
+            f"📊 @{author}\n"
+            f"  Подписчиков: {stats.get('followers', '?')}\n"
+            f"  Доходность: {stats.get('yield', '?')}%"
+        )
+    else:
+        await update.effective_message.reply_text(f"Не удалось получить данные @{author}")
+
+
 async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message:
         return
@@ -1127,7 +1189,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "balanced": "40% ETF, 30% дивидендные, 20% облигации, 10% рост",
                 "aggressive": "40% рост, 25% ETF, 25% дивидендные, 10% облигации",
             }
-            text = f"📊 *Личные настройки*\n\n"
+            text = "📊 *Личные настройки*\n\n"
             text += f"👤 Профиль риска: *{names.get(current, current)}*\n"
 
             p_capital = personal.get("capital", 100_000)
@@ -1180,7 +1242,7 @@ async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     pnl, pnl_pct = get_day_pnl()
     trades = get_trade_history(limit=10)
-    text = f"📊 *P&L*\n\n"
+    text = "📊 *P&L*\n\n"
     text += f"Сегодня: {pnl:+,.0f} ₽ ({pnl_pct:+.2%})\n\n"
     if trades:
         text += "*Последние сделки:*\n"
@@ -1220,6 +1282,8 @@ async def run_bot():
     app.add_handler(CommandHandler("portfolio", portfolio))
     app.add_handler(CommandHandler("rates", rates))
     app.add_handler(CommandHandler("geo", geo))
+    app.add_handler(CommandHandler("social", social_cmd))
+    app.add_handler(CommandHandler("pulse", pulse))
     app.add_handler(CommandHandler("subscribe", subscribe))
     app.add_handler(CommandHandler("unsubscribe", unsubscribe))
     app.add_handler(CommandHandler("daily", daily))
