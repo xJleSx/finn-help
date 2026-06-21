@@ -25,6 +25,7 @@ async def sync_portfolio_from_broker(account_id: str = "") -> dict[str, object]:
         positions = await client.get_portfolio(target)
 
     db = get_session()
+    synced_instrument_ids: set[int] = set()
     try:
         for pos in positions:
             try:
@@ -43,10 +44,28 @@ async def sync_portfolio_from_broker(account_id: str = "") -> dict[str, object]:
                     existing.avg_price = avg_price
                 else:
                     db.add(PortModel(user_id=1, instrument_id=inst.id, quantity=qty, avg_price=avg_price))
+                synced_instrument_ids.add(inst.id)
                 stats["positions_synced"] += 1
             except Exception as e:
                 stats["errors"].append(str(e))
                 logger.warning("Sync error for position: %s", e)
+
+        # Удаляем позиции, которых больше нет в портфеле брокера
+        orphaned = (
+            db.query(PortModel)
+            .filter(
+                PortModel.user_id == 1,
+                PortModel.instrument_id.notin_(synced_instrument_ids),
+            )
+            .all()
+        )
+        for orphan in orphaned:
+            ticker = orphan.instrument.ticker if orphan.instrument else "?"
+            logger.info("Removing %s from local portfolio (no longer in broker)", ticker)
+            db.delete(orphan)
+            stats.setdefault("removed", 0)
+            stats["removed"] += 1
+
         db.commit()
     finally:
         db.close()

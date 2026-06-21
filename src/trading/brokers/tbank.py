@@ -72,7 +72,7 @@ class TBankClient:
                 positions.append(
                     {
                         "figi": p.figi,
-                        "ticker": p.instrument_uid,
+                        "ticker": p.ticker if hasattr(p, 'ticker') and p.ticker else p.figi,
                         "quantity": self._decimal(p.quantity),
                         "average_price": self._money(p.average_position_price),
                         "current_price": self._money(p.current_price),
