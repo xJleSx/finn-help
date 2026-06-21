@@ -66,7 +66,7 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
         cursor.close()
 
 
-SyncSessionLocal = scoped_session(sessionmaker(bind=sync_engine))
+SyncSessionLocal = scoped_session(sessionmaker(bind=sync_engine, expire_on_commit=False))
 
 
 def get_session() -> Session:
