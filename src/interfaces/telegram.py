@@ -1102,6 +1102,13 @@ async def broadcast_trade(
 
 
 app: Optional[Application] = None
+_scheduler_task: Optional["asyncio.Task[None]"] = None
+
+
+def _stop_scheduler() -> None:
+    from src.scheduler.service import stop as _sched_stop
+
+    _sched_stop()
 
 
 async def correlation(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1265,7 +1272,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def run_bot():
-    global app
+    global app, _scheduler_task
     if not settings.telegram_bot_token:
         logger.warning("TELEGRAM_BOT_TOKEN not set in .env")
         return
@@ -1315,16 +1322,25 @@ async def run_bot():
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 
-    logger.info("Bot started polling...")
     await app.initialize()
     await app.start()
+
+    # Start background scheduler (runs full cycle including social sentiment)
+    from src.scheduler.service import start_background as _start_scheduler
+
+    _scheduler_task = await _start_scheduler()
+
     await app.updater.start_polling()
+    logger.info("Bot started polling with background scheduler")
 
     try:
         while True:
             await asyncio.sleep(3600)
     except asyncio.CancelledError:
         logger.info("Bot shutting down...")
+        _stop_scheduler()
+        if _scheduler_task and not _scheduler_task.done():
+            _scheduler_task.cancel()
         await app.updater.stop()
         await app.stop()
         await app.shutdown()

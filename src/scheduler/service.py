@@ -97,7 +97,14 @@ async def run_forever(interval: int = UPDATE_INTERVAL):
         await asyncio.sleep(interval)
 
 
-def stop():
+async def start_background() -> "asyncio.Task[None]":
+    """Start the scheduler as a background task. Returns the task handle."""
+    task = asyncio.create_task(run_forever())
+    logger.info("Scheduler background task created")
+    return task
+
+
+def stop() -> None:
     global _running
     _running = False
     logger.info("Scheduler stopping")
