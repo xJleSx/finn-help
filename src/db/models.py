@@ -423,3 +423,56 @@ class SentimentSignal(Base):
     __table_args__ = (
         Index("ix_sentiment_signals_ticker_date", "ticker", "created_at"),
     )
+
+
+class MetricSnapshot(Base):
+    __tablename__ = "metric_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
+    taken_at = Column(DateTime(timezone=True), nullable=False)
+    period = Column(String(10), nullable=False, index=True)  # daily / weekly / monthly
+
+    price = Column(Float)
+    rsi = Column(Float)
+    macd_line = Column(Float)
+    macd_signal = Column(Float)
+    macd_hist = Column(Float)
+    sma_20 = Column(Float)
+    sma_50 = Column(Float)
+    sma_200 = Column(Float)
+    signal_action = Column(String(20))
+    signal_score = Column(Float)
+    signal_confidence = Column(Float)
+
+    delta_price_pct = Column(Float)
+    delta_score = Column(Float)
+    delta_rsi = Column(Float)
+    delta_action_changed = Column(Boolean)
+
+    market_score_avg = Column(Float)
+    social_score_avg = Column(Float)
+    geo_score = Column(Float)
+
+    __table_args__ = (
+        Index("ix_snapshot_instr_period", "instrument_id", "period"),
+        Index("ix_snapshot_taken", "taken_at"),
+    )
+
+
+class DailyReport(Base):
+    __tablename__ = "daily_reports"
+
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, unique=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    total_buy = Column(Integer, default=0)
+    total_sell = Column(Integer, default=0)
+    total_hold = Column(Integer, default=0)
+    market_score_avg = Column(Float)
+    market_score_trend = Column(String(10))  # up / down / flat
+
+    portfolio_signals = Column(JSON)  # [{"ticker":"SBER","action":"BUY","confidence":0.72,"score_delta":0.15},...]
+
+    report_text = Column(Text)

@@ -736,5 +736,39 @@ def social_overview(days: int = typer.Option(1, "--days", "-d", help="Days to lo
     console.print(table)
 
 
+# ── Snapshot & Report CLI ──────────────────────────────────────────────
+
+
+@social_app.command(name="snapshot")
+def social_snapshot(period: str = typer.Argument("daily", help="daily / weekly / monthly")):
+    """Принудительно снять срез метрик и сформировать отчёт"""
+    async def _run():
+        from src.scheduler.tasks import generate_daily_report, take_snapshot
+        console.print(f"[bold]📸 Снятие среза: {period}[/bold]")
+        await take_snapshot(period)
+        console.print(f"[green]✓[/green] Срез {period} сохранён")
+        if period == "daily":
+            report = await generate_daily_report()
+            if report:
+                console.print(report.report_text)
+
+    asyncio.run(_run())
+
+
+@social_app.command(name="report")
+def social_report():
+    """Сформировать ежедневный отчёт (без рассылки)"""
+    async def _run():
+        from src.scheduler.tasks import generate_daily_report
+        console.print("[bold]📄 Генерация отчёта...[/bold]")
+        report = await generate_daily_report()
+        if report:
+            console.print(report.report_text)
+        else:
+            console.print("[yellow]Отчёт не сформирован[/yellow]")
+
+    asyncio.run(_run())
+
+
 def main():
     app()
