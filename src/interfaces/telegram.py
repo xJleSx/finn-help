@@ -486,18 +486,68 @@ async def _handle_text(update: Update, text: str):
     await _ask_llm_general(update, text)
 
 
+def _format_data_advice(fused: dict) -> str:
+    """Сформировать детальный анализ на основе реальных данных, без LLM."""
+    parts = []
+    components = fused.get("components", {})
+    risk = fused.get("risk_metrics", {})
+    vol = fused.get("volatility_regime", {})
+
+    tech = components.get("technical", {})
+    if tech:
+        tech_score = tech.get("score", 0)
+        tech_conf = tech.get("confidence", 0)
+        parts.append(f"📊 *Технический анализ*: {tech.get('action', 'NEUTRAL')}")
+        parts.append(f"  Оценка: {tech_score:+.2f}, уверенность: {tech_conf:.0%}")
+
+    if risk:
+        parts.append("📈 *Риск-метрики*")
+        parts.append(f"  Sharpe: {risk.get('sharpe', 0):.2f}  Sortino: {risk.get('sortino', 0):.2f}")
+        parts.append(f"  Max DD: {risk.get('max_drawdown', 0):.1%}  Calmar: {risk.get('calmar', 0):.2f}")
+
+    vol_regime = vol.get("regime", "") if vol else ""
+    if vol_regime:
+        parts.append(f"🌊 *Волатильность*: {vol_regime}")
+
+    sent = components.get("sentiment", {})
+    sent_score = sent.get("score", 0) if sent else 0
+    if sent_score != 0:
+        parts.append(f"📰 *Сентимент*: {sent_score:+.3f} ({sent.get('source', '?')})")
+
+    ml = components.get("ml", {})
+    ml_change = ml.get("change_pct") if ml else None
+    if ml_change is not None:
+        tp = ml.get("target_price")
+        line = f"🤖 *ML-прогноз*: {ml_change:+.1f}%"
+        if tp:
+            line += f"  (цель: {tp:.0f} ₽)"
+        parts.append(line)
+    ml_conf = ml.get("confidence", 0) if ml else 0
+    if ml_conf:
+        parts.append(f"  Уверенность ML: {ml_conf:.0%}")
+
+    mtf = components.get("mtf", {})
+    mtf_dir = mtf.get("direction", 0) if mtf else 0
+    if mtf_dir != 0:
+        parts.append(f"📐 *Мультитаймфрейм*: {mtf_dir:+.2f}")
+
+    if parts:
+        return "\n".join(parts)
+    return ""
+
+
 async def _reply_with_analysis(update: Update, ticker: str):
     now = time.time()
     cached = analysis_cache.get(ticker)
     if cached and (now - cached[0]) < CACHE_TTL:
-        fused, advice = cached[1], cached[2]
+        fused, _advice = cached[1], cached[2]
         logger.info("Using cached analysis for %s", ticker)
         msg = None
     else:
         msg = await update.effective_message.reply_text(f"\U0001f50d Анализирую {ticker}...")
         try:
-            fused, advice = await run_analysis(ticker, with_llm=True)
-            analysis_cache[ticker] = (now, fused, advice)
+            fused, _advice = await run_analysis(ticker, with_llm=False)
+            analysis_cache[ticker] = (now, fused, _advice)
             if len(analysis_cache) > MAX_CACHE_SIZE:
                 analysis_cache.popitem(last=False)
         except Exception:
@@ -508,7 +558,7 @@ async def _reply_with_analysis(update: Update, ticker: str):
             return
 
     if not fused:
-        await update.effective_message.reply_text(f"\u274c {advice}")
+        await update.effective_message.reply_text(f"\u274c {_advice}")
         return
 
     action = fused["action"]
@@ -528,8 +578,10 @@ async def _reply_with_analysis(update: Update, ticker: str):
     text += f"Уверенность: {confidence:.0%}\n"
     text += "\n" + _simplify_reasons(fused.get("reasons", []))
 
-    if advice:
-        text += f"\n\n{advice}"
+    data_advice = _format_data_advice(fused)
+    if data_advice:
+        text += f"\n\n{data_advice}"
+
     text += f"\n\n\U0001f4a1 Рекомендуемая доля: до {fused['max_portfolio_pct']}%"
 
     chunks = _chunk_text(text, 4096)
@@ -597,17 +649,15 @@ async def _ask_llm_general(update: Update, text: str):
     try:
         system_content = personal.get("llm_system_prompt") or (
             "Ты — финансовый ассистент. "
-            "Отвечай кратко, по делу, на русском. Называй конкретные тикеры и цены. "
-            "Всегда добавляй предупреждение о рисках."
+            "Отвечай кратко, по делу, на русском. Называй конкретные тикеры и цены."
         )
         prompt = (
             f"Пользователь задал вопрос: {text}\n\n"
-            "Ответь коротко и полезно — что купить, зачем, какие риски. "
+            "Ответь коротко и полезно — что купить, зачем. "
             "Если вопрос про дивиденды — назови конкретные российские акции "
             "с примерными ценами и дивидендной доходностью. "
             "Если про небольшие суммы — подскажи, какие акции/БПИФ доступны "
-            "для покупки от 500–1000 ₽. "
-            "Не давай инвестиционных рекомендаций без оговорки о рисках."
+            "для покупки от 500–1000 ₽."
         )
         messages = [
             {"role": "system", "content": system_content},
