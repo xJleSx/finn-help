@@ -551,20 +551,30 @@ async def generate_daily_report() -> DailyReport | None:
         else:
             trend = "flat"
 
-        # Формируем текст отчёта
+        # Формируем понятный текст отчёта
         text_lines = [f"📅 *Отчёт за {today.isoformat()}*"]
         text_lines.append("")
+
+        trend_labels = {"up": "был позитивным", "down": "был негативным", "flat": "оставался нейтральным"}
         if market_avg is not None:
             emoji = "🟢" if trend == "up" else ("🔴" if trend == "down" else "🟡")
-            text_lines.append(f"{emoji} Рынок: {trend} (средний score {market_avg:+.3f})")
-        text_lines.append(f"• BUY: {total_buy}  SELL: {total_sell}  HOLD: {total_hold}")
+            text_lines.append(f"{emoji} *Рынок*: {trend_labels.get(trend, trend)}")
+
+        text_lines.append("")
+        action_emojis = {"BUY": "✅", "SELL": "🔴", "CAUTIOUS_BUY": "🟡", "HOLD": "⚪", "NEUTRAL": "⚪"}
+        text_lines.append("*Сигналы за день:*")
+        text_lines.append(f"  {action_emojis.get('BUY', '')} К покупке: {total_buy}")
+        text_lines.append(f"  {action_emojis.get('SELL', '')} К продаже: {total_sell}")
+        text_lines.append(f"  {action_emojis.get('HOLD', '')} Нейтрально / держать: {total_hold}")
 
         if portfolio_rows:
             text_lines.append("")
-            text_lines.append("📂 *Позиции портфеля:*")
+            text_lines.append("📂 *Ваш портфель:*")
             for pr in portfolio_rows:
-                delta_str = f" ({pr['score_delta']:+.3f})" if pr["score_delta"] is not None else ""
-                text_lines.append(f"  {pr['ticker']} — {pr['action']} (уверенность {pr['confidence']:.0%}){delta_str}")
+                emoji = action_emojis.get(pr["action"], "⚪")
+                action_labels = {"BUY": "можно покупать", "CAUTIOUS_BUY": "можно рассмотреть", "HOLD": "держать", "SELL": "продавать", "NEUTRAL": "нейтрально"}
+                label = action_labels.get(pr["action"], pr["action"])
+                text_lines.append(f"  {emoji} *{pr['ticker']}* — {label} (уверенность {pr['confidence']:.0%})")
 
         report = DailyReport(
             date=today,

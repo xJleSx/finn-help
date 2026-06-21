@@ -41,7 +41,6 @@ from src.interfaces.telegram_helpers import (
     _find_excluded_tickers,
     _find_tickers,
     _format_allocation_plan,
-    _simplify_reasons,
     build_analyze_keyboard,
     build_main_keyboard,
     build_top_keyboard,
@@ -513,8 +512,27 @@ async def _handle_text(update: Update, text: str):
     await _ask_llm_general(update, text)
 
 
+def _describe_risk(sharpe: float, max_dd: float) -> str:
+    """Краткое словесное описание уровня риска."""
+    parts = []
+    if sharpe < 0.3:
+        parts.append("доходность нестабильна")
+    elif sharpe < 1.0:
+        parts.append("доходность умеренная")
+    else:
+        parts.append("доходность хорошая")
+
+    if max_dd > 0.3:
+        parts.append("возможны просадки до 30%+")
+    elif max_dd > 0.15:
+        parts.append("просадки в пределах разумного")
+    else:
+        parts.append("просадки небольшие")
+    return ", ".join(parts)
+
+
 def _format_data_advice(fused: dict) -> str:
-    """Сформировать детальный анализ на основе реальных данных, без LLM."""
+    """Понятный анализ без сложных терминов."""
     parts = []
     components = fused.get("components", {})
     risk = fused.get("risk_metrics", {})
@@ -523,73 +541,69 @@ def _format_data_advice(fused: dict) -> str:
     tech = components.get("technical", {})
     if tech:
         tech_score = tech.get("score", 0)
-        tech_conf = tech.get("confidence", 0)
-        parts.append(f"📊 *Технический анализ*: {tech.get('action', 'NEUTRAL')}")
-        parts.append(f"  Оценка: {tech_score:+.2f}, уверенность: {tech_conf:.0%}")
+        tech_action = tech.get("action", "NEUTRAL")
+        tech_labels = {"BUY": "сигнал к покупке", "SELL": "сигнал к продаже", "HOLD": "нейтрально, держать", "NEUTRAL": "нейтрально"}
+        desc = tech_labels.get(tech_action, tech_action.lower())
+        extra = ""
+        if tech_score > 0.3:
+            extra = " — технические индикаторы на стороне покупателей"
+        elif tech_score < -0.3:
+            extra = " — технические индикаторы на стороне продавцов"
+        parts.append(f"📊 *Технический анализ*: {desc}{extra}")
 
     if risk:
-        parts.append("📈 *Риск-метрики*")
-        parts.append(f"  Sharpe: {risk.get('sharpe', 0):.2f}  Sortino: {risk.get('sortino', 0):.2f}")
-        parts.append(f"  Max DD: {risk.get('max_drawdown', 0):.1%}  Calmar: {risk.get('calmar', 0):.2f}")
+        sharpe = risk.get("sharpe", 0)
+        max_dd = risk.get("max_drawdown", 0)
+        desc = _describe_risk(sharpe, max_dd)
+        parts.append(f"📈 *Риски*: {desc}")
 
     vol_regime = vol.get("regime", "") if vol else ""
-    if vol_regime:
-        parts.append(f"🌊 *Волатильность*: {vol_regime}")
+    if vol_regime == "HIGH":
+        parts.append("🌊 *Волатильность*: высокая — цена может резко меняться")
+    elif vol_regime == "LOW":
+        parts.append("🌊 *Волатильность*: низкая — цена стабильна")
+    elif vol_regime:
+        parts.append("🌊 *Волатильность*: обычная")
 
     sent = components.get("sentiment", {})
     sent_score = sent.get("score", 0) if sent else 0
-    if sent_score != 0:
-        parts.append(f"📰 *Сентимент*: {sent_score:+.3f} ({sent.get('source', '?')})")
+    if sent_score > 0.1:
+        parts.append("📰 *Новости*: позитивные — рынок поддерживает актив")
+    elif sent_score < -0.1:
+        parts.append("📰 *Новости*: негативные — вокруг актива больше плохих новостей")
+    elif sent_score != 0:
+        parts.append("📰 *Новости*: нейтральные")
 
     ml = components.get("ml", {})
     ml_change = ml.get("change_pct") if ml else None
     if ml_change is not None:
+        direction = "рост" if ml_change > 0 else "снижение"
         tp = ml.get("target_price")
-        line = f"🤖 *ML-прогноз*: {ml_change:+.1f}%"
+        line = f"🤖 *Прогноз модели*: {direction} {abs(ml_change):.1f}%"
         if tp:
-            line += f"  (цель: {tp:.0f} ₽)"
+            line += f" (цель {tp:.0f} ₽)"
         parts.append(line)
-    ml_conf = ml.get("confidence", 0) if ml else 0
-    if ml_conf:
-        parts.append(f"  Уверенность ML: {ml_conf:.0%}")
-
-    mtf = components.get("mtf", {})
-    mtf_dir = mtf.get("direction", 0) if mtf else 0
-    if mtf_dir != 0:
-        parts.append(f"📐 *Мультитаймфрейм*: {mtf_dir:+.2f}")
 
     trends = fused.get("trends", {})
     if trends:
-        parts.append("")
-        parts.append("📈 *Динамика*")
         daily = trends.get("daily", {})
-        if daily:
-            items = []
-            pd_ = daily.get("price_delta")
-            if pd_ is not None:
-                items.append(f"цена {pd_:+.1f}%")
-            sd = daily.get("score_delta")
-            if sd is not None:
-                items.append(f"score {sd:+.3f}")
-            rd = daily.get("rsi_delta")
-            if rd is not None:
-                items.append(f"RSI {rd:+.1f}")
-            if items:
-                parts.append(f"  За день: {' | '.join(items)}")
         weekly = trends.get("weekly", {})
+        trend_parts = []
+        pd_ = daily.get("price_delta") if daily else None
+        if pd_ is not None:
+            arrow = "📈" if pd_ > 0 else "📉"
+            trend_parts.append(f"{arrow} цена {'выросла' if pd_ > 0 else 'снизилась'} на {abs(pd_):.1f}% за день")
+        pw = weekly.get("price_delta") if weekly else None
+        if pw is not None:
+            arrow = "📈" if pw > 0 else "📉"
+            trend_parts.append(f"{arrow} за неделю {'+'+str(round(pw,1)) if pw > 0 else str(round(pw,1))}%")
         if weekly:
-            items = []
-            pw = weekly.get("price_delta")
-            if pw is not None:
-                items.append(f"цена {pw:+.1f}%")
-            rw = weekly.get("rsi_delta")
-            if rw is not None:
-                items.append(f"RSI {rw:+.1f}")
             ac = weekly.get("action_changed")
             if ac:
-                items.append("смена сигнала")
-            if items:
-                parts.append(f"  За неделю: {' | '.join(items)}")
+                trend_parts.append("🔄 рекомендация изменилась за неделю")
+        if trend_parts:
+            parts.append("")
+            parts.extend(trend_parts)
 
     if parts:
         return "\n".join(parts)
@@ -626,23 +640,22 @@ async def _reply_with_analysis(update: Update, ticker: str):
     emoji = ACTION_EMOJI.get(action, "\u26aa")
 
     action_labels = {
-        "BUY": "рекомендуется к покупке",
-        "CAUTIOUS_BUY": "можно рассмотреть для покупки",
-        "HOLD": "рекомендуется держать",
-        "SELL": "рекомендуется продать",
+        "BUY": "можно покупать",
+        "CAUTIOUS_BUY": "можно присмотреться",
+        "HOLD": "лучше держать",
+        "SELL": "лучше продать",
         "NEUTRAL": "нейтрально",
     }
-    label = action_labels.get(action, action)
+    label = action_labels.get(action, action.lower())
 
     text = f"{emoji} *{ticker}* — {label}\n"
     text += f"Уверенность: {confidence:.0%}\n"
-    text += "\n" + _simplify_reasons(fused.get("reasons", []))
 
     data_advice = _format_data_advice(fused)
     if data_advice:
-        text += f"\n\n{data_advice}"
+        text += f"\n{data_advice}"
 
-    text += f"\n\n\U0001f4a1 Рекомендуемая доля: до {fused['max_portfolio_pct']}%"
+    text += f"\n\n💡 Доля в портфеле: до {fused['max_portfolio_pct']}%"
 
     chunks = _chunk_text(text, 4096)
     if msg:
