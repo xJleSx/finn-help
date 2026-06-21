@@ -170,6 +170,32 @@ class AnalysisService:
             "count": news_sentiment["count"] + total_count,
         }
 
+    async def _load_trends(self, db: AsyncSession, instrument_id: int) -> dict:
+        from src.db.models import MetricSnapshot
+
+        result = {}
+        for period in ("daily", "weekly", "monthly"):
+            snap = (
+                await db.execute(
+                    select(MetricSnapshot)
+                    .where(MetricSnapshot.instrument_id == instrument_id, MetricSnapshot.period == period)
+                    .order_by(MetricSnapshot.taken_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if snap:
+                result[period] = {
+                    "price_delta": snap.delta_price_pct,
+                    "score_delta": snap.delta_score,
+                    "rsi_delta": snap.delta_rsi,
+                    "action_changed": snap.delta_action_changed,
+                    "price": snap.price,
+                    "rsi": snap.rsi,
+                    "signal_action": snap.signal_action,
+                    "signal_score": snap.signal_score,
+                }
+        return result
+
     async def analyze_single(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> dict:
         price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
         prices = price_result.scalars().all()
@@ -206,6 +232,8 @@ class AnalysisService:
         mtf_data = self.mtf.compute_all(df)
         mtf_concordance = self.mtf.concordance(mtf_data) if mtf_data else None
 
+        trends = await self._load_trends(db, inst.id)
+
         fused = self.fusion.fuse(
             ticker=ticker.upper(),
             technical=tech_signal,
@@ -218,6 +246,7 @@ class AnalysisService:
             sentiment=sentiment,
             mtf=mtf_concordance,
         )
+        fused["trends"] = trends
         return fused
 
     async def analyze_all(
@@ -258,6 +287,30 @@ class AnalysisService:
         fused = await self.analyze_single(db, inst, ticker, with_ml=with_ml)
         advice = await llm.advise(fused)
         return fused, advice
+
+    def _load_trends_sync(self, db, instrument_id: int) -> dict:
+        from src.db.models import MetricSnapshot
+
+        result = {}
+        for period in ("daily", "weekly", "monthly"):
+            snap = (
+                db.query(MetricSnapshot)
+                .filter(MetricSnapshot.instrument_id == instrument_id, MetricSnapshot.period == period)
+                .order_by(MetricSnapshot.taken_at.desc())
+                .first()
+            )
+            if snap:
+                result[period] = {
+                    "price_delta": snap.delta_price_pct,
+                    "score_delta": snap.delta_score,
+                    "rsi_delta": snap.delta_rsi,
+                    "action_changed": snap.delta_action_changed,
+                    "price": snap.price,
+                    "rsi": snap.rsi,
+                    "signal_action": snap.signal_action,
+                    "signal_score": snap.signal_score,
+                }
+        return result
 
     def analyze_all_sync(self, db, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict]:
         """Sync version for CLI / scheduler use."""
@@ -367,6 +420,7 @@ class AnalysisService:
                     sentiment=sentiment,
                     mtf=mtf_concordance,
                 )
+                fused["trends"] = self._load_trends_sync(db, inst.id)
                 self.fusion.save_signal_sync(db, inst.id, fused)
                 signals.append(fused)
             except (ValueError, Exception) as e:

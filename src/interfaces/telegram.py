@@ -214,10 +214,37 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if not update.effective_message:
         return
-    ns = NotificationService()
-    summary = ns.get_daily_summary()
-    text = format_daily_summary_text(summary)
-    await update.effective_message.reply_markdown(text)
+    from src.db.connection import get_session
+    from src.db.models import DailyReport
+
+    db = get_session()
+    try:
+        report = (
+            db.query(DailyReport)
+            .order_by(DailyReport.date.desc())
+            .first()
+        )
+        if report and report.report_text:
+            await update.effective_message.reply_markdown(report.report_text)
+        else:
+            await update.effective_message.reply_text("Ежедневный отчёт ещё не сформирован. Он появляется после 23:50 МСК.")
+    finally:
+        db.close()
+
+
+async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
+    if not update.effective_message:
+        return
+    await update.effective_message.reply_text("📆 Формирую недельную сводку...")
+    try:
+        from src.scheduler.tasks import generate_weekly_report_text
+        text = await generate_weekly_report_text()
+        await update.effective_message.reply_markdown(text)
+    except Exception:
+        logger.exception("Weekly report failed")
+        await update.effective_message.reply_text("Не удалось сформировать недельную сводку.")
 
 
 async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -530,6 +557,39 @@ def _format_data_advice(fused: dict) -> str:
     mtf_dir = mtf.get("direction", 0) if mtf else 0
     if mtf_dir != 0:
         parts.append(f"📐 *Мультитаймфрейм*: {mtf_dir:+.2f}")
+
+    trends = fused.get("trends", {})
+    if trends:
+        parts.append("")
+        parts.append("📈 *Динамика*")
+        daily = trends.get("daily", {})
+        if daily:
+            items = []
+            pd_ = daily.get("price_delta")
+            if pd_ is not None:
+                items.append(f"цена {pd_:+.1f}%")
+            sd = daily.get("score_delta")
+            if sd is not None:
+                items.append(f"score {sd:+.3f}")
+            rd = daily.get("rsi_delta")
+            if rd is not None:
+                items.append(f"RSI {rd:+.1f}")
+            if items:
+                parts.append(f"  За день: {' | '.join(items)}")
+        weekly = trends.get("weekly", {})
+        if weekly:
+            items = []
+            pw = weekly.get("price_delta")
+            if pw is not None:
+                items.append(f"цена {pw:+.1f}%")
+            rw = weekly.get("rsi_delta")
+            if rw is not None:
+                items.append(f"RSI {rw:+.1f}")
+            ac = weekly.get("action_changed")
+            if ac:
+                items.append("смена сигнала")
+            if items:
+                parts.append(f"  За неделю: {' | '.join(items)}")
 
     if parts:
         return "\n".join(parts)
@@ -1344,6 +1404,7 @@ async def run_bot():
     app.add_handler(CommandHandler("subscribe", subscribe))
     app.add_handler(CommandHandler("unsubscribe", unsubscribe))
     app.add_handler(CommandHandler("daily", daily))
+    app.add_handler(CommandHandler("weekly", weekly))
     app.add_handler(CommandHandler("stress", stress))
     app.add_handler(CommandHandler("backtest", backtest))
     app.add_handler(
