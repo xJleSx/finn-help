@@ -1,16 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { api } from "../lib/api";
 
 export default function SectorHeatmap() {
   const [sectors, setSectors] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API}/api/sectors/performance?days=30`)
-      .then((r) => r.json())
+    api.sectors.performance(30)
       .then((data) => { setSectors(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);

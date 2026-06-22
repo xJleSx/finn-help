@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Instrument } from "./types";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { api } from "../lib/api";
 
 export default function AdvicePanel({ selectedTicker, onSelectTicker, instruments }: {
   selectedTicker: string; onSelectTicker: (t: string) => void; instruments: Instrument[];
@@ -14,8 +13,7 @@ export default function AdvicePanel({ selectedTicker, onSelectTicker, instrument
   useEffect(() => {
     if (fetchedRef.current === selectedTicker) return;
     fetchedRef.current = selectedTicker;
-    fetch(`${API}/api/instruments/${selectedTicker}/advice`)
-      .then((r) => r.ok ? r.json() : Promise.reject())
+    api.instruments.advice(selectedTicker)
       .then((data) => setAdvice(data.advice || JSON.stringify(data.signal, null, 2)))
       .catch(() => setAdvice("API недоступен"));
   }, [selectedTicker]);

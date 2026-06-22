@@ -38,3 +38,13 @@ export type UserInfo = {
 export type AuthState = {
   token: string | null; user: UserInfo | null;
 };
+
+export type MacroData = {
+  brent: number | null;
+  usd_rate: number | null;
+  imoex: number | null;
+  key_rate: number | null;
+  cpi: number | null;
+  ofz_10y: number | null;
+  m2: number | null;
+};

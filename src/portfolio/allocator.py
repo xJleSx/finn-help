@@ -1,13 +1,24 @@
-import asyncio
 import logging
 from datetime import date, timedelta
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.constants import KNOWN_DIVIDEND_STOCKS, SAFE_BONDS, SAFE_ETFS, SECTOR_LIMITS, SECTOR_NAMES
-from src.db.connection import get_session
+from src.constants import (
+    ALLOCATOR_CAPITAL_TIERS,
+    ALLOCATOR_LEFTOVER_MIN_ABS,
+    ALLOCATOR_LEFTOVER_THRESHOLD,
+    ALLOCATOR_RECOMMEND_MAX_PICKS,
+    ALLOCATOR_RECOMMEND_TIER_PICKS,
+    ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL,
+    KNOWN_DIVIDEND_STOCKS,
+    SAFE_BONDS,
+    SAFE_ETFS,
+    SECTOR_LIMITS,
+    SECTOR_NAMES,
+)
+from src.db.connection import get_session, session_scope
 from src.db.models import Dividend, Instrument, Price
+from src.portfolio.risk import item_risk
 
 logger = logging.getLogger(__name__)
 
@@ -43,21 +54,100 @@ class PortfolioAllocator:
 
     def _load_profile_from_db(self):
         try:
-            from src.db.connection import get_session
             from src.db.models import UserSetting
 
-            db = get_session()
-            try:
+            with session_scope() as db:
                 row = db.query(UserSetting).filter_by(key="risk_profile").first()
                 if row and row.value in self.PROFILES:
                     self.profile = row.value
-            finally:
-                db.close()
         except Exception as e:
             logger.warning("Failed to load risk profile from DB: %s", e)
 
     def _weights(self) -> dict:
         return self.PROFILES.get(self.profile, self.PROFILES["balanced"])
+
+    def _allocate_from_data(self, capital: float, existing: list[dict], instruments_data: list[dict], db) -> dict:
+        plan = {}
+        total_allocated = 0.0
+        sector_allocation: dict[str, float] = {}
+
+        for category, cfg in self._weights().items():
+            budget = capital * cfg["weight"]
+            candidates = self._score_candidates(instruments_data, category, budget, existing, db)
+
+            max_positions = cfg["max"]
+            for tier in ALLOCATOR_CAPITAL_TIERS:
+                if capital < tier["max_capital"] and budget < tier["min_budget"]:
+                    max_positions = tier["max_positions"]
+                    break
+
+            selected = candidates[:max_positions]
+            if not selected:
+                continue
+
+            cat_total = sum(s["score"] for s in selected) or 1
+            category_items = []
+            for item in selected:
+                share = item["score"] / cat_total
+                amount = round(budget * share, 2)
+
+                last_price = item.get("last_price")
+                if last_price and last_price > 0 and amount < last_price:
+                    continue
+
+                sector = item.get("sector", "Прочее")
+                limit = SECTOR_LIMITS.get(sector, 0.30)
+                current_sector_weight = (sector_allocation.get(sector, 0.0) + amount) / capital
+                if capital >= ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL and current_sector_weight > limit:
+                    continue
+
+                sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
+
+                risk = item_risk(item, db, capital)
+                category_items.append(
+                    {
+                        "ticker": item["ticker"],
+                        "name": item["name"],
+                        "amount": amount,
+                        "reason": item.get("reason", ""),
+                        "expected_yield": item.get("yield", 0),
+                        "sector": sector,
+                        "last_price": item.get("last_price"),
+                        "risk": risk,
+                    }
+                )
+                total_allocated += amount
+
+            plan[category] = {
+                "label": cfg["label"],
+                "budget": round(budget, 2),
+                "items": category_items,
+            }
+
+        leftover = round(capital - total_allocated, 2)
+        if leftover > max(ALLOCATOR_LEFTOVER_MIN_ABS, capital * ALLOCATOR_LEFTOVER_THRESHOLD):
+            for cat_name in ["etf", "dividend"]:
+                if cat_name in plan and plan[cat_name]["items"]:
+                    items = plan[cat_name]["items"]
+                    total_score = sum(it.get("amount", 0) for it in items) or 1
+                    for it in items:
+                        frac = it["amount"] / total_score
+                        it["amount"] = round(it["amount"] + leftover * frac, 2)
+                    total_allocated += leftover
+                    break
+
+        projected_monthly = self._calc_projected_yield(plan, capital)
+
+        return {
+            "capital": capital,
+            "total_allocated": round(total_allocated, 2),
+            "reserve": round(capital - total_allocated, 2),
+            "plan": plan,
+            "projected_monthly_yield": round(projected_monthly, 2),
+            "projected_monthly_pct": round((projected_monthly / capital) * 100 if capital > 0 else 0, 2),
+            "existing_portfolio": existing,
+            "sector_allocation": sector_allocation,
+        }
 
     def allocate(self, capital: float, db=None) -> dict:
         should_close = db is None
@@ -66,88 +156,7 @@ class PortfolioAllocator:
         try:
             existing = self._get_current_portfolio(db)
             instruments_data = self._load_instruments(db)
-
-            plan = {}
-            total_allocated = 0.0
-            sector_allocation: dict[str, float] = {}
-
-            for category, cfg in self._weights().items():
-                budget = capital * cfg["weight"]
-                candidates = self._score_candidates(instruments_data, category, budget, existing, db)
-
-                max_positions = cfg["max"]
-                if capital < 1000 and budget < 500:
-                    max_positions = 1
-                elif capital < 3000 and budget < 1000:
-                    max_positions = min(max_positions, 2)
-
-                selected = candidates[:max_positions]
-                if not selected:
-                    continue
-
-                cat_total = sum(s["score"] for s in selected) or 1
-                category_items = []
-                for item in selected:
-                    share = item["score"] / cat_total
-                    amount = round(budget * share, 2)
-
-                    last_price = item.get("last_price")
-                    if last_price and last_price > 0 and amount < last_price:
-                        continue
-
-                    sector = item.get("sector", "Прочее")
-                    limit = SECTOR_LIMITS.get(sector, 0.30)
-                    current_sector_weight = (sector_allocation.get(sector, 0.0) + amount) / capital
-                    if capital >= 10000 and current_sector_weight > limit:
-                        continue
-
-                    sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
-
-                    risk = _item_risk(item, db, capital)
-                    category_items.append(
-                        {
-                            "ticker": item["ticker"],
-                            "name": item["name"],
-                            "amount": amount,
-                            "reason": item.get("reason", ""),
-                            "expected_yield": item.get("yield", 0),
-                            "sector": sector,
-                            "last_price": item.get("last_price"),
-                            "risk": risk,
-                        }
-                    )
-                    total_allocated += amount
-
-                plan[category] = {
-                    "label": cfg["label"],
-                    "budget": round(budget, 2),
-                    "items": category_items,
-                }
-
-            leftover = round(capital - total_allocated, 2)
-            if leftover > max(500, capital * 0.1):
-                for cat_name in ["etf", "dividend"]:
-                    if cat_name in plan and plan[cat_name]["items"]:
-                        items = plan[cat_name]["items"]
-                        total_score = sum(it.get("amount", 0) for it in items) or 1
-                        for it in items:
-                            frac = it["amount"] / total_score
-                            it["amount"] = round(it["amount"] + leftover * frac, 2)
-                        total_allocated += leftover
-                        break
-
-            projected_monthly = self._calc_projected_yield(plan, capital)
-
-            return {
-                "capital": capital,
-                "total_allocated": round(total_allocated, 2),
-                "reserve": round(capital - total_allocated, 2),
-                "plan": plan,
-                "projected_monthly_yield": round(projected_monthly, 2),
-                "projected_monthly_pct": round((projected_monthly / capital) * 100 if capital > 0 else 0, 2),
-                "existing_portfolio": existing,
-                "sector_allocation": sector_allocation,
-            }
+            return self._allocate_from_data(capital, existing, instruments_data, db)
         finally:
             if should_close:
                 db.close()
@@ -319,7 +328,7 @@ class PortfolioAllocator:
             budget,
             existing_tickers,
             existing_tickers_list,
-            risk_fn=lambda c, b: _item_risk(c, db, b),
+            risk_fn=lambda c, b: item_risk(c, db, b),
             penalty_fn=lambda t, tl: corr_analyzer.diversification_penalty(t, tl, db),
             dividend_fn=lambda c: self._upcoming_dividend_score(c, db),
             volume_fn=lambda c: self._volume_score(c, db),
@@ -383,375 +392,29 @@ class PortfolioAllocator:
                         continue
                     c["category"] = cfg["label"]
                     c["score"] = round(c.get("score", 0), 2)
-                    risk = _item_risk(c, db, capital)
+                    risk = item_risk(c, db, capital)
                     c["risk"] = risk
                     all_picks.append(c)
             all_picks.sort(key=lambda x: x["score"], reverse=True)
-            max_picks = 15
-            if capital < 5000:
-                max_picks = 8
-            if capital < 1000:
-                max_picks = 4
+            max_picks = ALLOCATOR_RECOMMEND_MAX_PICKS
+            for tier in ALLOCATOR_RECOMMEND_TIER_PICKS:
+                if capital < tier["max_capital"]:
+                    max_picks = tier["max_picks"]
+                    break
             return all_picks[:max_picks]
         finally:
             if should_close:
                 db.close()
 
     async def allocate_async(self, capital: float, db: AsyncSession | None = None) -> dict:
-        if db is None:
-            from src.db.connection import get_session as get_sync_session
+        if db is not None:
+            with session_scope() as sync_db:
+                existing = self._get_current_portfolio(sync_db)
+                instruments_data = self._load_instruments(sync_db)
+                return self._allocate_from_data(capital, existing, instruments_data, sync_db)
 
-            sync_db = get_sync_session()
-            try:
-                return self.allocate(capital, db=sync_db)
-            finally:
-                sync_db.close()
-
-        existing = await self._get_current_portfolio_async(db)
-        instruments_data = await self._load_instruments_async(db)
-
-        plan = {}
-        total_allocated = 0.0
-        sector_allocation: dict[str, float] = {}
-
-        for category, cfg in self._weights().items():
-            budget = capital * cfg["weight"]
-            candidates = await self._score_candidates_async(instruments_data, category, budget, existing, db)
-
-            max_positions = cfg["max"]
-            if capital < 1000 and budget < 500:
-                max_positions = 1
-            elif capital < 3000 and budget < 1000:
-                max_positions = min(max_positions, 2)
-
-            selected = candidates[:max_positions]
-            if not selected:
-                continue
-
-            cat_total = sum(s["score"] for s in selected) or 1
-            category_items = []
-            for item in selected:
-                share = item["score"] / cat_total
-                amount = round(budget * share, 2)
-
-                last_price = item.get("last_price")
-                if last_price and last_price > 0 and amount < last_price:
-                    continue
-
-                sector = item.get("sector", "Прочее")
-                limit = SECTOR_LIMITS.get(sector, 0.30)
-                current_sector_weight = (sector_allocation.get(sector, 0.0) + amount) / capital
-                if capital >= 10000 and current_sector_weight > limit:
-                    continue
-
-                sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
-
-                risk = await _item_risk_async(item, db, capital)
-                category_items.append(
-                    {
-                        "ticker": item["ticker"],
-                        "name": item["name"],
-                        "amount": amount,
-                        "reason": item.get("reason", ""),
-                        "expected_yield": item.get("yield", 0),
-                        "sector": sector,
-                        "last_price": item.get("last_price"),
-                        "risk": risk,
-                    }
-                )
-                total_allocated += amount
-
-            plan[category] = {
-                "label": cfg["label"],
-                "budget": round(budget, 2),
-                "items": category_items,
-            }
-
-        leftover = round(capital - total_allocated, 2)
-        if leftover > max(500, capital * 0.1):
-            for cat_name in ["etf", "dividend"]:
-                if cat_name in plan and plan[cat_name]["items"]:
-                    items = plan[cat_name]["items"]
-                    total_score = sum(it.get("amount", 0) for it in items) or 1
-                    for it in items:
-                        frac = it["amount"] / total_score
-                        it["amount"] = round(it["amount"] + leftover * frac, 2)
-                    total_allocated += leftover
-                    break
-
-        projected_monthly = self._calc_projected_yield(plan, capital)
-
-        return {
-            "capital": capital,
-            "total_allocated": round(total_allocated, 2),
-            "reserve": round(capital - total_allocated, 2),
-            "plan": plan,
-            "projected_monthly_yield": round(projected_monthly, 2),
-            "projected_monthly_pct": round((projected_monthly / capital) * 100 if capital > 0 else 0, 2),
-            "existing_portfolio": existing,
-            "sector_allocation": sector_allocation,
-        }
-
-    async def _get_current_portfolio_async(self, db: AsyncSession) -> list[dict]:
-        from src.db.models import Portfolio as PortModel
-
-        result = await db.execute(select(PortModel))
-        positions = result.scalars().all()
-        output = []
-        for p in positions:
-            inst_result = await db.execute(select(Instrument).where(Instrument.id == p.instrument_id))
-            inst = inst_result.scalar_one_or_none()
-            price_result = await db.execute(
-                select(Price).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc()).limit(1)
-            )
-            price = price_result.scalar_one_or_none()
-            current_price = price.close if price else 0
-            value = current_price * p.quantity if current_price else 0
-            output.append(
-                {
-                    "ticker": inst.ticker if inst else "?",
-                    "quantity": float(p.quantity),
-                    "avg_price": float(p.avg_price) if p.avg_price else 0,
-                    "current_value": round(float(value), 2),
-                }
-            )
-        return output
-
-    async def _load_instruments_async(self, db: AsyncSession) -> list[dict]:
-        result = await db.execute(select(Instrument))
-        instruments = result.scalars().all()
-        output = []
-        for inst in instruments:
-            price_result = await db.execute(
-                select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()).limit(1)
-            )
-            price = price_result.scalar_one_or_none()
-            last_price = price.close if price else None
-            sector = SECTOR_NAMES.get(inst.ticker, inst.sector or "")
-
-            div_yield = 0.0
-            one_year_ago = date.today() - timedelta(days=365)
-            div_result = await db.execute(
-                select(Dividend)
-                .where(Dividend.instrument_id == inst.id, Dividend.date >= one_year_ago)
-                .order_by(Dividend.date.desc())
-            )
-            divs = div_result.scalars().all()
-            if divs and last_price and last_price > 0:
-                div_yield = sum(d.amount for d in divs) / last_price * 100
-
-            output.append(
-                {
-                    "id": inst.id,
-                    "ticker": inst.ticker,
-                    "name": inst.full_name or inst.ticker,
-                    "type": inst.instrument_type,
-                    "sector": sector,
-                    "last_price": float(last_price) if last_price else None,
-                    "div_yield": round(div_yield, 2),
-                    "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "dividend",
-                    "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "growth",
-                }
-            )
-        return output
-
-    async def _score_candidates_async(
-        self,
-        instruments: list[dict],
-        category: str,
-        budget: float,
-        existing: list[dict],
-        db: AsyncSession,
-    ) -> list[dict]:
-        existing_tickers = set(e["ticker"] for e in existing)
-        existing_tickers_list = list(existing_tickers)
-        candidates = self._filter_candidates_by_category(instruments, category)
-        if not candidates:
-            return []
-
-        from src.analysis.correlation import correlation as corr_analyzer
-
-        risk_results = await asyncio.gather(*[_item_risk_async(c, db, budget) for c in candidates])
-        penalty_results = await asyncio.gather(
-            *[corr_analyzer.diversification_penalty_async(c["ticker"], existing_tickers_list, db) for c in candidates]
-        )
-        dividend_results = await asyncio.gather(*[self._upcoming_dividend_score_async(c, db) for c in candidates])
-        volume_results = await asyncio.gather(*[self._volume_score_async(c, db) for c in candidates])
-
-        for c, risk, penalty, div, vol in zip(candidates, risk_results, penalty_results, dividend_results, volume_results):
-            score = 0.0
-            reason_parts = []
-
-            c["risk"] = risk
-
-            var_95 = risk.get("var_95", 0) or 0
-            if var_95 > 0.05:
-                score -= 1.0
-                reason_parts.append("высокий VaR (5%)")
-            elif var_95 > 0.03:
-                score -= 0.5
-                reason_parts.append("повышенный VaR")
-
-            max_pos_val = risk.get("suggested_shares", 999) * (c.get("last_price") or 1)
-            max_pos_pct = max_pos_val / budget if budget > 0 else 1
-            if max_pos_pct < 0.02:
-                score -= 0.5
-                reason_parts.append("низкий лимит позиции")
-            if max_pos_pct > 0.5:
-                score -= 1.0
-                reason_parts.append("высокая концентрация")
-
-            if c["ticker"] in existing_tickers:
-                score += 1.0
-                reason_parts.append("уже в портфеле")
-
-            if penalty > 0:
-                score -= penalty
-                reason_parts.append("высокая корреляция с портфелем")
-
-            if c["div_yield"] > 5:
-                score += 2.0
-                reason_parts.append(f"див. доходность {c['div_yield']:.1f}%")
-            elif c["div_yield"] > 3:
-                score += 1.0
-                reason_parts.append(f"див. доходность {c['div_yield']:.1f}%")
-
-            if div["bonus"]:
-                score += div["bonus"]
-                reason_parts.append(div["reason"])
-
-            if category == "etf":
-                score += vol
-                if c["ticker"] in SAFE_ETFS:
-                    score += 2.0
-                    reason_parts.append("надёжный БПИФ")
-
-            if category == "bond":
-                if c["ticker"] in SAFE_BONDS:
-                    score += 2.0
-                    reason_parts.append("ОФЗ — госгарантия")
-                else:
-                    score += 1.0
-                    reason_parts.append("корпоративная облигация")
-
-            c["score"] = max(score, 0.1)
-            c["reason"] = "; ".join(reason_parts) if reason_parts else "диверсификация"
-            c["yield"] = c["div_yield"]
-
-        candidates.sort(key=lambda x: x["score"], reverse=True)
-        return candidates
-
-    async def _upcoming_dividend_score_async(self, inst: dict, db: AsyncSession) -> dict:
-        try:
-            result = await db.execute(
-                select(Dividend).where(Dividend.instrument_id == inst["id"]).order_by(Dividend.date.desc()).limit(1)
-            )
-            div = result.scalar_one_or_none()
-            if not div:
-                return {"bonus": 0.0, "reason": ""}
-            days_since = (date.today() - div.date).days
-            if 300 < days_since < 400:
-                est_yield = div.amount / inst["last_price"] * 100 if inst.get("last_price") else 0
-                return {"bonus": 2.0, "reason": f"ожидаются дивиденды ~{div.amount:.0f} ₽/акц ({est_yield:.1f}%)"}
-            if days_since <= 90:
-                return {"bonus": 0.5, "reason": "недавние дивиденды"}
-            return {"bonus": 0.0, "reason": ""}
-        except Exception as e:
-            logger.warning("Dividend score failed for %s: %s", inst.get("ticker", "?"), e)
-            return {"bonus": 0.0, "reason": ""}
-
-    async def _volume_score_async(self, inst: dict, db: AsyncSession) -> float:
-        try:
-            result = await db.execute(
-                select(Price).where(Price.instrument_id == inst["id"]).order_by(Price.date.desc()).limit(20)
-            )
-            prices = result.scalars().all()
-            if not prices:
-                return 0.0
-            avg_vol = sum(p.volume or 0 for p in prices) / len(prices)
-            if avg_vol > 1_000_000:
-                return 2.0
-            elif avg_vol > 100_000:
-                return 1.0
-            return 0.5
-        except Exception:
-            logger.warning("Failed to get liquidity score", exc_info=True)
-            return 0.0
+        with session_scope() as sync_db:
+            return self.allocate(capital, db=sync_db)
 
 
 allocator = PortfolioAllocator()
-
-
-def _item_risk(item: dict, db, capital: float = 100_000) -> dict:
-    prices = db.query(Price).filter_by(instrument_id=item["id"]).order_by(Price.date.desc()).limit(60).all()
-    if len(prices) < 10:
-        return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
-
-    close_vals = [p.close for p in prices if p.close]
-    if len(close_vals) < 10:
-        return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
-
-    return _compute_risk_from_closes(close_vals, item, capital)
-
-
-def _item_risk_sync(item: dict, capital: float = 100_000) -> dict:
-    from src.db.connection import get_session
-
-    db = get_session()
-    try:
-        return _item_risk(item, db, capital)
-    finally:
-        db.close()
-
-
-async def _item_risk_async(item: dict, db: AsyncSession, capital: float = 100_000) -> dict:
-    result = await db.execute(
-        select(Price).where(Price.instrument_id == item["id"]).order_by(Price.date.desc()).limit(60)
-    )
-    prices = result.scalars().all()
-    if len(prices) < 10:
-        return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
-    close_vals = [p.close for p in prices if p.close]
-    if len(close_vals) < 10:
-        return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
-    return _compute_risk_from_closes(close_vals, item, capital)
-
-
-def _compute_risk_from_closes(close_vals: list[float], item: dict, capital: float) -> dict:
-    from src.trading.risk.manager import (
-        compute_concentration_limit,
-        compute_position_size,
-        compute_risk_score,
-        compute_stop_loss,
-        compute_var,
-    )
-
-    var = compute_var(close_vals)
-    last_price = close_vals[0]
-
-    stop = compute_stop_loss(last_price, None)
-    sizing = compute_position_size(
-        capital=capital,
-        price=last_price,
-        risk_per_trade_pct=2.0,
-        stop_loss_pct=stop["stop_loss_pct"] if stop else None,
-    )
-    conc = compute_concentration_limit(capital, last_price, max_position_pct=20.0)
-    risk_score = compute_risk_score(
-        var.get("var_95", 0) or 0,
-        (abs(stop["stop_loss_pct"]) if stop else 5.0),
-    )
-
-    return {
-        "var_95": var.get("var_95", 0.0),
-        "var_99": var.get("var_99", 0.0),
-        "cvar_95": var.get("cvar_95", 0.0),
-        "stop_loss": stop["stop_loss"] if stop else None,
-        "stop_loss_pct": stop["stop_loss_pct"] if stop else 0.0,
-        "suggested_shares": sizing.get("shares", 0),
-        "risk_amount": sizing.get("amount", 0.0),
-        "risk_per_trade_pct": 2.0,
-        "max_position_shares": conc.get("shares", 0),
-        "max_position_amount": conc.get("amount", 0.0),
-        "risk_score": risk_score,
-    }

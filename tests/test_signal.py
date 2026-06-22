@@ -127,7 +127,7 @@ class TestFuse:
             ticker="SBER",
             technical={"action": "BUY", "confidence": 0.9, "score": 0.9, "reasons": []},
         )
-        assert 0 < result["max_portfolio_pct"] <= 30
+        assert 0 < result["max_portfolio_pct"] <= 50
 
     def test_has_components(self, engine):
         result = engine.fuse(
@@ -138,11 +138,11 @@ class TestFuse:
 
 
 class TestMaxPosition:
-    def test_buy_max_30(self, engine):
-        assert engine._calc_max_position("BUY", 0.0, 0.0) == 30
+    def test_buy_max_50(self, engine):
+        assert engine._calc_max_position("BUY", 0.0, 0.0) == 50
 
-    def test_cautious_buy_max_15(self, engine):
-        assert engine._calc_max_position("CAUTIOUS_BUY", 0.0, 0.0) == 15
+    def test_cautious_buy_max_25(self, engine):
+        assert engine._calc_max_position("CAUTIOUS_BUY", 0.0, 0.0) == 25
 
     def test_high_geo_reduces_limit(self, engine):
         assert engine._calc_max_position("BUY", 8.0, 0.0) == 10

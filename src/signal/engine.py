@@ -5,6 +5,14 @@ from typing import Optional
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.constants import (
+    BASE_POSITION_PCT,
+    FUND_RISK_HIGH,
+    GEO_RISK_ELEVATED,
+    GEO_RISK_HIGH,
+    MACRO_MAX_ADJUSTMENT,
+    MACRO_THRESHOLDS,
+)
 from src.db.models import Signal as SignalModel
 
 logger = logging.getLogger(__name__)
@@ -114,6 +122,8 @@ class SignalFusionEngine:
         macro_adjustment = 0.0
         macro_reasons = []
 
+        mt = MACRO_THRESHOLDS
+
         sentiment_signal = 0.0
         sentiment_source = "нет данных"
         if sentiment is not None:
@@ -133,53 +143,41 @@ class SignalFusionEngine:
             ofz = macro_context.get("ofz_10y")
             m2 = macro_context.get("m2")
 
-            brent = macro_context.get("brent")
-            if brent:
-                if brent > 80:
-                    macro_adjustment += 0.03
-                    macro_reasons.append(f"Brent>{80}")
-                elif brent < 50:
-                    macro_adjustment -= 0.05
-                    macro_reasons.append(f"Brent<{50}")
+            def _apply(name: str, val: float | None, label: str):
+                nonlocal macro_adjustment
+                if val is None:
+                    return
+                cfg = mt.get(name)
+                if not cfg:
+                    return
+                if val > cfg["high"]:
+                    macro_adjustment += cfg["high_adj"]
+                    macro_reasons.append(f"{label}>{cfg['high']}")
+                elif val < cfg["low"]:
+                    macro_adjustment += cfg["low_adj"]
+                    macro_reasons.append(f"{label}<{cfg['low']}")
 
-            if key_rate:
-                if key_rate > 15:
-                    macro_adjustment -= 0.05
-                    macro_reasons.append(f"Ключевая>{15}%")
-                elif key_rate < 7:
-                    macro_adjustment += 0.03
-                    macro_reasons.append(f"Ключевая<{7}%")
+            _apply("brent", brent, "Brent")
+            _apply("key_rate", key_rate, "Ключевая")
+            _apply("cpi", cpi, "Инфляция")
+            _apply("ofz_10y", ofz, "ОФЗ")
 
-            if cpi:
-                if cpi > 8:
-                    macro_adjustment -= 0.04
-                    macro_reasons.append(f"Инфляция>{8}%")
-                elif cpi < 4:
-                    macro_adjustment += 0.02
-                    macro_reasons.append(f"Инфляция<{4}%")
-
-            if ofz:
-                if ofz > 12:
-                    macro_adjustment -= 0.03
-                    macro_reasons.append(f"ОФЗ>{12}%")
-                elif ofz < 6:
-                    macro_adjustment += 0.02
-                    macro_reasons.append(f"ОФЗ<{6}%")
-
-            if m2:
-                if m2 > 70000:
-                    macro_adjustment += 0.02
+            if m2 is not None:
+                cfg = mt.get("m2")
+                if m2 > cfg["high"]:
+                    macro_adjustment += cfg["high_adj"]
                     macro_reasons.append("M2 расширяется")
-                elif m2 < 50000:
-                    macro_adjustment -= 0.02
+                elif m2 < cfg["low"]:
+                    macro_adjustment += cfg["low_adj"]
                     macro_reasons.append("M2 сужается")
 
-            if imoex:
-                if imoex > 3500:
-                    macro_adjustment += 0.02
+            if imoex is not None:
+                cfg = mt.get("imoex")
+                if imoex > cfg["high"]:
+                    macro_adjustment += cfg["high_adj"]
                     macro_reasons.append("IMOEX сильно")
-                elif imoex < 2500:
-                    macro_adjustment -= 0.03
+                elif imoex < cfg["low"]:
+                    macro_adjustment += cfg["low_adj"]
                     macro_reasons.append("IMOEX слабый")
 
             if macro_reasons:
@@ -226,10 +224,10 @@ class SignalFusionEngine:
             + ml_signal * weights["ml"]
             + sentiment_signal * weights["sentiment"]
             + mtf_signal * weights["mtf"]
-            + macro_adjustment * 0.10
+            + macro_adjustment * MACRO_MAX_ADJUSTMENT
         )
 
-        macro_max = 0.10
+        macro_max = MACRO_MAX_ADJUSTMENT
         w = weights
         all_except_geo = w["technical"] + w["fundamental"] + w["ml"] + w["sentiment"] + w["mtf"]
         all_weights = all_except_geo + w["geo"]
@@ -273,11 +271,11 @@ class SignalFusionEngine:
             reasons.append(f"⚠️ аномалии: {'; '.join(fund_anomalies[:3])}")
             action = self._downgrade_buy(action)
 
-        if geo_score > 7:
+        if geo_score > GEO_RISK_HIGH:
             reasons.append(f"⚠️ ВЫСОКИЙ геополитический риск ({geo_score:.1f}/10)")
             if action == "BUY":
                 action = "CAUTIOUS_BUY"
-        elif geo_score > 5:
+        elif geo_score > GEO_RISK_ELEVATED:
             reasons.append(f"⚠️ повышенный геополитический риск ({geo_score:.1f}/10)")
 
         max_portfolio_pct = self._calc_max_position(action, geo_score, fund_risk, user_id=user_id)
@@ -328,15 +326,14 @@ class SignalFusionEngine:
         return action
 
     def _calc_max_position(self, action: str, geo_risk: float, fund_risk: float, user_id: Optional[str] = None) -> int:
-        base = {"BUY": 50, "CAUTIOUS_BUY": 25, "HOLD": 10, "SELL": 5, "NEUTRAL": 10}
-        pct = base.get(action, 10)
+        pct = BASE_POSITION_PCT.get(action, 10)
         if user_id:
             from src.user_profile import profile_manager
 
             pct = min(pct, profile_manager.get_max_position(user_id))
-        if geo_risk > 7:
+        if geo_risk > GEO_RISK_HIGH:
             pct = min(pct, 10)
-        if fund_risk > 0.6:
+        if fund_risk > FUND_RISK_HIGH:
             pct = min(pct, 10)
         return pct
 

@@ -1,25 +1,9 @@
 "use client";
 
 import { useState } from "react";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { api } from "../lib/api";
 
 type AuthState = { token: string | null; user: { id: number; username: string; email: string | null; role: string; risk_profile: string; is_active: boolean } | null };
-
-function authHeaders(token: string | null): Record<string, string> {
-  if (!token) return {};
-  return { Authorization: `Bearer ${token}` };
-}
-
-async function apiPost(url: string, body: unknown, token?: string | null): Promise<any> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(token || null) },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
 
 function saveAuth(auth: AuthState) {
   localStorage.setItem("finn_auth", JSON.stringify(auth));
@@ -37,16 +21,14 @@ export default function AuthModal({ onClose, onAuth }: { onClose: () => void; on
     setError(""); setLoading(true);
     try {
       if (tab === "register") {
-        const data = await apiPost(`${API}/api/auth/register`, { username, password, risk_profile: riskProfile });
-        const userRes = await fetch(`${API}/api/auth/me`, { headers: authHeaders(data.access_token) });
-        const user = await userRes.json();
+        const data = await api.auth.register(username, password, riskProfile);
+        const user = await api.auth.me(data.access_token);
         const state: AuthState = { token: data.access_token, user };
         saveAuth(state);
         onAuth(state);
       } else {
-        const data = await apiPost(`${API}/api/auth/login`, { username, password });
-        const userRes = await fetch(`${API}/api/auth/me`, { headers: authHeaders(data.access_token) });
-        const user = await userRes.json();
+        const data = await api.auth.login(username, password);
+        const user = await api.auth.me(data.access_token);
         const state: AuthState = { token: data.access_token, user };
         saveAuth(state);
         onAuth(state);
