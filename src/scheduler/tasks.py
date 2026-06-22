@@ -8,6 +8,7 @@ from src.db.connection import get_session
 from src.db.models import Signal as SignalModel
 from src.scheduler.collectors import (
     collect_dividends,
+    collect_fundamental,
     collect_macro,
     collect_news,
     collect_prices,
@@ -30,6 +31,7 @@ async def daily_update():
     try:
         updated_ids = await collect_prices(db)
         await collect_dividends(db)
+        await collect_fundamental(db)
         compute_indicators(db, instrument_ids=updated_ids)
         news_list = await collect_news(db)
         await compute_geo_risk(db, news_list)

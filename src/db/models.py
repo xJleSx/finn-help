@@ -476,3 +476,31 @@ class DailyReport(Base):
     portfolio_signals = Column(JSON)  # [{"ticker":"SBER","action":"BUY","confidence":0.72,"score_delta":0.15},...]
 
     report_text = Column(Text)
+
+
+class FundamentalMetric(Base):
+    __tablename__ = "fundamental_metrics"
+
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    period = Column(String(10), default="annual")  # annual / quarterly / ttm
+
+    market_cap = Column(Float, comment="Рыночная капитализация (RUB)")
+    shares_outstanding = Column(BigInteger, comment="Количество акций в обращении")
+    pe_ratio = Column(Float, comment="P/E")
+    pb_ratio = Column(Float, comment="P/B")
+    roe = Column(Float, comment="ROE %")
+    eps = Column(Float, comment="EPS (RUB)")
+    debt_equity = Column(Float, comment="Debt/Equity")
+    book_value = Column(Float, comment="Балансовая стоимость на акцию (RUB)")
+    revenue = Column(Float, comment="Выручка (RUB)")
+    net_income = Column(Float, comment="Чистая прибыль (RUB)")
+
+    extra = Column(JSON, comment="Дополнительные метрики (свободный формат)")
+
+    instrument = relationship("Instrument", backref="fundamental_metrics")
+
+    __table_args__ = (
+        Index("ix_fundamental_metrics_instr_date", "instrument_id", "date"),
+    )

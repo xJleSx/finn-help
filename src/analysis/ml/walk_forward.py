@@ -1,3 +1,4 @@
+import copy
 import logging
 
 import numpy as np
@@ -77,12 +78,14 @@ def walk_forward_validate(
             continue
 
         try:
-            model = model_instance.__class__.__new__(model_instance.__class__)
-            model.__dict__.update(model_instance.__dict__)
+            model = copy.deepcopy(model_instance)
             if hasattr(model, "_model"):
                 model._model = None
             model.fit(x_train, y_train)
-            preds = model.predict(x_test)
+            if hasattr(model, "_model") and model._model is not None:
+                preds = model._model.predict(x_test)
+            else:
+                preds = model.predict(x_test)
 
             acc = float(np.mean(preds == y_test))
             accuracies.append(acc)

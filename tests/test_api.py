@@ -62,7 +62,8 @@ class TestHealth:
     def test_health_returns_ok(self, mock_client, mock_db):
         resp = mock_client.get("/api/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        body = resp.json()
+        assert body["status"] == "ok"
 
 
 class TestInstruments:

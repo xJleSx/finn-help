@@ -43,17 +43,33 @@ class CorrelationAnalyzer:
         if len(instruments) < 2:
             return None
 
+        inst_ids = [inst.id for inst in instruments]
+        all_prices = (
+            db.query(Price.instrument_id, Price.date, Price.close)
+            .filter(Price.instrument_id.in_(inst_ids))
+            .order_by(Price.date.asc())
+            .all()
+        )
+
+        id_to_ticker = {inst.id: str(inst.ticker) for inst in instruments}
+
         price_dict: dict[str, pd.Series] = {}
-        for inst in instruments:
-            rows = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.asc()).all()
-            if len(rows) < 20:
+        temp: dict[int, list] = {}
+        for pid, d, close in all_prices:
+            if close is None:
                 continue
-            closes = pd.Series(
-                [r.close for r in rows],
-                index=pd.DatetimeIndex([r.date for r in rows]),
-                name=inst.ticker,
+            temp.setdefault(pid, []).append((d, close))
+
+        for pid, rows in temp.items():
+            ticker = id_to_ticker.get(pid)
+            if not ticker or len(rows) < 20:
+                continue
+            dates, closes = zip(*rows)
+            price_dict[ticker] = pd.Series(
+                closes,
+                index=pd.DatetimeIndex(dates),
+                name=ticker,
             )
-            price_dict[str(inst.ticker)] = closes
 
         if len(price_dict) < 2:
             return None
@@ -94,20 +110,34 @@ class CorrelationAnalyzer:
         if len(instruments) < 2:
             return None
 
+        inst_ids = [inst.id for inst in instruments]
+        id_to_ticker = {inst.id: str(inst.ticker) for inst in instruments}
+
+        price_result = await db.execute(
+            select(Price.instrument_id, Price.date, Price.close)
+            .where(Price.instrument_id.in_(inst_ids))
+            .order_by(Price.date.asc())
+        )
+        all_prices = price_result.all()
+
         price_dict: dict[str, pd.Series] = {}
-        for inst in instruments:
-            price_result = await db.execute(
-                select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.asc())
-            )
-            rows = price_result.scalars().all()
-            if len(rows) < 20:
+        temp: dict[int, list] = {}
+        for row in all_prices:
+            pid, d, close = row[0], row[1], row[2]
+            if close is None:
                 continue
-            closes = pd.Series(
-                [r.close for r in rows],
-                index=pd.DatetimeIndex([r.date for r in rows]),
-                name=inst.ticker,
+            temp.setdefault(pid, []).append((d, close))
+
+        for pid, rows in temp.items():
+            ticker = id_to_ticker.get(pid)
+            if not ticker or len(rows) < 20:
+                continue
+            dates, closes = zip(*rows)
+            price_dict[ticker] = pd.Series(
+                closes,
+                index=pd.DatetimeIndex(dates),
+                name=ticker,
             )
-            price_dict[str(inst.ticker)] = closes
 
         if len(price_dict) < 2:
             return None

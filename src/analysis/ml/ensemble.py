@@ -216,7 +216,6 @@ class EnsemblePredictor:
     def _stacking_predict(self, df: pd.DataFrame, base_preds: list[dict]) -> float | None:
         try:
             from sklearn.linear_model import LogisticRegression
-            from sklearn.model_selection import train_test_split
 
             needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
             if not all(c in df.columns for c in needed):
@@ -246,9 +245,21 @@ class EnsemblePredictor:
             x_meta = aligned[mask].values
             y_meta = y[mask].astype(int)
 
-            x_train, _, y_train, _ = train_test_split(x_meta, y_meta, test_size=0.2, random_state=42)
+            split_idx = int(len(x_meta) * 0.8)
+            x_train, x_test = x_meta[:split_idx], x_meta[split_idx:]
+            y_train, y_test = y_meta[:split_idx], y_meta[split_idx:]
+
+            if len(x_train) < 30 or len(x_test) < 10:
+                return None
+
             meta_model = LogisticRegression(max_iter=500, random_state=42, C=0.5)
             meta_model.fit(x_train, y_train)
+
+            test_acc = float(np.mean(meta_model.predict(x_test) == y_test))
+            if test_acc < 0.52:
+                logger.debug("Stacking meta-learner test acc %.3f < 0.52, falling back", test_acc)
+                return None
+
             latest = features.iloc[-1:].values
             prob = float(meta_model.predict_proba(latest)[0, 1])
             return prob
@@ -260,16 +271,30 @@ class EnsemblePredictor:
         if df.empty or len(df) < 60:
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
-        x = self._build_x(df)
-        if x is None or len(x) < 30:
+        lookahead = 5
+        threshold = 0.03
+        needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
+        if not all(c in df.columns for c in needed):
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
-        y = self._build_y(df)
-        if y is None or len(y) < 30:
+        features = df[needed].copy()
+        features["price_sma20"] = features["close"] / features["sma_20"].replace(0, np.nan)
+        features["price_sma50"] = features["close"] / features["sma_50"].replace(0, np.nan)
+        features["sma20_sma50"] = features["sma_20"] / features["sma_50"].replace(0, np.nan)
+        features["rsi_norm"] = features["rsi"] / 100
+        features["macd_signal_binary"] = (features["macd_hist"] > 0).astype(int)
+
+        future_returns = df["close"].shift(-lookahead) / df["close"] - 1
+        aligned = features.iloc[:-lookahead].copy()
+        labels = future_returns.iloc[: len(aligned)].values
+        y_raw = np.where(labels > threshold, 1, np.where(labels < -threshold, 0, np.nan))
+        mask = ~np.isnan(y_raw)
+        if mask.sum() < 30:
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
-        if len(x) != len(y):
-            min_len = min(len(x), len(y))
-            x, y = x[:min_len], y[:min_len]
+        x = aligned[mask].values
+        y = y_raw[mask].astype(int)
+        if len(x) < 30:
+            return {"oos_accuracy": 0.5, "folds_completed": 0}
 
         return walk_forward_validate(model, x, y, n_splits=3)

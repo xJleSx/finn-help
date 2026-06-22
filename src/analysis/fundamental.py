@@ -1,13 +1,24 @@
 import logging
 from datetime import date, timedelta
+from typing import Optional
 
 import pandas as pd
 
+from src.db.models import FundamentalMetric
+
 logger = logging.getLogger(__name__)
+
+MCAP_THRESHOLD_LOW = 1e9  # 1 млрд RUB — минимальная капитализация для blue chip
+MCAP_THRESHOLD_HIGH = 100e9  # 100 млрд RUB
 
 
 class FundamentalAnalyzer:
-    def analyze(self, prices: pd.DataFrame, dividends: pd.DataFrame) -> dict:
+    def analyze(
+        self,
+        prices: pd.DataFrame,
+        dividends: pd.DataFrame,
+        metrics: Optional[dict] = None,
+    ) -> dict:
         anomalies = []
         signals = []
         risk_score = 0.0
@@ -58,6 +69,17 @@ class FundamentalAnalyzer:
                 risk_score += 0.15
             signals.append(f"волатильность: {vol:.1%} годовых")
 
+        recent_1m = df[df["date"] >= (date.today() - timedelta(days=30))]
+        if len(recent_1m) >= 5:
+            first_close = recent_1m["close"].iloc[0]
+            last_close = recent_1m["close"].iloc[-1]
+            if first_close > 0:
+                monthly_change = (last_close - first_close) / first_close
+                signals.append(f"изменение за месяц: {monthly_change:+.1%}")
+                if monthly_change < -0.15:
+                    anomalies.append(f"резкое падение за месяц: {monthly_change:.1%}")
+                    risk_score += 0.3
+
         if not dividends.empty:
             div_df = dividends.copy()
             div_df["date"] = pd.to_datetime(div_df["date"])
@@ -72,10 +94,80 @@ class FundamentalAnalyzer:
                     div_yield = (avg_div / last_price) * 100
                     signals.append(f"дивидендная доходность: {div_yield:.2f}%")
 
+        if metrics:
+            mcap = metrics.get("market_cap")
+            pe = metrics.get("pe_ratio")
+            pb = metrics.get("pb_ratio")
+            roe = metrics.get("roe")
+            eps = metrics.get("eps")
+            debt_eq = metrics.get("debt_equity")
+
+            if mcap is not None:
+                signals.append(f"капитализация: {_fmt_big(mcap)} ₽")
+                if mcap < MCAP_THRESHOLD_LOW:
+                    anomalies.append(f"малая капитализация ({_fmt_big(mcap)} ₽)")
+                    risk_score += 0.15
+                elif mcap < MCAP_THRESHOLD_HIGH:
+                    signals.append("средняя капитализация")
+                else:
+                    signals.append("крупная капитализация (blue chip)")
+
+            if pe is not None:
+                signals.append(f"P/E: {pe:.1f}")
+                if pe < 0:
+                    anomalies.append(f"отрицательная прибыль (P/E < 0)")
+                    risk_score += 0.3
+                elif pe > 30:
+                    anomalies.append(f"высокий P/E ({pe:.1f})")
+                    risk_score += 0.1
+
+            if pb is not None:
+                signals.append(f"P/B: {pb:.1f}")
+                if pb > 5:
+                    anomalies.append(f"высокий P/B ({pb:.1f})")
+                    risk_score += 0.1
+
+            if roe is not None:
+                signals.append(f"ROE: {roe:.1f}%")
+                if roe < 5:
+                    anomalies.append(f"низкая рентабельность капитала ({roe:.1f}%)")
+                    risk_score += 0.15
+
+            if debt_eq is not None:
+                signals.append(f"D/E: {debt_eq:.1f}")
+                if debt_eq > 2:
+                    anomalies.append(f"высокая долговая нагрузка ({debt_eq:.1f})")
+                    risk_score += 0.15
+
+            if eps is not None:
+                signals.append(f"EPS: {eps:.2f} ₽")
+
+            metrics_snapshot = {
+                "market_cap": mcap,
+                "pe_ratio": pe,
+                "pb_ratio": pb,
+                "roe": roe,
+                "eps": eps,
+                "debt_equity": debt_eq,
+            }
+        else:
+            metrics_snapshot = None
+
         risk_score = min(risk_score, 1.0)
 
         return {
             "risk": round(risk_score, 2),
             "anomalies": anomalies,
             "signals": signals,
+            "fundamental_metrics": metrics_snapshot,
         }
+
+
+def _fmt_big(val: float) -> str:
+    if val >= 1e12:
+        return f"{val / 1e12:.2f}трлн"
+    if val >= 1e9:
+        return f"{val / 1e9:.2f}млрд"
+    if val >= 1e6:
+        return f"{val / 1e6:.2f}млн"
+    return f"{val:.0f}"

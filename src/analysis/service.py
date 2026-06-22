@@ -1,5 +1,6 @@
 import logging
 from datetime import date
+from typing import Optional
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -219,7 +220,8 @@ class AnalysisService:
         div_result = await db.execute(select(Dividend).where(Dividend.instrument_id == inst.id))
         divs = div_result.scalars().all()
         div_df = self._dividend_df(divs)
-        fund = self.fundamental.analyze(df, div_df)
+        fund_metrics = await self._load_fundamental_metrics(db, inst.id)
+        fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics)
 
         ml = self._compute_ml(df, ind_df, ticker=ticker) if with_ml else None
         geo = await self._load_geo(db)
@@ -329,7 +331,8 @@ class AnalysisService:
 
         divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
         div_df = self._dividend_df(divs)
-        fund = self.fundamental.analyze(df, div_df)
+        fund_metrics = self._load_fundamental_metrics_sync(db, inst.id)
+        fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics)
 
         ml = self._compute_ml(df, ind_df, ticker=ticker) if with_ml else None
 
@@ -401,6 +404,47 @@ class AnalysisService:
         fused["trends"] = self._load_trends_sync(db, inst.id)
         return fused
 
+    async def _load_fundamental_metrics(self, db: AsyncSession, instrument_id: int) -> Optional[dict]:
+        from src.db.models import FundamentalMetric
+
+        result = await db.execute(
+            select(FundamentalMetric)
+            .where(FundamentalMetric.instrument_id == instrument_id)
+            .order_by(FundamentalMetric.date.desc())
+            .limit(1)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "market_cap": row.market_cap,
+            "pe_ratio": row.pe_ratio,
+            "pb_ratio": row.pb_ratio,
+            "roe": row.roe,
+            "eps": row.eps,
+            "debt_equity": row.debt_equity,
+        }
+
+    def _load_fundamental_metrics_sync(self, db, instrument_id: int) -> Optional[dict]:
+        from src.db.models import FundamentalMetric
+
+        row = (
+            db.query(FundamentalMetric)
+            .filter_by(instrument_id=instrument_id)
+            .order_by(FundamentalMetric.date.desc())
+            .first()
+        )
+        if row is None:
+            return None
+        return {
+            "market_cap": row.market_cap,
+            "pe_ratio": row.pe_ratio,
+            "pb_ratio": row.pb_ratio,
+            "roe": row.roe,
+            "eps": row.eps,
+            "debt_equity": row.debt_equity,
+        }
+
     def analyze_all_sync(self, db, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict]:
         instruments = db.query(Instrument)
         if updated_ids is not None:
@@ -466,12 +510,17 @@ class AnalysisService:
             ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
 
             ensemble = self._get_ensemble(sym)
-            results = ensemble.train_all(df)
-            all_results[sym] = all(results.values())
+            ensemble_ok = ensemble.train_all(df)
+
+            prophet = self._get_prophet(sym)
+            prophet_ok = prophet.train(df)
+
+            all_results[sym] = all(ensemble_ok.values()) and prophet_ok
             logger.info(
-                "Model training for %s: %s",
+                "Model training for %s: ensemble=%s prophet=%s",
                 sym,
-                "OK" if all_results[sym] else "partial",
+                "OK" if all(ensemble_ok.values()) else "partial",
+                "OK" if prophet_ok else "FAIL",
             )
         return all_results
 

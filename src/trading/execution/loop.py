@@ -239,18 +239,41 @@ async def _process_signals() -> None:
                 logger.warning("News sentiment check failed for %s: %s", ticker, ns_msg)
                 continue
 
+            max_pos_pct = s.fused_json.get("max_portfolio_pct", 10) if isinstance(s.fused_json, dict) else 10
+            db2 = get_session()
+            try:
+                from src.db.models import Portfolio as PortModel
+                from src.db.models import Price as PriceModel
+
+                port_value = db2.query(PortModel).all()
+                total_value = sum(
+                    (p.quantity or 0) * ((db2.query(PriceModel.close).filter_by(instrument_id=p.instrument_id).order_by(PriceModel.date.desc()).first() or (0,))[0] or p.avg_price or 0)
+                    for p in port_value
+                ) or 100000
+
+                last_price_row = db2.query(PriceModel).filter_by(instrument_id=s.instrument_id).order_by(PriceModel.date.desc()).first()
+                last_price = last_price_row.close if last_price_row else 100
+            except Exception:
+                total_value = 100000
+                last_price = 100
+            finally:
+                db2.close()
+
+            max_position_value = total_value * max_pos_pct / 100
+            quantity = max(1, int(max_position_value / last_price))
+
             if s.action in ("BUY", "CAUTIOUS_BUY"):
                 result = await execute_order(
                     ticker=ticker,
                     direction="BUY",
-                    quantity=10,
+                    quantity=quantity,
                     reason=f"Signal: {s.action} ({s.confidence:.0%})",
                 )
             elif s.action == "SELL":
                 result = await execute_order(
                     ticker=ticker,
                     direction="SELL",
-                    quantity=10,
+                    quantity=quantity,
                     reason=f"Signal: {s.action} ({s.confidence:.0%})",
                 )
             else:

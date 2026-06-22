@@ -57,12 +57,11 @@ class SocialSentimentAnalyzer:
             relevant = [p for p in posts if _is_finance_post(_post_text(p), _post_tickers(p))]
             skipped = len(posts) - len(relevant)
             if skipped:
-                for p in posts:
-                    if p not in relevant:
-                        db.query(SocialPost).filter(SocialPost.id == p.id).update({
-                            "processed": True,
-                            "processed_at": datetime.now(timezone.utc),
-                        })
+                skipped_ids = [p.id for p in posts if p not in relevant]
+                db.query(SocialPost).filter(SocialPost.id.in_(skipped_ids)).update({
+                    "processed": True,
+                    "processed_at": datetime.now(timezone.utc),
+                }, synchronize_session="fetch")
                 db.commit()
                 logger.info("Social: skipped %d non-finance posts", skipped)
 
@@ -80,11 +79,10 @@ class SocialSentimentAnalyzer:
                 result = self._process_batch(db, batch)
                 signals_created += result
 
-                for p in batch:
-                    db.query(SocialPost).filter(SocialPost.id == p.id).update({
-                        "processed": True,
-                        "processed_at": datetime.now(timezone.utc),
-                    })
+                db.query(SocialPost).filter(SocialPost.id.in_(batch_ids)).update({
+                    "processed": True,
+                    "processed_at": datetime.now(timezone.utc),
+                }, synchronize_session="fetch")
                 db.commit()
 
             logger.info("Social: %d signals created", signals_created)

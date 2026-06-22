@@ -440,6 +440,16 @@ class TestModelRegistryEdgeCases:
             mr.REGISTRY_FILE = original_reg
 
 
+try:
+    from groq import AsyncGroq  # noqa: F401
+    _has_groq = True
+except ImportError:
+    _has_groq = False
+
+_telegram_marker = pytest.mark.skipif(not _has_groq, reason="groq not installed")
+
+
+@_telegram_marker
 class TestTelegramEdgeCases:
     def test_analysis_cache_miss(self):
         from src.interfaces.telegram import analysis_cache, CACHE_TTL
