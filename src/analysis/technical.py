@@ -69,6 +69,48 @@ class TechnicalAnalyzer:
         df["atr"] = tr.rolling(window=period).mean()
         return df
 
+    def _add_momentum_scores(self, df: pd.DataFrame, score: float, max_score: float, reasons: list) -> tuple[float, float]:
+        latest = df.iloc[-1]
+        close = latest.get("close")
+
+        if close is None or pd.isna(close) or close <= 0:
+            return score, max_score
+
+        yesterday = df.iloc[-2] if len(df) > 1 else None
+        if yesterday is not None:
+            prev_close = yesterday.get("close")
+            if prev_close is not None and not pd.isna(prev_close) and prev_close > 0:
+                max_score += 0.2
+                daily_change = (close - prev_close) / prev_close
+                if daily_change > 0.01:
+                    score += 0.2
+                    reasons.append(f"Дневной рост: {daily_change:.1%}")
+                elif daily_change < -0.01:
+                    score -= 0.2
+                    reasons.append(f"Дневное падение: {daily_change:.1%}")
+
+        lookbacks = [
+            (5, 0.2, "5 дней"),
+            (10, 0.3, "2 недели"),
+            (21, 0.5, "месяц"),
+        ]
+        for n_days, weight, label in lookbacks:
+            if len(df) <= n_days + 1:
+                continue
+            prev = df.iloc[-(n_days + 1)]
+            prev_c = prev.get("close")
+            if prev_c is not None and not pd.isna(prev_c) and prev_c > 0:
+                max_score += weight
+                change = (close - prev_c) / prev_c
+                if change > 0.03:
+                    score += weight
+                    reasons.append(f"Рост за {label}: {change:.1%}")
+                elif change < -0.03:
+                    score -= weight
+                    reasons.append(f"Падение за {label}: {change:.1%}")
+
+        return score, max_score
+
     def generate_signal(self, df: pd.DataFrame) -> dict:
         if df.empty or len(df) < 50:
             return {"action": "NEUTRAL", "confidence": 0.0, "reasons": ["недостаточно данных"]}
@@ -101,7 +143,7 @@ class TechnicalAnalyzer:
             else:
                 reasons.append(f"MACD гистограмма={latest['macd_hist']:.2f}")
 
-        sma_cols = ["sma_20", "sma_50"]
+        sma_cols = ["sma_20", "sma_50", "sma_200"]
         for col in sma_cols:
             if not pd.isna(latest.get(col)):
                 max_score += 0.5
@@ -122,6 +164,8 @@ class TechnicalAnalyzer:
             elif latest["close"] >= latest["bb_upper"]:
                 score -= 0.5
                 reasons.append("Цена у верхней границы Bollinger Bands — возможна коррекция")
+
+        score, max_score = self._add_momentum_scores(df, score, max_score, reasons)
 
         normalized = score / max_score if max_score > 0 else 0.0
 

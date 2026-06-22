@@ -272,30 +272,36 @@ async def test_approve_order():
         assert result.status == "filled"
 
 
-def test_cancel_pending():
+@pytest.mark.asyncio
+async def test_cancel_pending():
     import src.trading.execution.engine as eng
 
     r = eng.OrderRecord(ticker="TEST", direction="BUY", quantity=1, price=100, mode=TradeMode.MANUAL)
     r.status = "pending_approval"
     eng._execution_log.append(r)
 
-    assert cancel_pending("TEST") is True
+    result = await cancel_pending("TEST")
+    assert result is True
 
     assert r.status == "cancelled"
 
 
-def test_cancel_pending_already_approved():
+@pytest.mark.asyncio
+async def test_cancel_pending_already_approved():
     import src.trading.execution.engine as eng
 
     r = eng.OrderRecord(ticker="TEST", direction="BUY", quantity=1, price=100, mode=TradeMode.MANUAL)
     r.status = "filled"
     eng._execution_log.append(r)
 
-    assert cancel_pending("TEST") is False
+    result = await cancel_pending("TEST")
+    assert result is False
 
 
-def test_cancel_pending_not_found():
-    assert cancel_pending("NONEXISTENT") is False
+@pytest.mark.asyncio
+async def test_cancel_pending_not_found():
+    result = await cancel_pending("NONEXISTENT")
+    assert result is False
 
 
 @pytest.mark.asyncio

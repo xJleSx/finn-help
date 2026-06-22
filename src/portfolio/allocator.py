@@ -1,6 +1,7 @@
 import logging
 from datetime import date, timedelta
 
+import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.constants import (
@@ -238,6 +239,7 @@ class PortfolioAllocator:
         penalty_fn,
         dividend_fn,
         volume_fn,
+        momentum_fn,
     ) -> list[dict]:
         for c in candidates:
             score = 0.0
@@ -278,6 +280,11 @@ class PortfolioAllocator:
             elif c["div_yield"] > 3:
                 score += 1.0
                 reason_parts.append(f"див. доходность {c['div_yield']:.1f}%")
+
+            momentum = momentum_fn(c)
+            if momentum["bonus"]:
+                score += momentum["bonus"]
+                reason_parts.append(momentum["reason"])
 
             upcoming = dividend_fn(c)
             if upcoming["bonus"]:
@@ -332,6 +339,7 @@ class PortfolioAllocator:
             penalty_fn=lambda t, tl: corr_analyzer.diversification_penalty(t, tl, db),
             dividend_fn=lambda c: self._upcoming_dividend_score(c, db),
             volume_fn=lambda c: self._volume_score(c, db),
+            momentum_fn=lambda c: self._momentum_score(c, db),
         )
 
     def _upcoming_dividend_score(self, inst: dict, db) -> dict:
@@ -364,6 +372,50 @@ class PortfolioAllocator:
         except Exception:
             logger.warning("Failed to get liquidity score", exc_info=True)
             return 0.0
+
+    def _momentum_score(self, inst: dict, db) -> dict:
+        try:
+            prices = (
+                db.query(Price)
+                .filter_by(instrument_id=inst["id"])
+                .order_by(Price.date.desc())
+                .limit(21)
+                .all()
+            )
+            if not prices or len(prices) < 5:
+                return {"bonus": 0.0, "reason": ""}
+
+            closes = [p.close for p in prices if p.close]
+            if len(closes) < 5:
+                return {"bonus": 0.0, "reason": ""}
+
+            closes = closes[::-1]
+            closes_arr = np.array(closes, dtype=float)
+            if np.any(closes_arr <= 0):
+                return {"bonus": 0.0, "reason": ""}
+
+            x = np.arange(len(closes_arr))
+            slope = np.polyfit(x, closes_arr, 1)[0]
+            mean_price = float(np.mean(closes_arr))
+            normalized_slope = slope / mean_price * 100
+
+            if normalized_slope < -0.8:
+                return {"bonus": -1.5, "reason": f"тренд вниз: {normalized_slope:.2f}%/день"}
+            if normalized_slope < -0.4:
+                return {"bonus": -0.8, "reason": f"тренд вниз: {normalized_slope:.2f}%/день"}
+            if normalized_slope < -0.15:
+                return {"bonus": -0.3, "reason": f"слабый нисходящий тренд: {normalized_slope:.2f}%/день"}
+            if normalized_slope > 0.8:
+                return {"bonus": 1.0, "reason": f"тренд вверх: {normalized_slope:.2f}%/день"}
+            if normalized_slope > 0.4:
+                return {"bonus": 0.5, "reason": f"тренд вверх: {normalized_slope:.2f}%/день"}
+            if normalized_slope > 0.15:
+                return {"bonus": 0.2, "reason": f"слабый восходящий тренд: {normalized_slope:.2f}%/день"}
+
+            return {"bonus": 0.0, "reason": ""}
+        except Exception as e:
+            logger.warning("Momentum score failed for %s: %s", inst.get("ticker", "?"), e)
+            return {"bonus": 0.0, "reason": ""}
 
     def _calc_projected_yield(self, plan: dict, total: float) -> float:
         monthly = 0.0

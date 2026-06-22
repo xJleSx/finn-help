@@ -1,5 +1,6 @@
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from typing import Optional
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -24,6 +25,8 @@ from src.geo.risk_scorer import GeoRiskScorer
 from src.geo.sentiment_divergence import SentimentDivergenceDetector
 
 logger = logging.getLogger(__name__)
+
+STALENESS_THRESHOLD_DAYS = 2
 
 divergence = SentimentDivergenceDetector()
 geo_risk = GeoRiskScorer()
@@ -55,21 +58,45 @@ async def collect_prices(db: Session) -> set[int]:
                     continue
                 exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
                 if not exists:
+                    def _first(v1, v2):
+                        return v1 if v1 is not None else v2
                     p = Price(
                         instrument_id=inst.id,
                         date=d,
-                        open=row.get("OPEN") or row.get("open"),
-                        high=row.get("HIGH") or row.get("high"),
-                        low=row.get("LOW") or row.get("low"),
-                        close=row.get("CLOSE") or row.get("close"),
-                        volume=row.get("VOLUME") or row.get("volume"),
+                        open=_first(row.get("OPEN"), row.get("open")),
+                        high=_first(row.get("HIGH"), row.get("high")),
+                        low=_first(row.get("LOW"), row.get("low")),
+                        close=_first(row.get("CLOSE"), row.get("close")),
+                        volume=_first(row.get("VOLUME"), row.get("volume")),
                     )
                     db.add(p)
                     new_count += 1
             db.commit()
             if new_count > 0:
                 updated_ids.add(int(inst.id))
+    _check_price_freshness(db)
     return updated_ids
+
+
+def _check_price_freshness(db: Session, max_age_days: int = STALENESS_THRESHOLD_DAYS):
+    from sqlalchemy import func as sqlfunc
+
+    subq = (
+        db.query(
+            Price.instrument_id,
+            sqlfunc.max(Price.date).label("last_date"),
+        )
+        .group_by(Price.instrument_id)
+        .subquery()
+    )
+    stale = (
+        db.query(Instrument.ticker, Instrument.instrument_type, subq.c.last_date)
+        .join(subq, Instrument.id == subq.c.instrument_id)
+        .filter(subq.c.last_date < date.today() - timedelta(days=max_age_days))
+        .all()
+    )
+    for ticker, itype, last_date in stale:
+        logger.warning("Stale data: %s (%s) — last price %s, >%d days ago", ticker, itype, last_date, max_age_days)
 
 
 async def collect_dividends(db: Session):
@@ -250,6 +277,48 @@ async def compute_geo_risk(db: Session, news_list: list[dict]):
         )
         db.add(score)
     db.commit()
+
+
+async def collect_fundamental(db: Session):
+    from src.collectors.fundamental import FundamentalDataCollector
+    from src.db.models import FundamentalMetric, Price
+
+    instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
+    if not instruments:
+        return
+
+    today = date.today()
+    async with FundamentalDataCollector() as collector:
+        for inst in instruments:
+            last_price_row = (
+                db.query(Price.close)
+                .filter_by(instrument_id=inst.id)
+                .order_by(Price.date.desc())
+                .first()
+            )
+            last_price = float(last_price_row[0]) if last_price_row else None
+
+            try:
+                data = await collector.fetch(inst.ticker, last_price=last_price)
+            except Exception as e:
+                logger.warning("Fundamental fetch failed for %s: %s", inst.ticker, e)
+                continue
+
+            existing = db.query(FundamentalMetric).filter_by(instrument_id=inst.id, date=today).first()
+            if existing:
+                existing.market_cap = data["market_cap"]
+                existing.shares_outstanding = data["shares_outstanding"]
+                existing.extra = data.get("extra")
+            else:
+                metric = FundamentalMetric(
+                    instrument_id=inst.id,
+                    date=today,
+                    market_cap=data["market_cap"],
+                    shares_outstanding=data["shares_outstanding"],
+                    extra=data.get("extra"),
+                )
+                db.add(metric)
+        db.commit()
 
 
 async def generate_signals(db: Session, updated_ids: set[int] | None = None) -> list[dict]:

@@ -119,10 +119,36 @@ class SignalFusionEngine:
                     weights[key] /= total
             reasons.append(f"Волатильность: {volatility_regime.get('regime', 'NORMAL')}")
 
+        tech_score_raw = technical.get("score", 0.0) if technical else 0.0
+        if tech_score_raw < 0:
+            boost = 0.10
+            weights["technical"] += boost
+            for k in ["sentiment", "mtf", "geo"]:
+                if weights[k] >= boost * 0.5:
+                    weights[k] -= boost * 0.4
+            total = sum(weights.values())
+            if total > 0:
+                for k in weights:
+                    weights[k] /= total
+            reasons.append("Технический вес повышен — негативная техническая оценка")
+
         macro_adjustment = 0.0
         macro_reasons = []
 
         mt = MACRO_THRESHOLDS
+
+        trend_adjustment = 0.0
+        if ml_prediction:
+            ts = ml_prediction.get("trend_slope", 0.0)
+            if ts != 0.0:
+                strength = ml_prediction.get("trend_strength", 0.5)
+                trend_adjustment = ts * 0.08 * strength
+                if ml_prediction.get("trend_changed") and ts < 0:
+                    trend_adjustment -= 0.05
+                if trend_adjustment > 0.01:
+                    reasons.append(f"Prophet тренд: восходящий ({ts:.2f})")
+                elif trend_adjustment < -0.01:
+                    reasons.append(f"Prophet тренд: нисходящий ({ts:.2f})")
 
         sentiment_signal = 0.0
         sentiment_source = "нет данных"
@@ -141,6 +167,7 @@ class SignalFusionEngine:
             cpi = macro_context.get("cpi")
             key_rate = macro_context.get("key_rate")
             ofz = macro_context.get("ofz_10y")
+            brent = macro_context.get("brent")
             m2 = macro_context.get("m2")
 
             def _apply(name: str, val: float | None, label: str):
@@ -185,7 +212,7 @@ class SignalFusionEngine:
 
         tech_action = technical.get("action", "NEUTRAL") if technical else "NEUTRAL"
         tech_conf = technical.get("confidence", 0.0) if technical else 0.0
-        tech_score = technical.get("score", 0.0) if technical else 0.0
+        tech_score = tech_score_raw
         tech_reasons = technical.get("reasons", []) if technical else []
 
         fund_risk = fundamental.get("risk", 0.5) if fundamental else 0.5
@@ -225,17 +252,16 @@ class SignalFusionEngine:
             + sentiment_signal * weights["sentiment"]
             + mtf_signal * weights["mtf"]
             + macro_adjustment * MACRO_MAX_ADJUSTMENT
+            + trend_adjustment * weights["ml"]
         )
 
         macro_max = MACRO_MAX_ADJUSTMENT
         w = weights
         all_except_geo = w["technical"] + w["fundamental"] + w["ml"] + w["sentiment"] + w["mtf"]
         all_weights = all_except_geo + w["geo"]
-        max_positive = all_except_geo + macro_max
-        max_negative = all_weights + macro_max
-        max_possible = max_positive if weighted_score >= 0 else max_negative
+        max_absolute = max(all_weights, all_except_geo) + macro_max + 0.08
 
-        confidence = abs(weighted_score) / max_possible if max_possible > 0 else 0.0
+        confidence = abs(weighted_score) / max_absolute if max_absolute > 0 else 0.0
 
         if risk_metrics:
             sharpe = risk_metrics.get("sharpe", 0.0)
@@ -260,6 +286,21 @@ class SignalFusionEngine:
             action = "SELL"
         else:
             action = "HOLD"
+
+        bearish_smas = sum(1 for r in tech_reasons if r.startswith("Цена ниже"))
+        bullish_smas = sum(1 for r in tech_reasons if r.startswith("Цена выше"))
+        if action == "BUY" and bearish_smas >= 2 and tech_score < 0:
+            action = "HOLD"
+            reasons.append(f"Технический анализ: цена ниже {bearish_smas} скользящих средних — BUY отклонён")
+        elif action == "BUY" and tech_action == "SELL" and tech_conf > 0.3:
+            action = "HOLD"
+            reasons.append("Технический анализ сигнализирует о продаже — BUY отклонён")
+        if action == "SELL" and bullish_smas >= 2 and tech_score > 0:
+            action = "HOLD"
+            reasons.append(f"Технический анализ: цена выше {bullish_smas} скользящих средних — SELL отклонён")
+        elif action == "SELL" and tech_action == "BUY" and tech_conf > 0.3:
+            action = "HOLD"
+            reasons.append("Технический анализ сигнализирует о покупке — SELL отклонён")
 
         reasons.extend(tech_reasons)
 

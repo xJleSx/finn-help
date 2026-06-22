@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -10,11 +11,11 @@ from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from sqlalchemy import select
+from sqlalchemy import select, func as sqlfunc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.db.models import User
+from src.db.models import Instrument, Price, Signal, User
 from src.interfaces.api.auth import (
     create_token,
     get_db,
@@ -78,8 +79,69 @@ app.include_router(market_router)
 
 
 @app.get("/api/health")
-async def health():
-    return {"status": "ok"}
+async def health(db: AsyncSession = Depends(get_db)):
+    healthy = True
+    checks = {}
+    components = {}
+
+    try:
+        result = await db.execute(select(sqlfunc.count(Instrument.id)))
+        val = result.scalar()
+        components["instruments"] = int(val) if val is not None else 0
+    except Exception:
+        components["instruments"] = None
+
+    try:
+        from src.scheduler.service import _running
+        components["scheduler_running"] = _running
+    except Exception:
+        components["scheduler_running"] = None
+
+    try:
+        last_signal = await db.execute(select(Signal.date).order_by(Signal.date.desc()).limit(1))
+        row = last_signal.scalar_one_or_none()
+        if row is not None:
+            components["last_signal_at"] = row.isoformat() if hasattr(row, "isoformat") else str(row)
+        else:
+            components["last_signal_at"] = None
+    except Exception:
+        components["last_signal_at"] = None
+
+    try:
+        last_price = await db.execute(select(Price.date).order_by(Price.date.desc()).limit(1))
+        row = last_price.scalar_one_or_none()
+        if row is not None:
+            dt_str = row.isoformat() if hasattr(row, "isoformat") else str(row)
+            components["last_price_date"] = dt_str
+            try:
+                days = (date.today() - row).days
+                components["price_staleness_days"] = days
+                if days > 2:
+                    checks["staleness"] = f"Последняя цена от {dt_str}, {days}д назад"
+            except TypeError:
+                pass
+    except Exception:
+        components["last_price_date"] = None
+
+    try:
+        from src.model_registry import _load_registry
+        registry = _load_registry()
+        if registry:
+            models_summary = {}
+            for name, entry in registry.items():
+                latest = entry.get("latest")
+                if latest:
+                    models_summary[name] = str(latest)
+            components["models"] = models_summary
+    except Exception:
+        components["models"] = None
+
+    status = "degraded" if checks and healthy else "unhealthy" if not healthy else "ok"
+    return {
+        "status": status,
+        "checks": checks or None,
+        "components": components,
+    }
 
 
 class RegisterBody(BaseModel):

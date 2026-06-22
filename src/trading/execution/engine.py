@@ -291,10 +291,11 @@ async def approve_order(ticker: str, direction: str, quantity: int) -> Optional[
     return None
 
 
-def cancel_pending(ticker: str) -> bool:
-    for r in _execution_log:
-        if r.ticker == ticker and r.status == "pending_approval":
-            r.status = "cancelled"
-            logger.info("Pending order cancelled: %s", ticker)
-            return True
+async def cancel_pending(ticker: str) -> bool:
+    async with _mode_lock:
+        for r in _execution_log:
+            if r.ticker == ticker and r.status == "pending_approval":
+                r.status = "cancelled"
+                logger.info("Pending order cancelled: %s", ticker)
+                return True
     return False
