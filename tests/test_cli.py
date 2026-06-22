@@ -48,9 +48,9 @@ class TestUpdateCommandStructure:
 
 class TestSchedulerDividends:
     def test_dividend_collection_exists(self):
-        from src.scheduler.tasks import _collect_dividends
+        from src.scheduler.collectors import collect_dividends
 
-        assert hasattr(_collect_dividends, "__code__")
+        assert hasattr(collect_dividends, "__code__")
 
     def test_instrument_filter_for_dividends(self):
         """_collect_dividends should only query stock and etf instruments"""

@@ -18,7 +18,7 @@ from src.config import personal
 from src.db.connection import get_session, init_db
 from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Portfolio, Price
 from src.llm.router import llm
-from src.signal.engine import compute_risk_metrics
+from src.social.cli import social_app
 
 if sys.stdout.encoding != "utf-8" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -171,93 +171,11 @@ async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True)
         inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
         if not inst:
             return None, f"Инструмент {ticker} не найден"
-        prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
-        if len(prices) < 50:
-            return None, f"Недостаточно данных для {ticker}"
-        ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
-        if len(ind_rows) < 2:
-            return None, f"Недостаточно индикаторов для {ticker}"
-
-        pdf = pd.DataFrame(
-            [
-                {"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume}
-                for p in prices
-            ]
-        )
-        idf = pd.DataFrame(
-            [
-                {
-                    "date": r.date,
-                    "rsi": r.rsi,
-                    "macd_line": r.macd_line,
-                    "macd_signal": r.macd_signal,
-                    "macd_hist": r.macd_hist,
-                    "sma_20": r.sma_20,
-                    "sma_50": r.sma_50,
-                    "sma_200": r.sma_200,
-                    "bb_upper": r.bb_upper,
-                    "bb_lower": r.bb_lower,
-                    "bb_mid": r.bb_mid,
-                    "volume_sma_20": r.volume_sma_20,
-                    "atr": r.atr,
-                }
-                for r in ind_rows
-            ]
-        )
-        idf = idf.merge(pdf[["date", "close"]], on="date", how="left")
-
-        tech_signal = analysis_service.analyzer.generate_signal(idf)
-        divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
-        div_df = pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
-        fund = analysis_service.fundamental.analyze(pdf, div_df)
-        ml = analysis_service._compute_ml(pdf, idf, ticker=ticker.upper()) if with_ml else None
-        geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
-        geo = {"score": geo_row.score} if geo_row else {"score": 0.0}
-
-        from src.collectors.macro import MacroCollector
-
-        macro_context = MacroCollector.latest_values(db)
-
-        from datetime import datetime, timedelta, timezone
-
-        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
-        news_recent = db.query(News).filter(News.created_at >= cutoff).all()
-        if news_recent:
-            scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in news_recent]
-            mean = sum(scores) / len(scores)
-            variance = sum((s - mean) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
-            sentiment = {
-                "score": round(mean, 3),
-                "divergence": round(min(variance * 2, 1.0), 3),
-                "source": "rss",
-                "count": len(scores),
-            }
-        else:
-            sentiment = {"score": 0.0, "divergence": 0.0, "source": "none"}
-
-        volatility_regime = analysis_service.volatility.detect(pdf, idf)
-        risk_metrics = compute_risk_metrics(pdf["close"].tolist())
-        mtf_data = analysis_service.mtf.compute_all(pdf)
-        mtf_concordance = analysis_service.mtf.concordance(mtf_data) if mtf_data else None
-
-        fused = analysis_service.fusion.fuse(
-            ticker=ticker.upper(),
-            technical=tech_signal,
-            fundamental=fund,
-            geo=geo,
-            ml_prediction=ml,
-            volatility_regime=volatility_regime,
-            risk_metrics=risk_metrics,
-            macro_context=macro_context,
-            sentiment=sentiment,
-            mtf=mtf_concordance,
-        )
-
+        fused = analysis_service._analyze_single_sync(db, inst, ticker.upper(), with_ml=with_ml)
         if with_llm:
             advice = await llm.advise(fused)
         else:
             advice = ""
-
         return fused, advice
     finally:
         db.close()
@@ -633,141 +551,7 @@ def scheduler():
     asyncio.run(run_forever())
 
 
-social_app = typer.Typer(help="Social sentiment commands (Pulse, Telegram, etc.)")
 app.add_typer(social_app, name="social")
-
-
-@social_app.command(name="update")
-def social_update():
-    """Collect new posts from all active social sources"""
-    import asyncio
-
-    from src.social.registry import registry
-    from src.social.sentiment.analyzer import analyzer
-
-    async def _run():
-        registry.build_from_config()
-        sources = registry.get_active()
-        if not sources:
-            console.print("[yellow]No active social sources. Configure in data/personal_settings.yaml[/yellow]")
-            return
-
-        from src.db.connection import get_session
-        from src.db.models import SocialPost
-
-        console.print(f"[bold]Collecting from {len(sources)} source(s)...[/bold]")
-        for src in sources:
-            console.print(f"  Collecting from [cyan]{src.source_name}[/cyan]...")
-            try:
-                posts = await src.fetch_posts()
-                db = get_session()
-                try:
-                    new_count = 0
-                    for post in posts:
-                        exists = db.query(SocialPost).filter_by(
-                            source=post.source, external_id=post.external_id
-                        ).first()
-                        if exists:
-                            continue
-                        sp = SocialPost(
-                            source=post.source,
-                            external_id=post.external_id,
-                            author_nick=post.author_nick,
-                            author_id=post.author_id,
-                            text=post.text,
-                            published_at=post.published_at,
-                            url=post.url,
-                            tickers_mentioned=post.tickers,
-                            raw_json=post.raw,
-                        )
-                        db.add(sp)
-                        new_count += 1
-                    db.commit()
-                    console.print(f"    [green]✓[/green] {new_count} new posts saved")
-                finally:
-                    db.close()
-            except Exception as e:
-                console.print(f"    [red]✗[/red] {e}")
-
-        console.print("\n[bold]Analyzing new posts with LLM...[/bold]")
-        count = await analyzer.process_new_posts()
-        console.print(f"  [green]✓[/green] {count} sentiment signals created")
-
-    asyncio.run(_run())
-
-
-@social_app.command(name="ticker")
-def social_ticker(ticker: str = typer.Argument(..., help="Ticker (e.g. SBER)")):
-    """Show social sentiment for a ticker"""
-    from src.social.sentiment.aggregator import aggregator
-
-    result = aggregator.get_ticker_sentiment(ticker.upper())
-    if result["count"] == 0:
-        console.print(f"[yellow]No social data for {ticker.upper()}[/yellow]")
-        return
-
-    table = Table(title=f"Social Sentiment — {ticker.upper()}")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="yellow")
-    table.add_row("Score", f"{result['score']:.3f}")
-    table.add_row("Divergence", f"{result['divergence']:.3f}")
-    table.add_row("Posts analyzed", str(result["count"]))
-    table.add_row("Avg confidence", f"{result.get('avg_confidence', 0):.3f}")
-    console.print(table)
-
-
-@social_app.command(name="overview")
-def social_overview(days: int = typer.Option(1, "--days", "-d", help="Days to look back")):
-    """Show market overview from social sentiment"""
-    from src.social.sentiment.aggregator import aggregator
-
-    overview = aggregator.get_market_overview(days=days)
-    if not overview:
-        console.print("[yellow]No social data for the period[/yellow]")
-        return
-
-    table = Table(title=f"Social Market Overview (last {days}d)")
-    table.add_column("Ticker", style="cyan")
-    table.add_column("Avg Score", style="yellow")
-    table.add_column("Volume", style="white")
-    for row in overview[:20]:
-        ticker = row["ticker"] or "Market (general)"
-        table.add_row(ticker, f"{row['avg_score']:.3f}", str(row["volume"]))
-    console.print(table)
-
-
-# ── Snapshot & Report CLI ──────────────────────────────────────────────
-
-
-@social_app.command(name="snapshot")
-def social_snapshot(period: str = typer.Argument("daily", help="daily / weekly / monthly")):
-    """Принудительно снять срез метрик и сформировать отчёт"""
-    async def _run():
-        from src.scheduler.tasks import generate_daily_report, take_snapshot
-        console.print(f"[bold]📸 Снятие среза: {period}[/bold]")
-        await take_snapshot(period)
-        console.print(f"[green]✓[/green] Срез {period} сохранён")
-        if period == "daily":
-            report = await generate_daily_report()
-            if report:
-                console.print(report.report_text)
-
-    asyncio.run(_run())
-
-
-@social_app.command(name="report")
-def social_report():
-    """Сформировать ежедневный отчёт (без рассылки)"""
-    async def _run():
-        from src.scheduler.tasks import generate_daily_report
-        console.print("[bold]📄 Генерация отчёта...[/bold]")
-        report = await generate_daily_report()
-        if report:
-            console.print(report.report_text)
-        else:
-            console.print("[yellow]Отчёт не сформирован[/yellow]")
-
-    asyncio.run(_run())
 
 
 def main():

@@ -238,7 +238,7 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.effective_message.reply_text("📆 Формирую недельную сводку...")
     try:
-        from src.scheduler.tasks import generate_weekly_report_text
+        from src.scheduler.reporting import generate_weekly_report_text
         text = await generate_weekly_report_text()
         await update.effective_message.reply_markdown(text)
     except Exception:

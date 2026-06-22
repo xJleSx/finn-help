@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { api } from "../lib/api";
 
 type PricePoint = { date: string; close: number; volume?: number };
 
@@ -20,8 +19,7 @@ export default function PriceChart({ ticker, company }: { ticker: string; compan
   useEffect(() => {
     const daysMap: Record<string, number> = { "1Н": 7, "1М": 30, "3М": 90, "1Г": 365 };
     const days = daysMap[period] || 30;
-    fetch(`${API}/api/instruments/${ticker}/prices?days=${days}`)
-      .then((r) => r.json())
+    api.instruments.prices(ticker, days)
       .then(setPrices)
       .catch(() => setPrices([]));
   }, [ticker, period]);

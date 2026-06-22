@@ -5,8 +5,7 @@ import type { AllocationPlan } from "./types";
 import ContributionBar from "./ContributionBar";
 import SectorBreakdown from "./SectorBreakdown";
 import DonutChart from "./DonutChart";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { api } from "../lib/api";
 
 function formatCurrency(v: number) {
   return v.toLocaleString("ru-RU", { style: "currency", currency: "RUB", minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -26,9 +25,8 @@ export default function AllocationSection({ onSelectTicker }: { onSelectTicker: 
     setLoadingAlloc(true);
     try {
       const val = Math.max(500, parseFloat(capital) || 50000);
-      const res = await fetch(`${API}/api/portfolio/allocate?capital=${val}`, { method: "POST" });
-      if (!res.ok) throw new Error(await res.text());
-      setAllocation(await res.json());
+      const alloc = await api.portfolio.allocate(val);
+      setAllocation(alloc);
       setCapital(String(val));
       setShowAlloc(true);
     } catch (e) {

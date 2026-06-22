@@ -9,6 +9,7 @@ from src.analysis.fundamental import FundamentalAnalyzer
 from src.analysis.multi_timeframe import MultiTimeframeAnalyzer
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.volatility import VolatilityRegimeDetector
+from src.constants import NEWS_SENTIMENT_DAYS
 from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Price, Signal
 from src.llm.router import llm
 from src.signal.engine import SignalFusionEngine, compute_risk_metrics
@@ -121,7 +122,7 @@ class AnalysisService:
 
         from src.db.models import News
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=NEWS_SENTIMENT_DAYS)
         result = await db.execute(select(News).where(News.created_at >= cutoff))
         recent = result.scalars().all()
         news_sentiment = {"score": 0.0, "divergence": 0.0, "source": "none", "count": 0}
@@ -312,8 +313,95 @@ class AnalysisService:
                 }
         return result
 
+    def _analyze_single_sync(self, db, inst, ticker: str, with_ml: bool = True) -> dict:
+        prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
+        if len(prices) < 50:
+            raise ValueError(f"Not enough price data for {ticker}")
+        df = self._price_df(prices)
+
+        ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
+        if len(ind_rows) < 2:
+            raise ValueError(f"Not enough indicator data for {ticker}")
+        ind_df = self._indicator_df(ind_rows)
+        ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
+
+        tech_signal = self.analyzer.generate_signal(ind_df)
+
+        divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
+        div_df = self._dividend_df(divs)
+        fund = self.fundamental.analyze(df, div_df)
+
+        ml = self._compute_ml(df, ind_df, ticker=ticker) if with_ml else None
+
+        geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
+        geo = {"score": geo_row.score} if geo_row else {"score": 0.0}
+
+        from src.collectors.macro import MacroCollector
+
+        macro_context = MacroCollector.latest_values(db)
+
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=NEWS_SENTIMENT_DAYS)
+        recent = db.query(News).filter(News.created_at >= cutoff).all()
+        news_sentiment = {"score": 0.0, "divergence": 0.0, "source": "none", "count": 0}
+        if recent:
+            scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
+            mean_s = sum(scores) / len(scores)
+            variance = sum((s - mean_s) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
+            news_sentiment = {
+                "score": round(mean_s, 3),
+                "divergence": round(min(variance * 2, 1.0), 3),
+                "source": "rss",
+                "count": len(scores),
+            }
+
+        try:
+            from src.social.sentiment.aggregator import aggregator
+
+            social_entry = aggregator.get_ticker_sentiment(ticker)
+        except Exception:
+            social_entry = {"score": 0.0, "divergence": 0.0, "source": "social", "count": 0}
+
+        if social_entry["count"] > 0 and news_sentiment["count"] > 0:
+            combined = news_sentiment["score"] * 0.4 + social_entry["score"] * 0.6
+            sentiment = {
+                "score": round(combined, 3),
+                "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),
+                "source": "rss+social",
+                "count": news_sentiment["count"] + social_entry["count"],
+            }
+        elif social_entry["count"] > 0:
+            sentiment = {
+                "score": round(social_entry["score"], 3),
+                "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),
+                "source": "social",
+                "count": social_entry["count"],
+            }
+        else:
+            sentiment = news_sentiment
+
+        volatility_regime = self.volatility.detect(df, ind_df)
+        risk_metrics = compute_risk_metrics(df["close"].tolist())
+        mtf_data = self.mtf.compute_all(df)
+        mtf_concordance = self.mtf.concordance(mtf_data) if mtf_data else None
+
+        fused = self.fusion.fuse(
+            ticker=ticker.upper(),
+            technical=tech_signal,
+            fundamental=fund,
+            geo=geo,
+            ml_prediction=ml,
+            volatility_regime=volatility_regime,
+            risk_metrics=risk_metrics,
+            macro_context=macro_context,
+            sentiment=sentiment,
+            mtf=mtf_concordance,
+        )
+        fused["trends"] = self._load_trends_sync(db, inst.id)
+        return fused
+
     def analyze_all_sync(self, db, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict]:
-        """Sync version for CLI / scheduler use."""
         instruments = db.query(Instrument)
         if updated_ids is not None:
             instruments = instruments.filter(Instrument.id.in_(updated_ids))
@@ -336,91 +424,7 @@ class AnalysisService:
                 continue
 
             try:
-                prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
-                if len(prices) < 50:
-                    continue
-                df = self._price_df(prices)
-
-                ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
-                if len(ind_rows) < 2:
-                    continue
-                ind_df = self._indicator_df(ind_rows)
-                ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
-
-                tech_signal = self.analyzer.generate_signal(ind_df)
-
-                divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
-                div_df = self._dividend_df(divs)
-                fund = self.fundamental.analyze(df, div_df)
-
-                ml = self._compute_ml(df, ind_df, ticker=str(inst.ticker or "")) if with_ml else None
-                geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
-                geo = {"score": geo_row.score} if geo_row else {"score": 0.0}
-
-                from src.collectors.macro import MacroCollector
-
-                macro_context = MacroCollector.latest_values(db)
-
-                from datetime import datetime, timedelta, timezone
-
-                cutoff = datetime.now(timezone.utc) - timedelta(days=3)
-                recent = db.query(News).filter(News.created_at >= cutoff).all()
-                news_sentiment = {"score": 0.0, "divergence": 0.0, "source": "none", "count": 0}
-                if recent:
-                    scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
-                    mean_s = sum(scores) / len(scores)
-                    variance = sum((s - mean_s) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
-                    news_sentiment = {
-                        "score": round(mean_s, 3),
-                        "divergence": round(min(variance * 2, 1.0), 3),
-                        "source": "rss",
-                        "count": len(scores),
-                    }
-
-                try:
-                    from src.social.sentiment.aggregator import aggregator
-
-                    inst_ticker = str(inst.ticker or "")
-                    social_entry = aggregator.get_ticker_sentiment(inst_ticker)
-                except Exception:
-                    social_entry = {"score": 0.0, "divergence": 0.0, "source": "social", "count": 0}
-
-                if social_entry["count"] > 0 and news_sentiment["count"] > 0:
-                    combined = news_sentiment["score"] * 0.4 + social_entry["score"] * 0.6
-                    sentiment = {
-                        "score": round(combined, 3),
-                        "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),
-                        "source": "rss+social",
-                        "count": news_sentiment["count"] + social_entry["count"],
-                    }
-                elif social_entry["count"] > 0:
-                    sentiment = {
-                        "score": round(social_entry["score"], 3),
-                        "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),
-                        "source": "social",
-                        "count": social_entry["count"],
-                    }
-                else:
-                    sentiment = news_sentiment
-
-                volatility_regime = self.volatility.detect(df, ind_df)
-                risk_metrics = compute_risk_metrics(df["close"].tolist())
-                mtf_data = self.mtf.compute_all(df)
-                mtf_concordance = self.mtf.concordance(mtf_data) if mtf_data else None
-
-                fused = self.fusion.fuse(
-                    ticker=str(inst.ticker).upper(),
-                    technical=tech_signal,
-                    fundamental=fund,
-                    geo=geo,
-                    ml_prediction=ml,
-                    volatility_regime=volatility_regime,
-                    risk_metrics=risk_metrics,
-                    macro_context=macro_context,
-                    sentiment=sentiment,
-                    mtf=mtf_concordance,
-                )
-                fused["trends"] = self._load_trends_sync(db, inst.id)
+                fused = self._analyze_single_sync(db, inst, str(inst.ticker), with_ml=with_ml)
                 self.fusion.save_signal_sync(db, inst.id, fused)
                 signals.append(fused)
             except (ValueError, Exception) as e:

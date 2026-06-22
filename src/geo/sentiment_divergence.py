@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from src.constants import NEWS_SENTIMENT_DAYS
 from src.db.models import News
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 class SentimentDivergenceDetector:
     def detect(self, db: Optional[Session] = None, news_list: Optional[list[dict]] = None) -> dict:
         if db:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=NEWS_SENTIMENT_DAYS)
             recent_news = db.query(News).filter(News.created_at >= cutoff).limit(1000).all()
             scores = [float(n.sentiment_score) for n in recent_news if n.sentiment_score is not None]
         elif news_list:

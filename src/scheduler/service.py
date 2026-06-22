@@ -2,7 +2,8 @@ import asyncio
 import logging
 from datetime import date, datetime, timezone
 
-from src.scheduler.tasks import daily_update, generate_daily_report, take_snapshot
+from src.scheduler.reporting import generate_daily_report, take_snapshot
+from src.scheduler.tasks import daily_update
 
 logger = logging.getLogger(__name__)
 

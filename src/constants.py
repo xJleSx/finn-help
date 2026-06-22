@@ -78,3 +78,59 @@ RISK_PROFILES: dict[str, dict] = {
 CACHE_TTL: int = 300
 MAX_CACHE_SIZE: int = 100
 COOLDOWN_SECONDS: int = 5
+
+# ── Macro thresholds (signal/engine.py) ──────────────────────────────
+
+MACRO_THRESHOLDS: dict[str, dict] = {
+    "brent": {"high": 80, "high_adj": 0.03, "low": 50, "low_adj": -0.05},
+    "key_rate": {"high": 15, "high_adj": -0.05, "low": 7, "low_adj": 0.03},
+    "cpi": {"high": 8, "high_adj": -0.04, "low": 4, "low_adj": 0.02},
+    "ofz_10y": {"high": 12, "high_adj": -0.03, "low": 6, "low_adj": 0.02},
+    "m2": {"high": 70000, "high_adj": 0.02, "low": 50000, "low_adj": -0.02},
+    "imoex": {"high": 3500, "high_adj": 0.02, "low": 2500, "low_adj": -0.03},
+}
+
+MACRO_MAX_ADJUSTMENT: float = 0.10
+
+# ── Signal / position limits (signal/engine.py) ──────────────────────
+
+BASE_POSITION_PCT: dict[str, int] = {
+    "BUY": 50,
+    "CAUTIOUS_BUY": 25,
+    "HOLD": 10,
+    "SELL": 5,
+    "NEUTRAL": 10,
+}
+
+GEO_RISK_HIGH: float = 7.0
+GEO_RISK_ELEVATED: float = 5.0
+FUND_RISK_HIGH: float = 0.6
+
+# ── Allocator thresholds (portfolio/allocator.py) ────────────────────
+
+ALLOCATOR_CAPITAL_TIERS: list[dict] = [
+    {"max_capital": 1000, "min_budget": 500, "max_positions": 1},
+    {"max_capital": 3000, "min_budget": 1000, "max_positions": 2},
+]
+
+ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL: float = 10000
+
+ALLOCATOR_LEFTOVER_THRESHOLD: float = 0.10
+ALLOCATOR_LEFTOVER_MIN_ABS: float = 500
+ALLOCATOR_RECOMMEND_MAX_PICKS: int = 15
+ALLOCATOR_RECOMMEND_TIER_PICKS: list[dict] = [
+    {"max_capital": 1000, "max_picks": 4},
+    {"max_capital": 5000, "max_picks": 8},
+]
+
+# ── Sentiment / news thresholds (analysis/service.py, tasks.py) ──────
+
+NEWS_SENTIMENT_DAYS: int = 3
+SOCIAL_SENTIMENT_WEIGHT: float = 0.6
+NEWS_SENTIMENT_WEIGHT: float = 0.4
+
+# ── Default days for data collection ─────────────────────────────────
+
+DEFAULT_HISTORY_DAYS: int = 365
+DIVIDEND_CHECK_DAYS: int = 365
+NEWS_MAX_PER_FEED: int = 5

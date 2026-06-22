@@ -254,7 +254,7 @@ class TestLoadSentiment:
     async def test_falls_back_when_no_news(self, service):
         db = _async_db()
         db.execute.return_value.scalars.return_value.all.return_value = []
-        assert await service._load_sentiment(db) == {"score": 0.0, "divergence": 0.0, "source": "none"}
+        assert await service._load_sentiment(db) == {"score": 0.0, "divergence": 0.0, "source": "none", "count": 0}
 
     @pytest.mark.asyncio
     async def test_divergence_capped_at_one(self, service):
@@ -620,6 +620,7 @@ class TestAnalyzeAllSync:
             if model is Indicator:
                 return ind_mock
             m = MagicMock()
+            m.filter.return_value.all.return_value = []
             m.filter.return_value.first.return_value = None
             m.filter_by.return_value.order_by.return_value.all.return_value = []
             return m
@@ -672,6 +673,7 @@ class TestAnalyzeAllSync:
             if model is News:
                 return news_mock
             m = MagicMock()
+            m.filter.return_value.all.return_value = []
             m.filter.return_value.first.return_value = None
             m.filter_by.return_value.order_by.return_value.all.return_value = []
             return m
@@ -689,6 +691,7 @@ class TestAnalyzeAllSync:
             patch.object(service.mtf, "concordance", return_value=None),
             patch.object(service.fusion, "fuse", mock_fuse),
             patch.object(service.fusion, "save_signal_sync", MagicMock()),
+            patch("src.social.sentiment.aggregator.aggregator.get_ticker_sentiment", return_value={"score": 0.0, "divergence": 0.0, "source": "social", "count": 0}),
         ):
             results = service.analyze_all_sync(db)
         assert len(results) == 1
@@ -724,6 +727,7 @@ class TestAnalyzeAllSync:
             if model is GeoRiskScore:
                 return geo_mock
             m = MagicMock()
+            m.filter.return_value.all.return_value = []
             m.filter.return_value.first.return_value = None
             m.filter_by.return_value.order_by.return_value.all.return_value = []
             return m

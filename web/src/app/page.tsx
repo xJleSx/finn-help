@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import type { AuthState, DashboardData, GeoRisk, Instrument, News } from "../components/types";
+import type { AuthState, DashboardData, GeoRisk, Instrument, MacroData, News } from "../components/types";
 import AuthModal from "../components/AuthModal";
 import AdvicePanel from "../components/AdvicePanel";
 import PriceChart from "../components/PriceChart";
@@ -13,8 +13,7 @@ import GeoRiskPanel from "../components/GeoRiskPanel";
 import NewsPanel from "../components/NewsPanel";
 import PortfolioSimulator from "../components/PortfolioSimulator";
 import MacroPanel from "../components/MacroPanel";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { api } from "../lib/api";
 
 const AUTH_KEY = "finn_auth";
 
@@ -36,6 +35,7 @@ export default function Home() {
   const [news, setNews] = useState<News[]>([]);
   const [geoHistory, setGeoHistory] = useState<GeoRisk[]>([]);
   const [selectedTicker, setSelectedTicker] = useState<string>("SBER");
+  const [macroData, setMacroData] = useState<MacroData | null>(null);
 
   const [auth, setAuth] = useState<AuthState>({ token: null, user: null });
   const [showAuth, setShowAuth] = useState(false);
@@ -48,30 +48,32 @@ export default function Home() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [instRes, newsRes, geoRes, macroRes] = await Promise.all([
-          fetch(`${API}/api/instruments?type=stock`),
-          fetch(`${API}/api/news?limit=5`),
-          fetch(`${API}/api/geo-risk?days=14`),
-          fetch(`${API}/api/macro`).catch(() => null),
+        const [instrumentsData, newsData, geoData, macroDataResp] = await Promise.all([
+          api.instruments.list("stock"),
+          api.news.list(5),
+          api.geo.history(14),
+          api.macro.latest().catch(() => null),
         ]);
-        setInstruments(await instRes.json());
-        setNews(await newsRes.json());
-        setGeoHistory(await geoRes.json());
-        if (macroRes?.ok) {
-          const m = await macroRes.json();
-          const el = (id: string, v: string) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-          el("macro-brent", m.brent?.toFixed(1) ?? "—");
-          el("macro-usd", m.usd_rate?.toFixed(2) ?? "—");
-          el("macro-imoex", m.imoex?.toFixed(0) ?? "—");
-          el("macro-rate", m.key_rate != null ? `${m.key_rate}%` : "—");
-          el("macro-cpi", m.cpi != null ? `${m.cpi}%` : "—");
+        setInstruments(instrumentsData);
+        setNews(newsData);
+        setGeoHistory(geoData);
+        if (macroDataResp) {
+          setMacroData({
+            brent: macroDataResp.brent ?? null,
+            usd_rate: macroDataResp.usd_rate ?? null,
+            imoex: macroDataResp.imoex ?? null,
+            key_rate: macroDataResp.key_rate ?? null,
+            cpi: macroDataResp.cpi ?? null,
+            ofz_10y: macroDataResp.ofz_10y ?? null,
+            m2: macroDataResp.m2 ?? null,
+          });
         }
       } catch (e) {
         console.error("Failed to fetch data", e);
       }
     };
     const fetchEvents = () => {
-      const es = new EventSource(`${API}/api/events`);
+      const es = new EventSource(`${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}/api/events`);
       es.onmessage = (e) => setDashboard(JSON.parse(e.data));
       es.onerror = () => {};
       return () => es.close();
@@ -151,7 +153,7 @@ export default function Home() {
             <GeoRiskPanel geoHistory={geoHistory} />
             <NewsPanel news={news} />
             <PortfolioSimulator />
-            <MacroPanel />
+            <MacroPanel data={macroData} />
           </aside>
         </div>
       </div>

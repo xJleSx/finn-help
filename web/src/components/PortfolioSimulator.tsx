@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { api } from "../lib/api";
 
 type PricePoint = { date: string; close: number; volume?: number };
 
@@ -32,7 +31,7 @@ export default function PortfolioSimulator() {
   const [instruments, setInstruments] = useState<Instrument[]>([]);
 
   useEffect(() => {
-    fetch(`${API}/api/instruments?type=stock`).then((r) => r.json()).then(setInstruments).catch(() => {});
+    api.instruments.list("stock").then(setInstruments).catch(() => {});
   }, []);
 
   const tickerNames: Record<string, string> = {};
@@ -60,9 +59,8 @@ export default function PortfolioSimulator() {
       const histories: Record<string, number[]> = {};
       let minLen = Infinity;
       for (const h of holdings) {
-        const res = await fetch(`${API}/api/instruments/${h.ticker}/prices?days=365`);
-        if (!res.ok) continue;
-        const data: PricePoint[] = await res.json();
+        let data: PricePoint[];
+        try { data = await api.instruments.prices(h.ticker, 365); } catch { continue; }
         const closes = data.map((p) => p.close).filter((c) => c > 0);
         if (closes.length > 20) { histories[h.ticker] = closes; minLen = Math.min(minLen, closes.length); }
       }
