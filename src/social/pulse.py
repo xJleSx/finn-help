@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, cast
 
@@ -72,11 +73,13 @@ class PulseAdapter(SocialDataSource):
             headers={"User-Agent": USER_AGENT},
             timeout=30,
         )
+        self._last_request_time: float = 0.0
 
     @async_retry(max_attempts=3, base_delay=2.0)
     async def fetch_posts(self, since: datetime | None = None) -> list[RawPost]:
         all_posts: list[RawPost] = []
         for nick in self._authors:
+            await self._rate_limit()
             try:
                 html = await self._fetch_profile_page(nick)
                 if not html:
@@ -90,6 +93,14 @@ class PulseAdapter(SocialDataSource):
             except Exception as e:
                 logger.error("Pulse: failed to fetch @%s: %s", nick, e)
         return all_posts
+
+    async def _rate_limit(self) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last_request_time
+        min_interval = 2.0
+        if elapsed < min_interval:
+            await asyncio.sleep(min_interval - elapsed)
+        self._last_request_time = time.monotonic()
 
     async def _fetch_profile_page(self, nick: str) -> str | None:
         loop = asyncio.get_event_loop()
@@ -107,6 +118,7 @@ class PulseAdapter(SocialDataSource):
 
     @async_retry(max_attempts=3, base_delay=2.0)
     async def fetch_author_stats(self, author_nick: str) -> dict[str, Any] | None:
+        await self._rate_limit()
         try:
             html = await self._fetch_profile_page(author_nick)
             if not html:

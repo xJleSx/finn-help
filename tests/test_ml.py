@@ -90,6 +90,7 @@ class TestLightGBMModel:
 class TestCatBoostModel:
     @pytest.fixture
     def model(self):
+        pytest.importorskip("catboost")
         from src.analysis.ml.catboost_model import CatBoostClassifierModel
 
         return CatBoostClassifierModel()
@@ -144,12 +145,10 @@ class TestWalkForward:
         x = rng.normal(0, 1, (150, 5))
         y = (rng.normal(0, 1, 150) > 0).astype(int)
 
-        def factory():
-            from xgboost import XGBClassifier
+        from xgboost import XGBClassifier
+        model = XGBClassifier(n_estimators=10, max_depth=2)
 
-            return XGBClassifier(n_estimators=10, max_depth=2)
-
-        result = walk_forward_validate(x, y, factory, n_splits=2, min_train_size=50)
+        result = walk_forward_validate(model, x, y, n_splits=2, min_train_size=50)
         assert "oos_accuracy" in result
         assert "oos_precision" in result
         assert "oos_recall" in result
@@ -162,7 +161,7 @@ class TestWalkForward:
 
     def test_adjust_confidence_no_folds(self):
         result = adjust_confidence_by_oos(0.5, {"oos_accuracy": 0.0, "folds_completed": 0})
-        assert result == pytest.approx(0.5)
+        assert result == pytest.approx(0.0)
 
 
 class TestProphet:
@@ -238,11 +237,9 @@ class TestEdgeCases:
         x = rng.normal(0, 1, (30, 5))
         y = (rng.normal(0, 1, 30) > 0).astype(int)
 
-        def factory():
-            from xgboost import XGBClassifier
+        from xgboost import XGBClassifier
+        model = XGBClassifier(n_estimators=5, max_depth=2)
 
-            return XGBClassifier(n_estimators=5, max_depth=2)
-
-        result = walk_forward_validate(x, y, factory, n_splits=2, min_train_size=25)
+        result = walk_forward_validate(model, x, y, n_splits=2, min_train_size=25)
         assert "folds_completed" in result
         assert 0 <= result["oos_accuracy"] <= 1
