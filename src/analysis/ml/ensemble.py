@@ -4,7 +4,11 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from src.analysis.ml.walk_forward import adjust_confidence_by_oos, walk_forward_validate
+from src.analysis.ml.walk_forward import (
+    adjust_confidence_by_oos,
+    model_weight_from_oos,
+    walk_forward_validate,
+)
 from src.model_registry import load_model as load_from_registry
 from src.model_registry import save_model
 
@@ -42,20 +46,40 @@ class EnsemblePredictor:
     @property
     def cat(self):
         if self._cat is None:
-            from src.analysis.ml.catboost_model import CatBoostClassifierModel
+            try:
+                from src.analysis.ml.catboost_model import CatBoostClassifierModel
 
-            self._cat = CatBoostClassifierModel(ticker=self._ticker)
+                self._cat = CatBoostClassifierModel(ticker=self._ticker)
+            except ImportError:
+                self._cat = None
         return self._cat
 
+    def _build_x(self, df: pd.DataFrame) -> np.ndarray | None:
+        needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
+        if not all(c in df.columns for c in needed):
+            return None
+        features = df[needed].copy()
+        features["price_sma20"] = features["close"] / features["sma_20"].replace(0, np.nan)
+        features["price_sma50"] = features["close"] / features["sma_50"].replace(0, np.nan)
+        features["sma20_sma50"] = features["sma_20"] / features["sma_50"].replace(0, np.nan)
+        features["rsi_norm"] = features["rsi"] / 100
+        features["macd_signal_binary"] = (features["macd_hist"] > 0).astype(int)
+        return features.dropna().values
+
+    def _build_y(self, df: pd.DataFrame) -> np.ndarray | None:
+        lookahead = 5
+        threshold = 0.03
+        future_returns = df["close"].shift(-lookahead) / df["close"] - 1
+        y = np.where(future_returns > threshold, 1, np.where(future_returns < -threshold, 0, np.nan))
+        mask = ~np.isnan(y)
+        return y[mask].astype(int) if mask.sum() >= 10 else None
+
     def _get_weights(self, oos_list: list[dict]) -> list[float]:
-        weights = []
-        for oos in oos_list:
-            acc = oos.get("oos_accuracy", 0.5)
-            folds = oos.get("folds_completed", 0)
-            w = max((acc - 0.5) * 4 * min(folds / 3, 1), 0.1) if folds > 0 else 1.0
-            weights.append(w)
+        weights = [model_weight_from_oos(oos) for oos in oos_list]
         total = sum(weights)
-        return [w / total for w in weights] if total > 0 else [1.0 / len(weights)] * len(weights)
+        if total > 0:
+            return [w / total for w in weights]
+        return [1.0 / max(len(weights), 1)] * len(weights)
 
     def predict(self, df: pd.DataFrame) -> dict:
         models = [("xgb", self.xgb), ("lgb", self.lgb), ("cat", self.cat)]
@@ -63,6 +87,9 @@ class EnsemblePredictor:
         oos_list = []
 
         for name, model in models:
+            if model is None:
+                oos_list.append({"oos_accuracy": 0.5, "folds_completed": 0})
+                continue
             try:
                 pred = model.predict(df)
                 oos = self._walk_forward_validate(df, model)
@@ -78,6 +105,10 @@ class EnsemblePredictor:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0, "uncertainty": 1.0}
 
         weights = self._get_weights(oos_list)
+        active_models = sum(1 for w in weights if w > 0)
+        if active_models == 0:
+            return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0, "uncertainty": 1.0}
+
         weighted_probs = []
         weighted_confs = []
         actions = []
@@ -88,8 +119,9 @@ class EnsemblePredictor:
             weighted_confs.append(r.get("confidence", 0) * w)
             actions.append(r["action"])
 
-        avg_prob = float(np.sum(weighted_probs) / np.sum(weights[: len(results)]))
-        avg_confidence = float(np.sum(weighted_confs) / np.sum(weights[: len(results)]))
+        total_w = sum(weights[: len(results)])
+        avg_prob = float(np.sum(weighted_probs) / total_w) if total_w > 0 else 0.5
+        avg_confidence = float(np.sum(weighted_confs) / total_w) if total_w > 0 else 0.0
 
         buy_votes = sum(1 for a in actions if a == "BUY")
         sell_votes = sum(1 for a in actions if a == "SELL")
@@ -228,46 +260,16 @@ class EnsemblePredictor:
         if df.empty or len(df) < 60:
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
-        lookahead = 5
-        threshold = 0.03
-
-        needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
-        if not all(c in df.columns for c in needed):
+        x = self._build_x(df)
+        if x is None or len(x) < 30:
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
-        features = df[needed].copy()
-        features["price_sma20"] = features["close"] / features["sma_20"].replace(0, np.nan)
-        features["price_sma50"] = features["close"] / features["sma_50"].replace(0, np.nan)
-        features["sma20_sma50"] = features["sma_20"] / features["sma_50"].replace(0, np.nan)
-        features["rsi_norm"] = features["rsi"] / 100
-        features["macd_signal_binary"] = (features["macd_hist"] > 0).astype(int)
-        features = features.dropna()
-
-        if len(features) < 30:
+        y = self._build_y(df)
+        if y is None or len(y) < 30:
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
-        future_returns = df["close"].shift(-lookahead) / df["close"] - 1
-        aligned = features.iloc[:-lookahead].copy()
-        labels = future_returns.iloc[: len(aligned)].values
+        if len(x) != len(y):
+            min_len = min(len(x), len(y))
+            x, y = x[:min_len], y[:min_len]
 
-        y = np.where(labels > threshold, 1, np.where(labels < -threshold, 0, np.nan))
-        mask = ~np.isnan(y)
-        if mask.sum() < 30:
-            return {"oos_accuracy": 0.5, "folds_completed": 0}
-
-        x = aligned[mask].values
-        y_clean = y[mask].astype(int)
-
-        def _make_model():
-            try:
-                from xgboost import XGBClassifier
-
-                return XGBClassifier(
-                    n_estimators=50, max_depth=3, learning_rate=0.1, eval_metric="logloss", verbosity=0, random_state=42
-                )
-            except Exception:
-                from sklearn.linear_model import LogisticRegression
-
-                return LogisticRegression(max_iter=200, random_state=42)
-
-        return walk_forward_validate(x, y_clean, _make_model, n_splits=3)
+        return walk_forward_validate(model, x, y, n_splits=3)
