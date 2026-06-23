@@ -86,7 +86,7 @@ class EnsemblePredictor:
             return [w / total for w in weights]
         return [1.0 / max(len(weights), 1)] * len(weights)
 
-    def predict(self, df: pd.DataFrame) -> dict:
+    def predict(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> dict:
         models = [("xgb", self.xgb), ("lgb", self.lgb), ("cat", self.cat)]
         results = []
         oos_list = []
@@ -96,7 +96,7 @@ class EnsemblePredictor:
                 oos_list.append({"oos_accuracy": 0.5, "folds_completed": 0})
                 continue
             try:
-                pred = model.predict(df)
+                pred = model.predict(df, anomaly_mask=anomaly_mask)
                 oos = self._walk_forward_validate(df, model)
                 oos_list.append(oos)
                 if pred.get("action") != "NEUTRAL":
@@ -169,12 +169,12 @@ class EnsemblePredictor:
             "weights": [round(w, 3) for w in weights[: len(results)]],
         }
 
-    def train_all(self, df: pd.DataFrame) -> dict[str, bool]:
+    def train_all(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> dict[str, bool]:
         results = {}
         for name in ("xgb", "lgb", "cat"):
             try:
                 model = getattr(self, name)
-                results[name] = model.train(df)
+                results[name] = model.train(df, anomaly_mask=anomaly_mask)
             except Exception as e:
                 logger.warning("Ensemble %s training failed: %s", name, e)
                 results[name] = False

@@ -35,11 +35,11 @@ class CatBoostClassifierModel:
         self._model = load_from_registry(self.model_name, version=version)
         return self._model
 
-    def train(self, df: pd.DataFrame) -> bool:
+    def train(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> bool:
         features = self._prepare_features(df)
         if features.empty or len(features) < 30:
             return False
-        result = self._train_on_the_fly(df, features)
+        result = self._train_on_the_fly(df, features, anomaly_mask=anomaly_mask)
         if result is None:
             return False
         model, val_metrics = result
@@ -53,7 +53,7 @@ class CatBoostClassifierModel:
         self.save(metrics=save_metrics)
         return True
 
-    def predict(self, df: pd.DataFrame) -> dict:
+    def predict(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> dict:
         if df.empty or len(df) < 60:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
 
@@ -69,7 +69,7 @@ class CatBoostClassifierModel:
                 pass
 
         if model is None:
-            result = self._train_on_the_fly(df, features)
+            result = self._train_on_the_fly(df, features, anomaly_mask=anomaly_mask)
             if result is not None:
                 model, _ = result
                 if model is not None:
@@ -149,12 +149,15 @@ class CatBoostClassifierModel:
         result = result.dropna()
         return result
 
-    def _train_on_the_fly(self, df: pd.DataFrame, features: pd.DataFrame):
+    def _train_on_the_fly(self, df: pd.DataFrame, features: pd.DataFrame, anomaly_mask: np.ndarray | None = None):
         try:
             lookahead = 5
             threshold = 0.03
             y, mask = build_labels(df["close"], lookahead=lookahead, threshold=threshold)
             aligned = features.iloc[: len(y)].copy()
+            if anomaly_mask is not None:
+                am = anomaly_mask[: len(y)]
+                mask = mask & (~am)
             x_all = aligned[mask].values
             y_all = y[mask].astype(int)
 

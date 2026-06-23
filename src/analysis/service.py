@@ -94,7 +94,7 @@ class AnalysisService:
             return pd.DataFrame({
                 "date": dates, "event_count_30d": 0,
                 "event_severity_30d": 0.0, "sanctions_30d": 0,
-                "days_since_major_event": 999,
+                "days_since_major_event": 999, "is_anomaly": False,
             })
 
         ev_df = pd.DataFrame([
@@ -123,6 +123,7 @@ class AnalysisService:
                 "event_severity_30d": severity,
                 "sanctions_30d": sanctions,
                 "days_since_major_event": days_since,
+                "is_anomaly": days_since < 3,
             })
         return pd.DataFrame(result_rows)
 
@@ -133,15 +134,19 @@ class AnalysisService:
         if len(df) < 60:
             return None
         try:
+            anomaly_mask = None
             if events:
                 ef = self._build_event_features(events, ind_df["date"])
                 ind_df = ind_df.merge(ef, on="date", how="left")
                 for c in ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]:
                     if c in ind_df.columns:
                         ind_df[c] = ind_df[c].fillna(0)
+                if "is_anomaly" in ind_df.columns:
+                    anomaly_mask = ind_df["is_anomaly"].fillna(False).to_numpy(dtype=bool)
+                    ind_df = ind_df.drop(columns=["is_anomaly"])
 
             pr = self._get_prophet(ticker).predict(df)
-            ensemble = self._get_ensemble(ticker).predict(ind_df)
+            ensemble = self._get_ensemble(ticker).predict(ind_df, anomaly_mask=anomaly_mask)
             ml = pr
             ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble.get("confidence", 0))
             ml["xgb_action"] = ensemble.get("xgb_action", "NEUTRAL")
@@ -711,8 +716,17 @@ class AnalysisService:
             ind_df = self._indicator_df(ind_rows)
             ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
 
+            all_events = self._load_all_events_sync(db)
+            anomaly_mask = None
+            if all_events:
+                ef = self._build_event_features(all_events, ind_df["date"])
+                train_df = ind_df.merge(ef, on="date", how="left")
+                if "is_anomaly" in train_df.columns:
+                    anomaly_mask = train_df["is_anomaly"].fillna(False).to_numpy(dtype=bool)
+                    train_df = train_df.drop(columns=["is_anomaly"])
+
             ensemble = self._get_ensemble(sym)
-            ensemble_ok = ensemble.train_all(df)
+            ensemble_ok = ensemble.train_all(df, anomaly_mask=anomaly_mask)
 
             prophet = self._get_prophet(sym)
             prophet_ok = prophet.train(df)
