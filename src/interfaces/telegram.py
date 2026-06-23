@@ -1400,7 +1400,11 @@ async def run_bot():
         logger.warning("TELEGRAM_BOT_TOKEN not set in .env")
         return
 
-    app = Application.builder().token(settings.telegram_bot_token).build()
+    builder = Application.builder().token(settings.telegram_bot_token)
+    if settings.telegram_proxy_url:
+        builder.proxy(settings.telegram_proxy_url)
+        logger.info("Telegram bot using proxy: %s", settings.telegram_proxy_url)
+    app = builder.build()
 
     app.add_error_handler(error_handler)
 
@@ -1454,12 +1458,35 @@ async def run_bot():
 
     _scheduler_task = await _start_scheduler()
 
-    await app.updater.start_polling()
-    logger.info("Bot started polling with background scheduler")
+    POLLING_RETRY_DELAY = 10
+    poll_attempt = 0
+    while True:
+        try:
+            await app.updater.start_polling()
+            poll_attempt = 0
+            logger.info("Bot started polling with background scheduler")
+            break
+        except telegram.error.NetworkError as e:
+            poll_attempt += 1
+            delay = min(POLLING_RETRY_DELAY * (2 ** (poll_attempt - 1)), 300)
+            logger.warning("Telegram polling connection failed (attempt %d): %s — retrying in %ds", poll_attempt, e, delay)
+            await asyncio.sleep(delay)
 
+    retry_count = 0
     try:
         while True:
-            await asyncio.sleep(3600)
+            await asyncio.sleep(30)
+            if not app.updater.running:
+                retry_count += 1
+                delay = min(10 * (2 ** (retry_count - 1)), 300)
+                logger.warning("Telegram polling stopped, reconnecting in %ds (attempt %d)", delay, retry_count)
+                await asyncio.sleep(delay)
+                try:
+                    await app.updater.start_polling()
+                    retry_count = 0
+                    logger.info("Telegram polling reconnected")
+                except Exception as e:
+                    logger.error("Telegram polling reconnect failed: %s", e)
     except asyncio.CancelledError:
         logger.info("Bot shutting down...")
         _stop_scheduler()
