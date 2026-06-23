@@ -97,6 +97,7 @@ class SignalFusionEngine:
         macro_context: Optional[dict] = None,
         sentiment: Optional[dict] = None,
         mtf: Optional[dict] = None,
+        event_context: Optional[dict] = None,
         user_id: Optional[str] = None,
     ) -> dict:
         reasons = []
@@ -210,6 +211,18 @@ class SignalFusionEngine:
             if macro_reasons:
                 reasons.append(f"Макро: {', '.join(macro_reasons)}")
 
+        event_penalty = 0.0
+        if event_context:
+            event_risk = event_context.get("event_risk_score", 0.0)
+            event_penalty = event_risk * 0.05
+            if event_context.get("sanctions_spike"):
+                event_penalty += 0.03
+                reasons.append("Санкционная активность за последние 7 дней")
+            if event_risk > 0.5:
+                reasons.append(f"Высокая событийная волатильность ({event_risk:.0%} дней)")
+            elif event_risk > 0.2:
+                reasons.append(f"Повышенная событийная активность ({event_risk:.0%} дней)")
+
         tech_action = technical.get("action", "NEUTRAL") if technical else "NEUTRAL"
         tech_conf = technical.get("confidence", 0.0) if technical else 0.0
         tech_score = tech_score_raw
@@ -253,6 +266,7 @@ class SignalFusionEngine:
             + mtf_signal * weights["mtf"]
             + macro_adjustment * MACRO_MAX_ADJUSTMENT
             + trend_adjustment * weights["ml"]
+            + event_penalty
         )
 
         macro_max = MACRO_MAX_ADJUSTMENT

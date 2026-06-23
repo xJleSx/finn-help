@@ -224,10 +224,15 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
             .first()
         )
         if report and report.report_text:
+            text = report.report_text
             try:
-                await update.effective_message.reply_markdown(report.report_text)
-            except telegram.error.BadRequest:
-                await update.effective_message.reply_text(report.report_text)
+                await update.effective_message.reply_markdown(text)
+            except Exception:
+                logger.warning("Daily report Markdown error, falling back to plain text (len=%d)", len(text))
+                try:
+                    await update.effective_message.reply_text(text)
+                except Exception as e:
+                    logger.error("Daily report plain text failed too: %s", e)
         else:
             await update.effective_message.reply_text("Ежедневный отчёт ещё не сформирован. Он появляется после 23:50 МСК.")
     finally:
