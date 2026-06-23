@@ -14,6 +14,8 @@ from src.model_registry import save_model
 
 logger = logging.getLogger(__name__)
 
+EVENT_FEATURE_COLS = ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]
+
 
 class EnsemblePredictor:
     def __init__(self, ticker: str = ""):
@@ -64,6 +66,9 @@ class EnsemblePredictor:
         features["sma20_sma50"] = features["sma_20"] / features["sma_50"].replace(0, np.nan)
         features["rsi_norm"] = features["rsi"] / 100
         features["macd_signal_binary"] = (features["macd_hist"] > 0).astype(int)
+        for c in EVENT_FEATURE_COLS:
+            if c in df.columns:
+                features[c] = df[c].values
         return features.dropna().values
 
     def _build_y(self, df: pd.DataFrame) -> np.ndarray | None:
@@ -229,6 +234,9 @@ class EnsemblePredictor:
             features["sma20_sma50"] = features["sma_20"] / features["sma_50"].replace(0, np.nan)
             features["rsi_norm"] = features["rsi"] / 100
             features["macd_signal_binary"] = (features["macd_hist"] > 0).astype(int)
+            for c in EVENT_FEATURE_COLS:
+                if c in df.columns:
+                    features[c] = df[c].values
             features = features.dropna()
 
             if len(features) < 50:
@@ -283,6 +291,9 @@ class EnsemblePredictor:
         features["sma20_sma50"] = features["sma_20"] / features["sma_50"].replace(0, np.nan)
         features["rsi_norm"] = features["rsi"] / 100
         features["macd_signal_binary"] = (features["macd_hist"] > 0).astype(int)
+        for c in EVENT_FEATURE_COLS:
+            if c in df.columns:
+                features[c] = df[c].values
 
         future_returns = df["close"].shift(-lookahead) / df["close"] - 1
         aligned = features.iloc[:-lookahead].copy()
