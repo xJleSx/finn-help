@@ -109,9 +109,36 @@ class AnalysisService:
             return None
 
     async def _load_geo(self, db: AsyncSession) -> dict:
+        score = await self._compute_geo_from_events(db)
+        if score is not None:
+            return {"score": score}
         result = await db.execute(select(GeoRiskScore).order_by(GeoRiskScore.date.desc()).limit(1))
         geo = result.scalar_one_or_none()
         return {"score": geo.score} if geo else {"score": 0.0}
+
+    async def _compute_geo_from_events(self, db: AsyncSession) -> float | None:
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        result = await db.execute(
+            select(MarketEvent)
+            .where(MarketEvent.event_type == "sanctions_timeline", MarketEvent.date >= cutoff)
+        )
+        events = result.scalars().all()
+        if not events:
+            return None
+
+        now = datetime.now(timezone.utc).date()
+        score = 2.0
+        for e in events:
+            if e.date >= now - timedelta(days=7):
+                score += 1.0
+            else:
+                score += 0.5
+            if e.severity and e.severity > 0.8:
+                score += 0.5
+        score = min(score, 10.0)
+        return round(score, 1)
 
     async def _load_macro(self, db: AsyncSession) -> dict:
         from src.collectors.macro import MacroCollector
@@ -158,6 +185,30 @@ class AnalysisService:
             "event_count": len(events),
             "total_impact": round(total_impact, 3),
         }
+
+    def _compute_geo_from_events_sync(self, db) -> float | None:
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        events = (
+            db.query(MarketEvent)
+            .filter(MarketEvent.event_type == "sanctions_timeline", MarketEvent.date >= cutoff)
+            .all()
+        )
+        if not events:
+            return None
+
+        now = datetime.now(timezone.utc).date()
+        score = 2.0
+        for e in events:
+            if e.date >= now - timedelta(days=7):
+                score += 1.0
+            else:
+                score += 0.5
+            if e.severity and e.severity > 0.8:
+                score += 0.5
+        score = min(score, 10.0)
+        return round(score, 1)
 
     def _load_market_events_sync(self, db, days: int = 30) -> dict:
         from datetime import datetime, timedelta, timezone
@@ -417,8 +468,11 @@ class AnalysisService:
 
         ml = self._compute_ml(df, ind_df, ticker=ticker) if with_ml else None
 
-        geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
-        geo = {"score": geo_row.score} if geo_row else {"score": 0.0}
+        geo_score = self._compute_geo_from_events_sync(db)
+        if geo_score is None:
+            geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
+            geo_score = geo_row.score if geo_row else 0.0
+        geo = {"score": geo_score}
 
         from src.collectors.macro import MacroCollector
 
