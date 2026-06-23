@@ -836,22 +836,30 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cost = avg * qty
             pnl = val - cost
             pnl_pct = ((cur / avg) - 1) * 100 if avg > 0 else 0.0
-            emoji = "🟢" if pnl >= 0 else "🔴"
+            emoji = "🟢" if pnl > 0.5 else ("🔴" if pnl < -0.5 else "⚪")
+            pnl_display = "" if abs(pnl) < 1 else f"{pnl:+,.0f}"
+            pnl_pct_display = "" if abs(pnl_pct) < 0.1 else f"{pnl_pct:+.1f}%"
+            if pnl_display and pnl_pct_display:
+                pnl_line = f"   P&L: {pnl_display} ₽ ({pnl_pct_display})"
+            else:
+                pnl_line = "   P&L: ~0 ₽"
 
             lines.append(
                 f"{emoji} *{r['ticker']}*: {qty:.0f} шт × {cur:.2f} ₽\n"
                 f"   Средняя: {avg:.2f} | Стоимость: {val:,.0f} ₽\n"
-                f"   P&L: {pnl:+,.0f} ₽ ({pnl_pct:+.1f}%)"
+                f"{pnl_line}"
             )
             total_value += val
             total_cost += cost
 
         total_pnl = total_value - total_cost
         total_pnl_pct = ((total_value / total_cost) - 1) * 100 if total_cost > 0 else 0.0
-        total_emoji = "🟢" if total_pnl >= 0 else "🔴"
+        total_emoji = "🟢" if total_pnl > 0.5 else ("🔴" if total_pnl < -0.5 else "⚪")
+        total_pnl_str = "" if abs(total_pnl) < 1 else f"{total_pnl:+,.0f}"
+        total_pnl_pct_str = "" if abs(total_pnl_pct) < 0.1 else f"{total_pnl_pct:+.1f}%"
+        pnl_suffix = f" | P&L: {total_pnl_str} ₽ ({total_pnl_pct_str})" if total_pnl_str and total_pnl_pct_str else " | P&L: ~0 ₽"
         lines.append(
-            f"\n{total_emoji} *Итого:* {total_value:,.0f} ₽"
-            f" | P&L: {total_pnl:+,.0f} ₽ ({total_pnl_pct:+.1f}%)"
+            f"\n{total_emoji} *Итого:* {total_value:,.0f} ₽{pnl_suffix}"
         )
         await msg.edit_text("\n".join(lines), parse_mode="Markdown")
     finally:
