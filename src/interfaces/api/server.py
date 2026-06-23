@@ -36,6 +36,11 @@ limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from src.db.connection import init_db
+    try:
+        init_db()
+    except Exception as e:
+        logger.warning("DB migration failed (may be OK if tables exist): %s", e)
     logger.info("Trade mode: DRY_RUN (set ENABLE_TRADING=true to enable AUTO)")
     scheduler_task = asyncio.create_task(run_forever())
     yield

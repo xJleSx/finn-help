@@ -69,8 +69,7 @@ class MOEXCollector:
         if not isinstance(cols, list) or not isinstance(rows, list):
             logger.warning("MOEX API: table '%s' missing columns or data", table_name)
             return []
-        if len(rows) == 0:
-            logger.debug("MOEX API: table '%s' returned 0 rows (empty dataset)", table_name)
+
         return [dict(zip(cols, row)) for row in rows]
 
     async def get_securities(self) -> list[dict]:
