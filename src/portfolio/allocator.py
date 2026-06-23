@@ -201,6 +201,9 @@ class PortfolioAllocator:
             )
             if divs and last_price and last_price > 0:
                 div_yield = sum(d.amount for d in divs) / last_price * 100
+                if div_yield > 25:
+                    logger.warning("Suspicious div yield %.1f%% for %s (divs=%s, price=%s), capping at 25%%", div_yield, inst.ticker, [d.amount for d in divs], last_price)
+                    div_yield = 25.0
 
             result.append(
                 {
@@ -249,10 +252,10 @@ class PortfolioAllocator:
             c["risk"] = risk
 
             var_95 = risk.get("var_95", 0) or 0
-            if var_95 > 0.05:
+            if var_95 > 5.0:
                 score -= 1.0
                 reason_parts.append("высокий VaR (5%)")
-            elif var_95 > 0.03:
+            elif var_95 > 3.0:
                 score -= 0.5
                 reason_parts.append("повышенный VaR")
 
@@ -274,10 +277,11 @@ class PortfolioAllocator:
                 score -= penalty
                 reason_parts.append("высокая корреляция с портфелем")
 
-            if c["div_yield"] > 5:
+            div_yield = min(c["div_yield"], 20.0)
+            if div_yield > 5:
                 score += 2.0
                 reason_parts.append(f"див. доходность {c['div_yield']:.1f}%")
-            elif c["div_yield"] > 3:
+            elif div_yield > 3:
                 score += 1.0
                 reason_parts.append(f"див. доходность {c['div_yield']:.1f}%")
 
@@ -306,7 +310,7 @@ class PortfolioAllocator:
                     score += 1.0
                     reason_parts.append("корпоративная облигация")
 
-            c["score"] = max(score, 0.1)
+            c["score"] = max(score, 0.0)
             c["reason"] = "; ".join(reason_parts) if reason_parts else "диверсификация"
             c["yield"] = c["div_yield"]
 
@@ -344,12 +348,28 @@ class PortfolioAllocator:
 
     def _upcoming_dividend_score(self, inst: dict, db) -> dict:
         try:
-            div = db.query(Dividend).filter_by(instrument_id=inst["id"]).order_by(Dividend.date.desc()).first()
-            if not div:
+            divs = (
+                db.query(Dividend)
+                .filter_by(instrument_id=inst["id"])
+                .order_by(Dividend.date.desc())
+                .limit(2)
+                .all()
+            )
+            if not divs:
                 return {"bonus": 0.0, "reason": ""}
+
+            div = divs[0]
             days_since = (date.today() - div.date).days
-            if 300 < days_since < 400:
+
+            gap = 365
+            if len(divs) >= 2:
+                gap = (divs[0].date - divs[1].date).days
+
+            upcoming_in = gap - days_since
+            if 0 < upcoming_in <= 90:
                 est_yield = div.amount / inst["last_price"] * 100 if inst.get("last_price") else 0
+                if est_yield > 25:
+                    logger.warning("Suspicious div yield %.1f%% for %s (amount=%.4f, price=%s)", est_yield, inst.get("ticker"), div.amount, inst.get("last_price"))
                 return {"bonus": 2.0, "reason": f"ожидаются дивиденды ~{div.amount:.0f} ₽/акц ({est_yield:.1f}%)"}
             if days_since <= 90:
                 return {"bonus": 0.5, "reason": "недавние дивиденды"}
