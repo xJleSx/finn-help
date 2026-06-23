@@ -230,7 +230,7 @@ class AnalysisService:
 
         from datetime import datetime, timedelta, timezone
 
-        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        recent_cutoff = datetime.now(timezone.utc).date() - timedelta(days=7)
         recent = [e for e in events if e.date >= recent_cutoff]
         sanctions_spike = any(getattr(e, "event_type", "") == "sanctions_timeline" for e in recent)
         recent_types = list({getattr(e, "event_type", "") for e in recent})[:5]
@@ -255,7 +255,7 @@ class AnalysisService:
     def _compute_geo_from_events_sync(self, db) -> float | None:
         from datetime import datetime, timedelta, timezone
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        cutoff = datetime.now(timezone.utc).date() - timedelta(days=30)
         events = (
             db.query(MarketEvent)
             .filter(MarketEvent.event_type == "sanctions_timeline", MarketEvent.date >= cutoff)
@@ -279,7 +279,7 @@ class AnalysisService:
     def _load_market_events_sync(self, db, days: int = 30) -> dict:
         from datetime import datetime, timedelta, timezone
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc).date() - timedelta(days=days)
         events = (
             db.query(MarketEvent).filter(MarketEvent.date >= cutoff).all()
         )
@@ -298,7 +298,7 @@ class AnalysisService:
         trading_days = max(len(events), 1)
         event_risk_score = min(high_impact / trading_days, 1.0)
 
-        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        recent_cutoff = datetime.now(timezone.utc).date() - timedelta(days=7)
         recent = [e for e in events if e.date >= recent_cutoff]
         sanctions_spike = any(getattr(e, "event_type", "") == "sanctions_timeline" for e in recent)
         recent_types = list({getattr(e, "event_type", "") for e in recent})[:5]
