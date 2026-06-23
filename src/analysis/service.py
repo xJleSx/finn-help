@@ -214,6 +214,7 @@ class AnalysisService:
                 "recent_types": [],
                 "event_count": 0,
                 "total_impact": 0.0,
+                "recent_for_llm": [],
             }
 
         high_impact = sum(
@@ -232,12 +233,18 @@ class AnalysisService:
         total_impact = sum(abs(e.market_impact_pct or 0) for e in events)
         total_impact = min(total_impact / 100.0, 1.0)
 
+        recent_for_llm = []
+        for e in sorted(recent, key=lambda x: x.date, reverse=True)[:5]:
+            impact = f" ({e.market_impact_pct:+.1f}%)" if e.market_impact_pct else ""
+            recent_for_llm.append(f"{e.date} — {e.event_type}: {e.title}{impact}")
+
         return {
             "event_risk_score": round(event_risk_score, 3),
             "sanctions_spike": sanctions_spike,
             "recent_types": recent_types,
             "event_count": len(events),
             "total_impact": round(total_impact, 3),
+            "recent_for_llm": recent_for_llm,
         }
 
     def _compute_geo_from_events_sync(self, db) -> float | None:
@@ -437,6 +444,7 @@ class AnalysisService:
             event_context=event_context,
         )
         fused["trends"] = trends
+        fused["recent_events"] = event_context.get("recent_for_llm", [])
         return fused
 
     async def analyze_all(
@@ -595,6 +603,7 @@ class AnalysisService:
             event_context=event_context,
         )
         fused["trends"] = self._load_trends_sync(db, inst.id)
+        fused["recent_events"] = event_context.get("recent_for_llm", [])
         return fused
 
     async def _load_fundamental_metrics(self, db: AsyncSession, instrument_id: int) -> Optional[dict]:
