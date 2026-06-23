@@ -130,6 +130,8 @@ class CatBoostClassifierModel:
         )
         self._model.fit(x_train, y_train)
 
+    EVENT_FEATURE_COLS = ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]
+
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
         if not all(c in df.columns for c in needed):
@@ -141,6 +143,9 @@ class CatBoostClassifierModel:
         result["sma20_sma50"] = result["sma_20"] / result["sma_50"].replace(0, np.nan)
         result["rsi_norm"] = result["rsi"] / 100
         result["macd_signal_binary"] = (result["macd_hist"] > 0).astype(int)
+        for c in self.EVENT_FEATURE_COLS:
+            if c in df.columns:
+                result[c] = df[c].values
         result = result.dropna()
         return result
 
@@ -225,7 +230,8 @@ class CatBoostClassifierModel:
             logger.debug("SHAP unavailable: %s", e)
 
     def _feature_names(self) -> list[str]:
-        return [
+        names = [
             "close", "rsi", "macd_hist", "sma_20", "sma_50",
             "price_sma20", "price_sma50", "sma20_sma50", "rsi_norm", "macd_signal_binary",
         ]
+        return names + self.EVENT_FEATURE_COLS

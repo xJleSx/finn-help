@@ -89,10 +89,57 @@ class AnalysisService:
     def _dividend_df(self, divs: list[Dividend]) -> pd.DataFrame:
         return pd.DataFrame([{"date": d.date, "amount": d.amount} for d in divs])
 
-    def _compute_ml(self, df: pd.DataFrame, ind_df: pd.DataFrame, ticker: str = "") -> dict | None:
+    def _build_event_features(self, events: list[MarketEvent], dates: pd.Series) -> pd.DataFrame:
+        if not events:
+            return pd.DataFrame({
+                "date": dates, "event_count_30d": 0,
+                "event_severity_30d": 0.0, "sanctions_30d": 0,
+                "days_since_major_event": 999,
+            })
+
+        ev_df = pd.DataFrame([
+            {
+                "date": e.date,
+                "impact": abs(e.market_impact_pct or 0),
+                "is_sanctions": e.event_type == "sanctions_timeline",
+            }
+            for e in events
+        ])
+        ev_df = ev_df.sort_values("date")
+        result_rows = []
+        for d in pd.to_datetime(dates):
+            cutoff = d - pd.Timedelta(days=30)
+            window = ev_df[(ev_df["date"] >= cutoff) & (ev_df["date"] < d)]
+            count = len(window)
+            severity = float(window["impact"].mean()) if count > 0 else 0.0
+            sanctions = int(window["is_sanctions"].sum()) if count > 0 else 0
+            major = ev_df[ev_df["impact"] > 2.0]
+            if not major.empty and major["date"].max() < d:
+                days_since = (d - pd.Timestamp(major["date"].max())).days
+            else:
+                days_since = 999
+            result_rows.append({
+                "date": d, "event_count_30d": count,
+                "event_severity_30d": severity,
+                "sanctions_30d": sanctions,
+                "days_since_major_event": days_since,
+            })
+        return pd.DataFrame(result_rows)
+
+    def _compute_ml(
+        self, df: pd.DataFrame, ind_df: pd.DataFrame, ticker: str = "",
+        events: list[MarketEvent] | None = None,
+    ) -> dict | None:
         if len(df) < 60:
             return None
         try:
+            if events:
+                ef = self._build_event_features(events, ind_df["date"])
+                ind_df = ind_df.merge(ef, on="date", how="left")
+                for c in ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]:
+                    if c in ind_df.columns:
+                        ind_df[c] = ind_df[c].fillna(0)
+
             pr = self._get_prophet(ticker).predict(df)
             ensemble = self._get_ensemble(ticker).predict(ind_df)
             ml = pr
@@ -144,6 +191,13 @@ class AnalysisService:
         from src.collectors.macro import MacroCollector
 
         return await MacroCollector.latest_values_async(db)
+
+    async def _load_all_events(self, db: AsyncSession) -> list[MarketEvent]:
+        result = await db.execute(select(MarketEvent).order_by(MarketEvent.date))
+        return list(result.scalars().all())
+
+    def _load_all_events_sync(self, db) -> list[MarketEvent]:
+        return db.query(MarketEvent).order_by(MarketEvent.date).all()
 
     async def _load_market_events(self, db: AsyncSession, days: int = 30) -> dict:
         from datetime import datetime, timedelta, timezone
@@ -353,7 +407,8 @@ class AnalysisService:
         fund_metrics = await self._load_fundamental_metrics(db, inst.id)
         fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics)
 
-        ml = self._compute_ml(df, ind_df, ticker=ticker) if with_ml else None
+        all_events = await self._load_all_events(db)
+        ml = self._compute_ml(df, ind_df, ticker=ticker, events=all_events) if with_ml else None
         geo = await self._load_geo(db)
         macro_context = await self._load_macro(db)
         sentiment = await self._load_sentiment(db)
@@ -466,7 +521,8 @@ class AnalysisService:
         fund_metrics = self._load_fundamental_metrics_sync(db, inst.id)
         fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics)
 
-        ml = self._compute_ml(df, ind_df, ticker=ticker) if with_ml else None
+        all_events = self._load_all_events_sync(db)
+        ml = self._compute_ml(df, ind_df, ticker=ticker, events=all_events) if with_ml else None
 
         geo_score = self._compute_geo_from_events_sync(db)
         if geo_score is None:
