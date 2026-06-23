@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     tinkoff_sandbox: bool = True
     database_url: str = "postgresql://finn:finn@localhost:5432/finn"
     telegram_bot_token: str = ""
+    telegram_proxy_url: str = ""
     telegram_allowed_ids: str = ""
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:3000"
