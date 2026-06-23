@@ -11,7 +11,7 @@ from src.analysis.multi_timeframe import MultiTimeframeAnalyzer
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.volatility import VolatilityRegimeDetector
 from src.constants import NEWS_SENTIMENT_DAYS
-from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Price, Signal
+from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, MarketEvent, News, Price, Signal
 from src.llm.router import llm
 from src.signal.engine import SignalFusionEngine, compute_risk_metrics
 
@@ -117,6 +117,85 @@ class AnalysisService:
         from src.collectors.macro import MacroCollector
 
         return await MacroCollector.latest_values_async(db)
+
+    async def _load_market_events(self, db: AsyncSession, days: int = 30) -> dict:
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        result = await db.execute(
+            select(MarketEvent).where(MarketEvent.date >= cutoff)
+        )
+        events = result.scalars().all()
+        if not events:
+            return {
+                "event_risk_score": 0.0,
+                "sanctions_spike": False,
+                "recent_types": [],
+                "event_count": 0,
+                "total_impact": 0.0,
+            }
+
+        high_impact = sum(
+            1 for e in events if e.market_impact_pct is not None and abs(e.market_impact_pct) > 1.5
+        )
+        trading_days = max(len(events), 1)
+        event_risk_score = min(high_impact / trading_days, 1.0)
+
+        from datetime import datetime, timedelta, timezone
+
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        recent = [e for e in events if e.date >= recent_cutoff]
+        sanctions_spike = any(getattr(e, "event_type", "") == "sanctions_timeline" for e in recent)
+        recent_types = list({getattr(e, "event_type", "") for e in recent})[:5]
+
+        total_impact = sum(abs(e.market_impact_pct or 0) for e in events)
+        total_impact = min(total_impact / 100.0, 1.0)
+
+        return {
+            "event_risk_score": round(event_risk_score, 3),
+            "sanctions_spike": sanctions_spike,
+            "recent_types": recent_types,
+            "event_count": len(events),
+            "total_impact": round(total_impact, 3),
+        }
+
+    def _load_market_events_sync(self, db, days: int = 30) -> dict:
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        events = (
+            db.query(MarketEvent).filter(MarketEvent.date >= cutoff).all()
+        )
+        if not events:
+            return {
+                "event_risk_score": 0.0,
+                "sanctions_spike": False,
+                "recent_types": [],
+                "event_count": 0,
+                "total_impact": 0.0,
+            }
+
+        high_impact = sum(
+            1 for e in events if e.market_impact_pct is not None and abs(e.market_impact_pct) > 1.5
+        )
+        trading_days = max(len(events), 1)
+        event_risk_score = min(high_impact / trading_days, 1.0)
+
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        recent = [e for e in events if e.date >= recent_cutoff]
+        sanctions_spike = any(getattr(e, "event_type", "") == "sanctions_timeline" for e in recent)
+        recent_types = list({getattr(e, "event_type", "") for e in recent})[:5]
+
+        total_impact = sum(abs(e.market_impact_pct or 0) for e in events)
+        total_impact = min(total_impact / 100.0, 1.0)
+
+        return {
+            "event_risk_score": round(event_risk_score, 3),
+            "sanctions_spike": sanctions_spike,
+            "recent_types": recent_types,
+            "event_count": len(events),
+            "total_impact": round(total_impact, 3),
+        }
 
     async def _load_sentiment(self, db: AsyncSession) -> dict:
         from datetime import datetime, timedelta, timezone
@@ -227,6 +306,7 @@ class AnalysisService:
         geo = await self._load_geo(db)
         macro_context = await self._load_macro(db)
         sentiment = await self._load_sentiment(db)
+        event_context = await self._load_market_events(db)
 
         volatility_regime = self.volatility.detect(df, ind_df)
 
@@ -248,6 +328,7 @@ class AnalysisService:
             macro_context=macro_context,
             sentiment=sentiment,
             mtf=mtf_concordance,
+            event_context=event_context,
         )
         fused["trends"] = trends
         return fused
@@ -389,6 +470,7 @@ class AnalysisService:
         mtf_data = self.mtf.compute_all(df)
         mtf_concordance = self.mtf.concordance(mtf_data) if mtf_data else None
 
+        event_context = self._load_market_events_sync(db)
         fused = self.fusion.fuse(
             ticker=ticker.upper(),
             technical=tech_signal,
@@ -400,6 +482,7 @@ class AnalysisService:
             macro_context=macro_context,
             sentiment=sentiment,
             mtf=mtf_concordance,
+            event_context=event_context,
         )
         fused["trends"] = self._load_trends_sync(db, inst.id)
         return fused

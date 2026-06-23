@@ -3,6 +3,7 @@ from typing import Any, cast
 
 from src.config import settings
 from src.llm import prompts
+from src.llm.tools.wolfram import WolframAlphaClient
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +15,15 @@ class LLMRouter:
         self._groq_model = settings.groq_model
         self._ollama_model = settings.ollama_model
         self._ollama_url = settings.ollama_url
+        self._wolfram: WolframAlphaClient | None = (
+            WolframAlphaClient(settings.wolfram_app_id)
+            if settings.wolfram_enabled and settings.wolfram_app_id
+            else None
+        )
 
     async def advise(self, signal: dict[str, object]) -> str:
+        await self._enrich_with_wolfram(signal)
+
         if self._use_groq:
             try:
                 return await self._groq_advise(signal)
@@ -23,6 +31,20 @@ class LLMRouter:
                 logger.warning(f"Groq failed: {e}, trying local...")
 
         return await self._ollama_advise(signal)
+
+    async def _enrich_with_wolfram(self, signal: dict[str, object]) -> None:
+        if not self._wolfram:
+            return
+        ticker = signal.get("ticker")
+        if not ticker or not isinstance(ticker, str):
+            return
+        try:
+            data = await self._wolfram.enrich_stock(ticker)
+            if data:
+                signal["wolfram_data"] = data
+                logger.debug("WolframAlpha enriched %s: %d facts", ticker, len(data))
+        except Exception as e:
+            logger.warning("WolframAlpha enrichment failed for %s: %s", ticker, e)
 
     async def _groq_advise(self, signal: dict[str, object]) -> str:
         try:

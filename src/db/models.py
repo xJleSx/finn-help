@@ -478,6 +478,26 @@ class DailyReport(Base):
     report_text = Column(Text)
 
 
+class MarketEvent(Base):
+    __tablename__ = "market_events"
+
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False, index=True)
+    event_type = Column(String(50), nullable=False, index=True)
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    severity = Column(Float, nullable=False, default=0.5)
+    market_impact_pct = Column(Float)
+    sector_impacts_json = Column(JSON)
+    indicators_before_json = Column(JSON)
+    indicators_after_json = Column(JSON)
+    source = Column(String(50), default="synthetic")
+    source_news_id = Column(Integer, ForeignKey("news.id"), nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (Index("ix_market_events_date_type", "date", "event_type"),)
+
+
 class FundamentalMetric(Base):
     __tablename__ = "fundamental_metrics"
 
