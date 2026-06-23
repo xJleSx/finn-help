@@ -718,15 +718,19 @@ class AnalysisService:
 
             all_events = self._load_all_events_sync(db)
             anomaly_mask = None
+            train_df = ind_df.copy()
             if all_events:
                 ef = self._build_event_features(all_events, ind_df["date"])
                 train_df = ind_df.merge(ef, on="date", how="left")
+                for c in ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]:
+                    if c in train_df.columns:
+                        train_df[c] = train_df[c].fillna(0)
                 if "is_anomaly" in train_df.columns:
                     anomaly_mask = train_df["is_anomaly"].fillna(False).to_numpy(dtype=bool)
                     train_df = train_df.drop(columns=["is_anomaly"])
 
             ensemble = self._get_ensemble(sym)
-            ensemble_ok = ensemble.train_all(df, anomaly_mask=anomaly_mask)
+            ensemble_ok = ensemble.train_all(train_df, anomaly_mask=anomaly_mask)
 
             prophet = self._get_prophet(sym)
             prophet_ok = prophet.train(df)
