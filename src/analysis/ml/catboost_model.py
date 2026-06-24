@@ -79,8 +79,7 @@ class CatBoostClassifierModel:
         if model is None:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
 
-        latest = features.iloc[-1:].values
-        proba = model.predict_proba(latest)[0, 1]
+        proba = self._predict_latest(features)
 
         if proba > 0.55:
             action = "BUY"
@@ -115,9 +114,13 @@ class CatBoostClassifierModel:
         mask = ~np.isnan(y)
         if mask.sum() < 10 or self._model is None:
             return 0.0
-        x_test = aligned[mask].values
+        x_test = aligned[mask]
+        try:
+            preds = self._model.predict(x_test)
+        except Exception:
+            base = aligned[mask][self.BASE_FEATURE_COLS]
+            preds = self._model.predict(base)
         y_test = y[mask].astype(int)
-        preds = self._model.predict(x_test)
         return float(np.mean(preds == y_test))
 
     def fit(self, x_train, y_train):
@@ -131,6 +134,10 @@ class CatBoostClassifierModel:
         self._model.fit(x_train, y_train)
 
     EVENT_FEATURE_COLS = ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]
+    BASE_FEATURE_COLS = [
+        "close", "rsi", "macd_hist", "sma_20", "sma_50",
+        "price_sma20", "price_sma50", "sma20_sma50", "rsi_norm", "macd_signal_binary",
+    ]
 
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
@@ -149,12 +156,23 @@ class CatBoostClassifierModel:
         result = result.dropna()
         return result
 
+    def _predict_latest(self, features: pd.DataFrame) -> np.ndarray:
+        latest = features.iloc[-1:]
+        try:
+            return self._model.predict_proba(latest)[0, 1]
+        except Exception:
+            base = features[self.BASE_FEATURE_COLS].iloc[-1:]
+            return self._model.predict_proba(base)[0, 1]
+
     def _train_on_the_fly(self, df: pd.DataFrame, features: pd.DataFrame, anomaly_mask: np.ndarray | None = None):
         try:
             lookahead = 5
             threshold = 0.03
             y, mask = build_labels(df["close"], lookahead=lookahead, threshold=threshold)
-            aligned = features.iloc[: len(y)].copy()
+            n = min(len(features), len(y))
+            aligned = features.iloc[:n].copy()
+            y = y[:n]
+            mask = mask[:n]
             if anomaly_mask is not None:
                 am = anomaly_mask[: len(y)]
                 mask = mask & (~am)

@@ -31,7 +31,7 @@ from src.collectors.cbr import CBRCollector
 from src.config import personal, settings
 from src.constants import CACHE_TTL, COOLDOWN_SECONDS, MAX_CACHE_SIZE
 from src.db.connection import get_session
-from src.db.models import GeoRiskScore, Instrument, Price, UserSetting
+from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, NewsInstrument, Price, UserSetting
 from src.db.models import Portfolio as PortModel
 from src.db.models import Signal as SignalModel
 from src.interfaces.telegram_helpers import (
@@ -55,6 +55,16 @@ logger = logging.getLogger(__name__)
 analysis_cache: OrderedDict[str, tuple[float, dict, str]] = OrderedDict()
 
 _user_cooldowns: dict[int, float] = {}
+
+DETAILED_KEYWORDS = {
+    "анализ", "подробн", "минимальн", "максимальн", "прогноз", "перспектив",
+    "сколько", "почему", "будет", "изменил", "вырос", "упал", "снизил",
+    "повысил", "динамик", "покажи", "расскажи", "объясни", "оцени",
+    "сравни", "каков", "какова", "каково", "какие", "какой", "какое",
+    "какая", "стоит", "что", "когда", "зачем", "цена", "стоимость",
+    "дайте", "нужн", "хоч", "подскаж", "посоветуй", "насколько",
+    "во сколько", "какую", "какую", "каком", "какому", "какими",
+}
 
 TICKER, QUANTITY, PRICE = range(3)
 
@@ -446,21 +456,60 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_message.reply_text("Нет данных. Запустите `finn update`.")
             return
 
-        text = "🏆 *Топ-10 возможностей:*\n\n"
-        for i, p in enumerate(picks[:10], 1):
-            score = p.get("score", 0)
-            name = p.get("name") or p["ticker"]
-            text += f"{i}. *{p['ticker']}* — score {score:.2f}\n"
-            text += f"   {p['category']} | {name}\n"
-            reason = p.get("reason", "")
-            if reason:
-                text += f"   \u2192 {reason}\n"
+        categories = OrderedDict()
+        for p in picks:
+            cat = p.get("category", "Прочее")
+            if cat not in categories:
+                categories[cat] = []
+            if len(categories[cat]) < 5:
+                categories[cat].append(p)
+
+        text = "🏆 *Топ по категориям:*\n\n"
+        for cat, items in categories.items():
+            text += f"▫️ *{cat}*\n"
+            for i, p in enumerate(items, 1):
+                score = p.get("score", 0)
+                text += f"  {i}. *{p['ticker']}* — score {score:.2f}\n"
+                reason = p.get("reason", "")
+                if reason:
+                    text += f"     → {reason[:80]}\n"
             text += "\n"
 
         await update.effective_message.reply_markdown(text, reply_markup=build_top_keyboard())
     except Exception:
         logger.warning("Top command error", exc_info=True)
         await update.effective_message.reply_text("\u274c Не удалось загрузить топ. Убедитесь, что запущен `finn update`.")
+
+
+async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    if not await _check_cooldown(update):
+        return
+    try:
+        db = get_session()
+        try:
+            rows = db.query(News).order_by(News.published_at.desc().nullslast()).limit(50).all()
+            if not rows:
+                await update.effective_message.reply_text("Нет новостей.")
+                return
+            text = "📰 *Последние 50 новостей:*\n\n"
+            for i, n in enumerate(rows, 1):
+                title = (n.title or "")[:120]
+                pub = n.published_at.strftime("%d.%m.%Y") if n.published_at else "?"
+                src = n.source_name or n.source_type or "?"
+                sent = f" ({n.sentiment_score:+.2f})" if n.sentiment_score is not None else ""
+                text += f"{i}. [{pub}] {title}{sent}\n"
+                if n.source_name:
+                    text += f"   — {src}\n"
+                text += "\n"
+            for chunk in _chunk_text(text, 4096):
+                await update.effective_message.reply_markdown(chunk)
+        finally:
+            db.close()
+    except Exception:
+        logger.warning("News command error", exc_info=True)
+        await update.effective_message.reply_text("❌ Не удалось загрузить новости.")
 
 
 async def export_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -504,6 +553,139 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _handle_text(update, update.effective_message.text)
 
 
+def _is_detailed_question(text: str, ticker: str) -> bool:
+    words = text.lower().split()
+    if len(words) <= 1:
+        return False
+    from src.interfaces.telegram_helpers import RUSSIAN_NAMES
+    ticker_variants = {ticker.lower()}
+    for russian_name, eng_ticker in RUSSIAN_NAMES.items():
+        if eng_ticker == ticker.upper():
+            ticker_variants.add(russian_name)
+    other_words = [w for w in words if w not in ticker_variants]
+    if not other_words:
+        return False
+    return any(kw in w for w in other_words for kw in DETAILED_KEYWORDS)
+
+
+def _build_stock_context(ticker: str) -> str:
+    db = get_session()
+    try:
+        inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+        if not inst:
+            return ""
+        prices_q = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
+        if len(prices_q) < 20:
+            return ""
+        closes = [p.close for p in prices_q if p.close]
+        if not closes:
+            return ""
+        last = closes[-1]
+        lines = [
+            f"Название: {inst.full_name or '—'}",
+            f"Сектор: {inst.sector or '—'}",
+            f"Тип: {inst.instrument_type or '—'}",
+            f"Лот: {inst.lot_size or 1} шт",
+            "",
+            f"Текущая цена: {last:.2f} ₽",
+        ]
+        def _add_price_stats(c, label, period_days=None):
+            if len(c) < 2:
+                return
+            mn = min(c)
+            mx = max(c)
+            avg = sum(c) / len(c)
+            chg = (c[-1] - c[0]) / c[0] * 100
+            lines.append(f"Цена {label}: мин {mn:.2f}, макс {mx:.2f}, средняя {avg:.2f}, изм {chg:+.2f}%")
+        _add_price_stats(closes, "за всё время")
+        if len(closes) >= 252:
+            _add_price_stats(closes[-252:], "за 1 год")
+        if len(closes) >= 126:
+            _add_price_stats(closes[-126:], "за 6 мес")
+        if len(closes) >= 63:
+            _add_price_stats(closes[-63:], "за 3 мес")
+        if len(closes) >= 21:
+            _add_price_stats(closes[-21:], "за 1 мес")
+        if len(closes) >= 7:
+            _add_price_stats(closes[-7:], "за 1 нед")
+        ind = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date.desc()).first()
+        if ind:
+            lines.append("")
+            if ind.rsi is not None:
+                rsi_label = "перегрет" if ind.rsi > 70 else ("перепродан" if ind.rsi < 30 else "нейтрален")
+                lines.append(f"RSI: {ind.rsi:.1f} ({rsi_label})")
+            if ind.sma_20 is not None:
+                lines.append(f"SMA 20: {ind.sma_20:.2f} (цена {'выше' if last > ind.sma_20 else 'ниже'})")
+            if ind.sma_50 is not None:
+                lines.append(f"SMA 50: {ind.sma_50:.2f} (цена {'выше' if last > ind.sma_50 else 'ниже'})")
+            if ind.sma_200 is not None:
+                lines.append(f"SMA 200: {ind.sma_200:.2f} (цена {'выше' if last > ind.sma_200 else 'ниже'})")
+            if ind.bb_upper is not None and ind.bb_lower is not None:
+                bb_pos = "у верхней" if last >= ind.bb_upper else ("у нижней" if last <= ind.bb_lower else "в середине")
+                lines.append(f"Боллинджер: {bb_pos} ({ind.bb_lower:.1f}–{ind.bb_upper:.1f})")
+            if ind.macd_hist is not None:
+                lines.append(f"MACD гист: {ind.macd_hist:.2f} ({'бычья' if ind.macd_hist > 0 else 'медвежья'})")
+            if ind.atr is not None:
+                lines.append(f"ATR: {ind.atr:.2f}")
+            if ind.volume_sma_20 is not None and prices_q and prices_q[-1].volume:
+                vol_ratio = prices_q[-1].volume / ind.volume_sma_20 if ind.volume_sma_20 > 0 else 1
+                vol_label = "выше" if vol_ratio > 1.2 else ("ниже" if vol_ratio < 0.8 else "около")
+                lines.append(f"Объём: {vol_label} среднего ({vol_ratio:.1f}x)")
+        divs = (
+            db.query(Dividend)
+            .filter_by(instrument_id=inst.id)
+            .order_by(Dividend.date.desc())
+            .limit(5)
+            .all()
+        )
+        if divs:
+            lines.append("")
+            lines.append("Дивиденды (последние):")
+            for d in divs:
+                yield_pct = d.amount / last * 100 if last > 0 else 0
+                lines.append(f"  {d.date}: {d.amount:.4f} ₽/акцию (дох-ть {yield_pct:.2f}%)")
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        recent_news = (
+            db.query(News)
+            .join(NewsInstrument, News.id == NewsInstrument.news_id)
+            .filter(NewsInstrument.instrument_id == inst.id, News.created_at >= cutoff)
+            .order_by(News.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        if recent_news:
+            scores = [n.sentiment_weighted or n.sentiment_score or 0 for n in recent_news]
+            avg = sum(scores) / len(scores)
+            pos = sum(1 for s in scores if s > 0)
+            neg = sum(1 for s in scores if s < 0)
+            lines.append("")
+            lines.append(f"Новости (30д): {len(recent_news)} шт, сентимент {avg:+.2f} (👍{pos} 👎{neg})")
+            for n in recent_news[:5]:
+                s = n.sentiment_weighted or n.sentiment_score or 0
+                icon = "🟢" if s > 0 else ("🔴" if s < 0 else "⚪")
+                lines.append(f"  {icon} {n.title[:100]}")
+        try:
+            from src.analysis.service import analysis_service
+            fused = analysis_service._analyze_single_sync(db, inst, ticker.upper(), with_ml=True)
+            if fused:
+                lines.append("")
+                lines.append(f"Сигнал: {fused['action']} (уверенность {fused['confidence']:.0%})")
+                ml = fused.get("components", {}).get("ml", {})
+                if ml and ml.get("change_pct") is not None:
+                    lines.append(f"ML прогноз: {ml['change_pct']:+.2f}% (цель {ml.get('target_price', 0):.0f} ₽)")
+                rr = fused.get("reasons", [])
+                if rr:
+                    lines.append("Обоснование:")
+                    for r in rr[:5]:
+                        lines.append(f"  • {r}")
+        except Exception:
+            pass
+        return "\n".join(lines)
+    finally:
+        db.close()
+
+
 async def _handle_text(update: Update, text: str):
     amount = _extract_allocation_amount(text)
     if amount is not None:
@@ -513,6 +695,10 @@ async def _handle_text(update: Update, text: str):
     tickers = _find_tickers(text)
     if tickers:
         ticker = tickers[0]
+        if _is_detailed_question(text, ticker):
+            ctx = _build_stock_context(ticker)
+            await _ask_llm_general(update, text, ticker_context=ctx)
+            return
         if len(tickers) > 1:
             await update.effective_message.reply_text(f"Нашёл несколько, анализирую {ticker}")
         await _reply_with_analysis(update, ticker)
@@ -725,15 +911,20 @@ async def _reply_with_allocation(update: Update, capital: float, exclude: set[st
         await msg.edit_text("\u274c Не удалось рассчитать рекомендации. Убедитесь, что запущен `finn update`.")
 
 
-async def _ask_llm_general(update: Update, text: str):
+async def _ask_llm_general(update: Update, text: str, ticker_context: str = ""):
     msg = await update.effective_message.reply_text("🤔 Думаю...")
     try:
         system_content = personal.get("llm_system_prompt") or (
             "Ты — финансовый ассистент. "
             "Отвечай кратко, по делу, на русском. Называй конкретные тикеры и цены."
         )
+        context_block = (
+            f"\n\nВот реальные данные об инструменте из БД:\n{ticker_context}\n\n"
+            f"Используй эти данные в ответе (цены, проценты, даты — всё фактическое)."
+        ) if ticker_context else ""
         prompt = (
             f"Пользователь задал вопрос: {text}\n\n"
+            f"{context_block}"
             "Ответь коротко и полезно — что купить, зачем. "
             "Если вопрос про дивиденды — назови конкретные российские акции "
             "с примерными ценами и дивидендной доходностью. "
@@ -1456,6 +1647,7 @@ async def run_bot():
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("sectors", sectors))
     app.add_handler(CommandHandler("top", top))
+    app.add_handler(CommandHandler("news", news))
     app.add_handler(CommandHandler("export", export_portfolio))
     app.add_handler(CommandHandler("correlation", correlation))
     app.add_handler(CommandHandler("whatif", whatif))

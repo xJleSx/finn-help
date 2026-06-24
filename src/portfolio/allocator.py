@@ -269,7 +269,7 @@ class PortfolioAllocator:
                 reason_parts.append("высокая концентрация")
 
             if c["ticker"] in existing_tickers:
-                score += 1.0
+                score += 0.5
                 reason_parts.append("уже в портфеле")
 
             penalty = penalty_fn(c["ticker"], existing_tickers_list)
@@ -299,7 +299,7 @@ class PortfolioAllocator:
                 vs = volume_fn(c)
                 score += vs
                 if c["ticker"] in SAFE_ETFS:
-                    score += 2.0
+                    score += 1.0
                     reason_parts.append("надёжный БПИФ")
 
             if category == "bond":
@@ -445,6 +445,29 @@ class PortfolioAllocator:
                 monthly += ann / 12
         return monthly
 
+    def _downtrend_excluded(self, ticker: str, db) -> bool:
+        try:
+            inst = db.query(Instrument).filter_by(ticker=ticker).first()
+            if not inst:
+                return False
+            prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).limit(22).all()
+            if not prices or len(prices) < 5:
+                return False
+            closes = [p.close for p in prices if p.close]
+            if len(closes) < 5:
+                return False
+            closes21 = closes[:21]
+            change_21d = (closes21[0] / closes21[-1] - 1) * 100 if len(closes21) >= 5 else 0
+            if change_21d < -8.0:
+                return True
+            closes7 = closes[:7]
+            change_7d = (closes7[0] / closes7[-1] - 1) * 100 if len(closes7) >= 5 else 0
+            if change_7d < -5.0:
+                return True
+            return False
+        except Exception:
+            return False
+
     def recommend(self, capital: float = 0, db=None, exclude: set | None = None) -> list[dict]:
         self._load_profile_from_db()
         should_close = db is None
@@ -458,6 +481,8 @@ class PortfolioAllocator:
                 candidates = self._score_candidates(instruments, cat, capital or 100_000, existing, db)
                 for c in candidates:
                     if exclude and c["ticker"] in exclude:
+                        continue
+                    if self._downtrend_excluded(c["ticker"], db):
                         continue
                     last_price = c.get("last_price")
                     if last_price and capital > 0 and last_price > capital * 0.8:

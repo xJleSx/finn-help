@@ -316,6 +316,10 @@ class SignalFusionEngine:
             action = "HOLD"
             reasons.append("Технический анализ сигнализирует о покупке — SELL отклонён")
 
+        if action == "BUY" and trend_adjustment < -0.02 and ml_signal < 0.1:
+            action = "HOLD"
+            reasons.append("Нисходящий тренд: цена продолжает падать — BUY отклонён")
+
         reasons.extend(tech_reasons)
 
         if ml_prediction and ml_change is not None:
