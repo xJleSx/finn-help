@@ -4,8 +4,6 @@ from typing import Optional
 
 import pandas as pd
 
-from src.db.models import FundamentalMetric
-
 logger = logging.getLogger(__name__)
 
 MCAP_THRESHOLD_LOW = 1e9  # 1 млрд RUB — минимальная капитализация для blue chip
@@ -115,7 +113,7 @@ class FundamentalAnalyzer:
             if pe is not None:
                 signals.append(f"P/E: {pe:.1f}")
                 if pe < 0:
-                    anomalies.append(f"отрицательная прибыль (P/E < 0)")
+                    anomalies.append("отрицательная прибыль (P/E < 0)")
                     risk_score += 0.3
                 elif pe > 30:
                     anomalies.append(f"высокий P/E ({pe:.1f})")

@@ -16,7 +16,7 @@ from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.config import personal
 from src.db.connection import get_session, init_db
-from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, Portfolio, Price
+from src.db.models import Dividend, Instrument, Portfolio, Price
 from src.llm.router import llm
 from src.social.cli import social_app
 

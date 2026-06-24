@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date, timedelta
 
@@ -505,13 +506,9 @@ class PortfolioAllocator:
 
     async def allocate_async(self, capital: float, db: AsyncSession | None = None) -> dict:
         if db is not None:
-            with session_scope() as sync_db:
-                existing = self._get_current_portfolio(sync_db)
-                instruments_data = self._load_instruments(sync_db)
-                return self._allocate_from_data(capital, existing, instruments_data, sync_db)
-
-        with session_scope() as sync_db:
-            return self.allocate(capital, db=sync_db)
+            logger.warning("allocate_async: AsyncSession ignored, using sync session via run_in_executor")
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.allocate, capital, None)
 
 
 allocator = PortfolioAllocator()

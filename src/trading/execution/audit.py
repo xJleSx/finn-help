@@ -5,9 +5,13 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.db.connection import get_session
 from src.db.models import Order as OrderModel
+
+if TYPE_CHECKING:
+    from src.trading.execution.engine import OrderRecord
 from src.db.models import TradeLog
 
 logger = logging.getLogger(__name__)
@@ -37,7 +41,7 @@ def audit_log_order(entry: dict[str, object]) -> None:
         logger.error("Failed to write audit log: %s", e)
 
 
-def save_order(order: "OrderRecord") -> int:  # type: ignore[name-defined]
+def save_order(order: "OrderRecord") -> int:
     db = get_session()
     try:
 

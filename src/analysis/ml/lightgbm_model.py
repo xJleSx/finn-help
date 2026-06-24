@@ -1,10 +1,10 @@
 import logging
+import warnings
 from typing import Optional
 
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
-import warnings
 
 from src.analysis.ml.walk_forward import (
     baseline_accuracy,

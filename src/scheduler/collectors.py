@@ -1,6 +1,5 @@
 import logging
-from datetime import date, datetime, timedelta
-from typing import Optional
+from datetime import date, timedelta
 
 import pandas as pd
 from sqlalchemy.orm import Session

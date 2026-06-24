@@ -93,7 +93,7 @@ def walk_forward_validate(
             tp = ((preds == 1) & (y_test == 1)).sum()
             fp = ((preds == 1) & (y_test == 0)).sum()
             fn = ((preds == 0) & (y_test == 1)).sum()
-            tn = ((preds == 0) & (y_test == 0)).sum()
+
 
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
             recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0

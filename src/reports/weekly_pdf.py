@@ -4,7 +4,6 @@ from datetime import date, timedelta
 import numpy as np
 
 from src.analysis.personal_backtest import run_personal_backtest
-from src.config import personal
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +16,6 @@ def generate_weekly_report() -> bytes | None:
     import matplotlib.pyplot as plt
 
     try:
-        bt = personal.get("backtest", {})
         end = date.today()
         start = end - timedelta(days=120)
 
