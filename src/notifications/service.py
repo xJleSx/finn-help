@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date, timedelta
 from typing import Optional
@@ -338,8 +339,6 @@ class NotificationService:
                 current = price.close
                 change_pct = (current - p.avg_price) / p.avg_price
                 if change_pct > 0.20:
-                    from src.notifications import PriceTargetAlert
-
                     alerts.append(
                         PriceTargetAlert(
                             ticker=inst.ticker,
@@ -350,8 +349,6 @@ class NotificationService:
                         )
                     )
                 elif change_pct < -0.15:
-                    from src.notifications import PriceTargetAlert
-
                     alerts.append(
                         PriceTargetAlert(
                             ticker=inst.ticker,
@@ -459,5 +456,12 @@ class NotificationService:
                 )
         return alerts
 
-    def check_rebalance_async(self, db) -> list[RebalanceAlert]:
-        return self.check_rebalance(db)
+    async def check_rebalance_async(self, db: object | None = None) -> list[RebalanceAlert]:
+        def _run():
+            session = get_session()
+            try:
+                return self.check_rebalance(session)
+            finally:
+                session.close()
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _run)

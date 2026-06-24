@@ -17,13 +17,11 @@ router = APIRouter(tags=["portfolio"])
 @router.get("/api/portfolio")
 async def get_portfolio(
     db: AsyncSession = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     from src.db.models import Portfolio
 
-    q = select(Portfolio)
-    if user:
-        q = q.where(Portfolio.user_id == user.id)
+    q = select(Portfolio).where(Portfolio.user_id == user.id)
     result = await db.execute(q)
     positions = result.scalars().all()
 

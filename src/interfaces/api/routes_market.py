@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from src.db.connection import close_session, get_session
+from src.db.connection import get_session
 from src.db.models import GeoRiskScore, Indicator, Instrument, News, Price, Signal
 from src.interfaces.api.auth import get_db
 
@@ -128,7 +128,7 @@ async def get_divergence_alerts(ticker: str, db: AsyncSession = Depends(get_db))
 async def get_rebalance_alerts(db: AsyncSession = Depends(get_db)):
     from src.notifications.service import notification_service
 
-    alerts = notification_service.check_rebalance_async(db)
+    alerts = await notification_service.check_rebalance_async()
     return [
         {
             "ticker": a.ticker,
@@ -145,24 +145,26 @@ async def get_rebalance_alerts(db: AsyncSession = Depends(get_db)):
 async def event_stream():
     async def generate():
         while True:
-            db = get_session()
-            try:
-                inst_count = db.query(Instrument).count()
-                signal_count = db.query(Signal).count()
-                latest_signal = db.query(Signal).order_by(Signal.date.desc()).first()
-                yield {
-                    "data": json.dumps({
+            def _query_stats():
+                db = get_session()
+                try:
+                    inst_count = db.query(Instrument).count()
+                    signal_count = db.query(Signal).count()
+                    latest_signal = db.query(Signal).order_by(Signal.date.desc()).first()
+                    return {
                         "instruments": inst_count,
                         "signals": signal_count,
                         "last_update": latest_signal.date.isoformat() if latest_signal else None,
                         "timestamp": date.today().isoformat(),
-                    })
-                }
+                    }
+                finally:
+                    db.close()
+            loop = asyncio.get_running_loop()
+            try:
+                data = await loop.run_in_executor(None, _query_stats)
+                yield {"data": json.dumps(data)}
             except Exception:
                 logger.exception("SSE event error")
-            finally:
-                db.close()
-                close_session()
             await asyncio.sleep(60)
 
     return EventSourceResponse(generate())

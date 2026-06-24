@@ -25,6 +25,8 @@ async_engine = create_async_engine(
     echo=False,
     pool_size=5 if "postgresql" in _ASYNC_DB_URL else 1,
     max_overflow=10 if "postgresql" in _ASYNC_DB_URL else 0,
+    pool_pre_ping=True,
+    pool_recycle=3600 if "postgresql" in _ASYNC_DB_URL else -1,
     connect_args={"check_same_thread": False} if "sqlite" in _ASYNC_DB_URL else {},
 )
 
@@ -54,6 +56,7 @@ DB_DIR.mkdir(parents=True, exist_ok=True)
 sync_engine = create_engine(
     settings.database_url,
     echo=False,
+    pool_pre_ping=True,
     connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
 )
 

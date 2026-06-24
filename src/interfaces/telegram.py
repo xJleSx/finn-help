@@ -8,6 +8,7 @@ from typing import Optional
 import httpx
 from groq import AsyncGroq
 from telegram import Update
+from telegram.error import NetworkError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -69,20 +70,24 @@ DETAILED_KEYWORDS = {
 TICKER, QUANTITY, PRICE = range(3)
 
 
-ALLOWED_IDS: set[int] = set()
-_raw = settings.telegram_allowed_ids
-if _raw:
-    for part in _raw.split(","):
+def _load_allowed_ids() -> set[int]:
+    raw = settings.telegram_allowed_ids
+    if not raw:
+        return set()
+    ids: set[int] = set()
+    for part in raw.split(","):
         part = part.strip()
         if part.isdigit():
-            ALLOWED_IDS.add(int(part))
+            ids.add(int(part))
+    return ids
 
 
 async def _check_access(update: Update) -> bool:
-    if not ALLOWED_IDS:
+    allowed = _load_allowed_ids()
+    if not allowed:
         return True
     uid = update.effective_user.id if update.effective_user else 0
-    if uid in ALLOWED_IDS:
+    if uid in allowed:
         return True
     if update.effective_message:
         await update.effective_message.reply_text("⛔ Доступ запрещён. Ваш Telegram ID не в списке разрешённых.")
@@ -92,6 +97,12 @@ async def _check_access(update: Update) -> bool:
 async def _check_cooldown(update: Update) -> bool:
     uid = update.effective_user.id if update.effective_user else 0
     now = time.time()
+    # periodic cleanup: remove entries older than 1 hour
+    if len(_user_cooldowns) > 1000:
+        cutoff = now - 3600
+        stale = [k for k, v in _user_cooldowns.items() if v < cutoff]
+        for k in stale:
+            del _user_cooldowns[k]
     last = _user_cooldowns.get(uid, 0)
     if now - last < COOLDOWN_SECONDS:
         if update.effective_message:
@@ -118,8 +129,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif parts[0] == "add" and len(parts) > 1:
         ticker = parts[1]
-        context.args = [ticker, "1"]
-        await add_position(update, context)
+        await _save_position(update, ticker, 1.0)
 
     elif parts[0] == "history" and len(parts) > 1:
         ticker = parts[1]
@@ -1666,7 +1676,7 @@ async def run_bot():
 
     _scheduler_task = await _start_scheduler()
 
-    POLLING_RETRY_DELAY = 10
+    polling_retry_delay = 10
     poll_attempt = 0
     while True:
         try:
@@ -1674,9 +1684,9 @@ async def run_bot():
             poll_attempt = 0
             logger.info("Bot started polling with background scheduler")
             break
-        except telegram.error.NetworkError as e:
+        except NetworkError as e:
             poll_attempt += 1
-            delay = min(POLLING_RETRY_DELAY * (2 ** (poll_attempt - 1)), 300)
+            delay = min(polling_retry_delay * (2 ** (poll_attempt - 1)), 300)
             logger.warning("Telegram polling connection failed (attempt %d): %s — retrying in %ds", poll_attempt, e, delay)
             await asyncio.sleep(delay)
 

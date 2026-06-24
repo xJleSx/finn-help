@@ -125,7 +125,7 @@ class Signal(Base):
     id = Column(Integer, primary_key=True)
     instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
     date = Column(DateTime, default=func.now(), nullable=False)
-    action = Column(String(10), nullable=False)
+    action = Column(String(20), nullable=False)
     confidence = Column(Float)
     technical_json = Column(JSON)
     fundamental_json = Column(JSON)
@@ -316,7 +316,7 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True)
-    ticker = Column(String(20), nullable=False, index=True)
+    ticker = Column(String(20), nullable=False)
     direction = Column(String(10), nullable=False)  # BUY / SELL
     quantity = Column(Integer, nullable=False)
     price = Column(Float, nullable=True)
@@ -345,7 +345,7 @@ class TradeLog(Base):
 
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)
-    ticker = Column(String(20), nullable=False, index=True)
+    ticker = Column(String(20), nullable=False)
     direction = Column(String(10), nullable=False)
     quantity = Column(Integer, nullable=False)
     price = Column(Float, nullable=False)

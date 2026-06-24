@@ -249,7 +249,6 @@ def run_personal_backtest(
         ]
 
         port_returns = _returns(equity)
-        bench_returns = _returns(bench_equity)
 
         total_return = (equity[-1] / equity[0]) - 1
         bench_total_return = (bench_equity[-1] / bench_equity[0]) - 1
@@ -272,10 +271,8 @@ def run_personal_backtest(
                 break
             # train on first half, test on second half
             if fold == 0:
-                train_slice = equity[ts:te]
                 test_slice = equity[te:]
             else:
-                train_slice = equity[:te]
                 test_slice = equity[te:]
 
             wf_port_ret = (test_slice[-1] / test_slice[0]) - 1 if len(test_slice) > 1 else 0
