@@ -44,7 +44,7 @@ class ProphetPredictor:
         if self._model is None:
             try:
                 self.load()
-            except (ValueError, FileNotFoundError):
+            except (ValueError, FileNotFoundError, ModuleNotFoundError, ImportError):
                 logger.warning("Prophet model for %s not found, auto-training (run train() first for performance)", self._ticker or "default")
 
         if self._model is not None:
@@ -61,7 +61,42 @@ class ProphetPredictor:
         return self._predict_with_model(df, days_ahead)
 
     def _fit(self, df: pd.DataFrame):
-        from prophet import Prophet
+        try:
+            from prophet import Prophet
+        except ImportError:
+            logger.warning("prophet not installed, using linear trend fallback")
+            import numpy as np
+            trend_df = df[["date", "close"]].copy()
+            trend_df.columns = ["ds", "y"]
+            trend_df["ds"] = pd.to_datetime(trend_df["ds"])
+            trend_df["y"] = trend_df["y"].clip(lower=0.01)
+            class LinearFallback:
+                def __init__(self, trend_df):
+                    self.trend_df = trend_df
+                    self.changepoints = []
+                    self.params = {"delta": np.array([])}
+                    x = np.arange(len(trend_df))
+                    y = np.log(trend_df["y"].values)
+                    self._coeffs = np.polyfit(x, y, 1)
+                def make_future_dataframe(self, periods):
+                    import pandas as pd
+                    last = self.trend_df["ds"].max()
+                    return pd.DataFrame({"ds": pd.date_range(last + pd.Timedelta(days=1), periods=periods)})
+                def predict(self, future_df):
+                    import pandas as pd
+                    all_dates = pd.concat([self.trend_df["ds"], future_df["ds"]], ignore_index=True)
+                    x = np.arange(len(all_dates))
+                    log_pred = self._coeffs[0] * x + self._coeffs[1]
+                    pred = np.exp(log_pred)
+                    result = pd.DataFrame({
+                        "ds": all_dates,
+                        "trend": pred,
+                        "yhat": pred,
+                        "yhat_lower": pred * 0.9,
+                        "yhat_upper": pred * 1.1,
+                    })
+                    return result
+            return LinearFallback(trend_df)
 
         trend_df = df[["date", "close"]].copy()
         trend_df.columns = ["ds", "y"]

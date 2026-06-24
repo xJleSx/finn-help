@@ -221,6 +221,7 @@ class EnsemblePredictor:
     def _stacking_predict(self, df: pd.DataFrame, base_preds: list[dict]) -> float | None:
         try:
             from sklearn.linear_model import LogisticRegression
+            from sklearn.preprocessing import StandardScaler
 
             needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
             if not all(c in df.columns for c in needed):
@@ -260,15 +261,19 @@ class EnsemblePredictor:
             if len(x_train) < 30 or len(x_test) < 10:
                 return None
 
-            meta_model = LogisticRegression(max_iter=500, random_state=42, C=0.5)
-            meta_model.fit(x_train, y_train)
+            scaler = StandardScaler()
+            x_train_scaled = scaler.fit_transform(x_train)
+            x_test_scaled = scaler.transform(x_test)
 
-            test_acc = float(np.mean(meta_model.predict(x_test) == y_test))
+            meta_model = LogisticRegression(max_iter=2000, random_state=42, C=0.5)
+            meta_model.fit(x_train_scaled, y_train)
+
+            test_acc = float(np.mean(meta_model.predict(x_test_scaled) == y_test))
             if test_acc < 0.52:
                 logger.debug("Stacking meta-learner test acc %.3f < 0.52, falling back", test_acc)
                 return None
 
-            latest = features.iloc[-1:].values
+            latest = scaler.transform(features.iloc[-1:].values)
             prob = float(meta_model.predict_proba(latest)[0, 1])
             return prob
         except Exception as e:

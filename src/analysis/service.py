@@ -91,15 +91,17 @@ class AnalysisService:
 
     def _build_event_features(self, events: list[MarketEvent], dates: pd.Series) -> pd.DataFrame:
         if not events:
-            return pd.DataFrame({
-                "date": dates, "event_count_30d": 0,
+            result = pd.DataFrame({
+                "date": pd.to_datetime(dates), "event_count_30d": 0,
                 "event_severity_30d": 0.0, "sanctions_30d": 0,
                 "days_since_major_event": 999, "is_anomaly": False,
             })
+            result["date"] = result["date"].astype(object)
+            return result
 
         ev_df = pd.DataFrame([
             {
-                "date": e.date,
+                "date": pd.Timestamp(e.date),
                 "impact": abs(e.market_impact_pct or 0),
                 "is_sanctions": e.event_type == "sanctions_timeline",
             }
@@ -115,7 +117,7 @@ class AnalysisService:
             sanctions = int(window["is_sanctions"].sum()) if count > 0 else 0
             major = ev_df[ev_df["impact"] > 2.0]
             if not major.empty and major["date"].max() < d:
-                days_since = (d - pd.Timestamp(major["date"].max())).days
+                days_since = (d - major["date"].max()).days
             else:
                 days_since = 999
             result_rows.append({
@@ -125,7 +127,10 @@ class AnalysisService:
                 "days_since_major_event": days_since,
                 "is_anomaly": days_since < 3,
             })
-        return pd.DataFrame(result_rows)
+        result = pd.DataFrame(result_rows)
+        result["date"] = pd.to_datetime(result["date"])
+        result["date"] = result["date"].astype(object)
+        return result
 
     def _compute_ml(
         self, df: pd.DataFrame, ind_df: pd.DataFrame, ticker: str = "",

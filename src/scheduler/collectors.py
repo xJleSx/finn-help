@@ -296,7 +296,7 @@ async def collect_fundamental(db: Session):
                 .order_by(Price.date.desc())
                 .first()
             )
-            last_price = float(last_price_row[0]) if last_price_row else None
+            last_price = float(last_price_row[0]) if last_price_row and last_price_row[0] is not None else None
 
             try:
                 data = await collector.fetch(inst.ticker, last_price=last_price)
