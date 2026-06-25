@@ -22,8 +22,7 @@ BOARD_MAP = {
 
 BOND_BOARDS = ["TQCB", "TQBD", "TQOB"]
 
-# Доски, где MOEX возвращает цену в % от номинала
-BOND_PCT_BOARDS = {"TQBD", "TQOB"}
+
 
 
 class MOEXCollector:

@@ -5,7 +5,7 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from src.collectors.cbr import CBRCollector
-from src.collectors.moex import BOND_PCT_BOARDS, MOEXCollector
+from src.collectors.moex import MOEXCollector
 from src.collectors.news import NewsCollector
 from src.constants import (
     DEFAULT_HISTORY_DAYS,
@@ -38,19 +38,10 @@ def _first(v1, v2):
 
 async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date: str, moex: MOEXCollector) -> int:
     board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
-
-    if board == "bond":
-        history, board_id = await moex.get_bond_history_with_board(inst.ticker, from_date, (date.today()).isoformat())
-        if not history:
-            logger.debug("No price history for bond %s (from=%s)", inst.ticker, from_date)
-            return 0
-        need_normalize = board_id in BOND_PCT_BOARDS if board_id else False
-    else:
-        history = await moex.get_history(inst.ticker, from_date=from_date, board=board)
-        if not history:
-            logger.debug("No price history for %s (board=%s, from=%s)", inst.ticker, board, from_date)
-            return 0
-        need_normalize = False
+    history = await moex.get_history(inst.ticker, from_date=from_date, board=board)
+    if not history:
+        logger.debug("No price history for %s (board=%s, from=%s)", inst.ticker, board, from_date)
+        return 0
 
     nominal: float | None = None
     if board == "bond":
@@ -82,7 +73,7 @@ async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date:
         _h = _first(row.get("HIGH"), row.get("high"))
         _l = _first(row.get("LOW"), row.get("low"))
         _c = _first(row.get("CLOSE"), row.get("close"))
-        if need_normalize:
+        if nominal:
             _o = _bond_normalize(_o)
             _h = _bond_normalize(_h)
             _l = _bond_normalize(_l)
