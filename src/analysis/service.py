@@ -13,6 +13,7 @@ from src.analysis.volatility import VolatilityRegimeDetector
 from src.constants import NEWS_SENTIMENT_DAYS
 from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, MarketEvent, News, Price, Signal
 from src.llm.router import llm
+from src.analysis.ml.price_targets import build_trade_plan, to_dict as trade_plan_to_dict
 from src.signal.engine import SignalFusionEngine, compute_risk_metrics
 
 logger = logging.getLogger(__name__)
@@ -23,38 +24,24 @@ class AnalysisService:
         self.analyzer = TechnicalAnalyzer()
         self.fundamental = FundamentalAnalyzer()
         self.fusion = SignalFusionEngine()
-        self._prophet = None
-        self._ensemble = None
+        self._prophet_cache: dict = {}
+        self._ensemble_cache: dict = {}
         self.volatility = VolatilityRegimeDetector()
         self.mtf = MultiTimeframeAnalyzer()
 
     def _get_prophet(self, ticker: str = ""):
-        key = f"prophet_{ticker}"
-        if not hasattr(self, "_prophet_cache"):
-            self._prophet_cache = {}
-        if key not in self._prophet_cache:
+        if ticker not in self._prophet_cache:
             from src.analysis.ml.prophet_model import ProphetPredictor
 
-            self._prophet_cache[key] = ProphetPredictor(ticker=ticker)
-        return self._prophet_cache[key]
-
-    @property
-    def prophet(self):
-        return self._get_prophet()
+            self._prophet_cache[ticker] = ProphetPredictor(ticker=ticker)
+        return self._prophet_cache[ticker]
 
     def _get_ensemble(self, ticker: str = ""):
-        key = f"ensemble_{ticker}"
-        if not hasattr(self, "_ensemble_cache"):
-            self._ensemble_cache = {}
-        if key not in self._ensemble_cache:
+        if ticker not in self._ensemble_cache:
             from src.analysis.ml.ensemble import EnsemblePredictor
 
-            self._ensemble_cache[key] = EnsemblePredictor(ticker=ticker)
-        return self._ensemble_cache[key]
-
-    @property
-    def ensemble(self):
-        return self._get_ensemble()
+            self._ensemble_cache[ticker] = EnsemblePredictor(ticker=ticker)
+        return self._ensemble_cache[ticker]
 
     def _price_df(self, prices: list[Price]) -> pd.DataFrame:
         return pd.DataFrame(
@@ -399,47 +386,87 @@ class AnalysisService:
                 }
         return result
 
-    async def analyze_single(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> dict:
-        price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
-        prices = price_result.scalars().all()
-        if len(prices) < 50:
-            raise ValueError(f"Not enough price data for {ticker}")
+    def _load_sentiment_sync(self, db, ticker: str) -> dict:
+        from datetime import datetime, timedelta, timezone
 
-        df = self._price_df(prices)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=NEWS_SENTIMENT_DAYS)
+        recent = db.query(News).filter(News.created_at >= cutoff).all()
+        news_sentiment = {"score": 0.0, "divergence": 0.0, "source": "none", "count": 0}
+        if recent:
+            scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
+            mean_s = sum(scores) / len(scores)
+            variance = sum((s - mean_s) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
+            news_sentiment = {
+                "score": round(mean_s, 3),
+                "divergence": round(min(variance * 2, 1.0), 3),
+                "source": "rss",
+                "count": len(scores),
+            }
 
-        ind_result = await db.execute(
-            select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date)
-        )
-        ind_rows = ind_result.scalars().all()
-        if len(ind_rows) < 2:
-            raise ValueError(f"Not enough indicator data for {ticker}")
-        ind_df = self._indicator_df(ind_rows)
-        ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
+        try:
+            from src.social.sentiment.aggregator import aggregator
 
+            social_entry = aggregator.get_ticker_sentiment(ticker)
+        except Exception:
+            social_entry = {"score": 0.0, "divergence": 0.0, "source": "social", "count": 0}
+
+        if social_entry["count"] > 0 and news_sentiment["count"] > 0:
+            combined = news_sentiment["score"] * 0.4 + social_entry["score"] * 0.6
+            return {
+                "score": round(combined, 3),
+                "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),
+                "source": "rss+social",
+                "count": news_sentiment["count"] + social_entry["count"],
+            }
+        elif social_entry["count"] > 0:
+            return {
+                "score": round(social_entry["score"], 3),
+                "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),
+                "source": "social",
+                "count": social_entry["count"],
+            }
+        return news_sentiment
+
+    def _build_trade_plan(self, df: pd.DataFrame, ind_df: pd.DataFrame, tech_signal: dict) -> dict | None:
+        if df.empty or len(df) < 20 or ind_df.empty:
+            return None
+        latest = df.iloc[-1]
+        ind_latest = ind_df.iloc[-1]
+        close = float(latest["close"])
+        sma20 = float(ind_latest.get("sma_20") or close)
+        atr = float(ind_latest.get("atr") or close * 0.02)
+        if atr <= 0 or close <= 0:
+            return None
+        side = "buy" if tech_signal.get("action") == "BUY" else "sell" if tech_signal.get("action") == "SELL" else "buy"
+        plan = build_trade_plan(close, sma20, atr, df, side=side)
+        return trade_plan_to_dict(plan)
+
+    def _analyze_core(
+        self,
+        df: pd.DataFrame,
+        ind_df: pd.DataFrame,
+        inst: Instrument,
+        ticker: str,
+        fund_metrics: dict | None,
+        divs: list,
+        geo_score: float,
+        macro_context: dict,
+        sentiment: dict,
+        event_context: dict,
+        market_events: list[MarketEvent],
+        trends: dict,
+        with_ml: bool = True,
+    ) -> dict:
         tech_signal = self.analyzer.generate_signal(ind_df)
-
-        div_result = await db.execute(select(Dividend).where(Dividend.instrument_id == inst.id))
-        divs = div_result.scalars().all()
         div_df = self._dividend_df(divs)
-        fund_metrics = await self._load_fundamental_metrics(db, inst.id)
         fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics)
-
-        all_events = await self._load_all_events(db)
-        ml = self._compute_ml(df, ind_df, ticker=ticker, events=all_events) if with_ml else None
-        geo = await self._load_geo(db)
-        macro_context = await self._load_macro(db)
-        sentiment = await self._load_sentiment(db)
-        event_context = await self._load_market_events(db)
-
+        ml = self._compute_ml(df, ind_df, ticker=ticker, events=market_events) if with_ml else None
+        geo = {"score": geo_score}
         volatility_regime = self.volatility.detect(df, ind_df)
-
         risk_metrics = compute_risk_metrics(df["close"].tolist())
-
         mtf_data = self.mtf.compute_all(df)
         mtf_concordance = self.mtf.concordance(mtf_data) if mtf_data else None
-
-        trends = await self._load_trends(db, inst.id)
-
+        trade_plan = self._build_trade_plan(df, ind_df, tech_signal) if not ind_df.empty else None
         fused = self.fusion.fuse(
             ticker=ticker.upper(),
             technical=tech_signal,
@@ -452,10 +479,46 @@ class AnalysisService:
             sentiment=sentiment,
             mtf=mtf_concordance,
             event_context=event_context,
+            trade_plan=trade_plan,
         )
         fused["trends"] = trends
         fused["recent_events"] = event_context.get("recent_for_llm", [])
         return fused
+
+    async def analyze_single(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> dict:
+        price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
+        prices = price_result.scalars().all()
+        if len(prices) < 50:
+            raise ValueError(f"Not enough price data for {ticker}")
+        df = self._price_df(prices)
+
+        ind_result = await db.execute(
+            select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date)
+        )
+        ind_rows = ind_result.scalars().all()
+        if len(ind_rows) < 2:
+            raise ValueError(f"Not enough indicator data for {ticker}")
+        ind_df = self._indicator_df(ind_rows)
+        ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
+
+        div_result = await db.execute(select(Dividend).where(Dividend.instrument_id == inst.id))
+        divs = div_result.scalars().all()
+
+        fund_metrics = await self._load_fundamental_metrics(db, inst.id)
+        geo_score = (await self._load_geo(db)).get("score", 0.0)
+        macro_context = await self._load_macro(db)
+        sentiment = await self._load_sentiment(db)
+        event_context = await self._load_market_events(db)
+        market_events = await self._load_all_events(db)
+        trends = await self._load_trends(db, inst.id)
+
+        return self._analyze_core(
+            df=df, ind_df=ind_df, inst=inst, ticker=ticker,
+            fund_metrics=fund_metrics, divs=divs, geo_score=geo_score,
+            macro_context=macro_context, sentiment=sentiment,
+            event_context=event_context, market_events=market_events,
+            trends=trends, with_ml=with_ml,
+        )
 
     async def analyze_all(
         self, db: AsyncSession, updated_ids: set[int] | None = None, with_ml: bool = True
@@ -532,89 +595,29 @@ class AnalysisService:
         ind_df = self._indicator_df(ind_rows)
         ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
 
-        tech_signal = self.analyzer.generate_signal(ind_df)
-
         divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
-        div_df = self._dividend_df(divs)
         fund_metrics = self._load_fundamental_metrics_sync(db, inst.id)
-        fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics)
 
-        all_events = self._load_all_events_sync(db)
-        ml = self._compute_ml(df, ind_df, ticker=ticker, events=all_events) if with_ml else None
-
-        geo_score = self._compute_geo_from_events_sync(db)
-        if geo_score is None:
+        geo_val = self._compute_geo_from_events_sync(db)
+        if geo_val is None:
             geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
-            geo_score = geo_row.score if geo_row else 0.0
-        geo = {"score": geo_score}
+            geo_val = geo_row.score if geo_row else 0.0
 
         from src.collectors.macro import MacroCollector
 
         macro_context = MacroCollector.latest_values(db)
-
-        from datetime import datetime, timedelta, timezone
-
-        cutoff = datetime.now(timezone.utc) - timedelta(days=NEWS_SENTIMENT_DAYS)
-        recent = db.query(News).filter(News.created_at >= cutoff).all()
-        news_sentiment = {"score": 0.0, "divergence": 0.0, "source": "none", "count": 0}
-        if recent:
-            scores = [float(n.sentiment_weighted or n.sentiment_score or 0) for n in recent]
-            mean_s = sum(scores) / len(scores)
-            variance = sum((s - mean_s) ** 2 for s in scores) / len(scores) if len(scores) > 1 else 0.0
-            news_sentiment = {
-                "score": round(mean_s, 3),
-                "divergence": round(min(variance * 2, 1.0), 3),
-                "source": "rss",
-                "count": len(scores),
-            }
-
-        try:
-            from src.social.sentiment.aggregator import aggregator
-
-            social_entry = aggregator.get_ticker_sentiment(ticker)
-        except Exception:
-            social_entry = {"score": 0.0, "divergence": 0.0, "source": "social", "count": 0}
-
-        if social_entry["count"] > 0 and news_sentiment["count"] > 0:
-            combined = news_sentiment["score"] * 0.4 + social_entry["score"] * 0.6
-            sentiment = {
-                "score": round(combined, 3),
-                "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),
-                "source": "rss+social",
-                "count": news_sentiment["count"] + social_entry["count"],
-            }
-        elif social_entry["count"] > 0:
-            sentiment = {
-                "score": round(social_entry["score"], 3),
-                "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),
-                "source": "social",
-                "count": social_entry["count"],
-            }
-        else:
-            sentiment = news_sentiment
-
-        volatility_regime = self.volatility.detect(df, ind_df)
-        risk_metrics = compute_risk_metrics(df["close"].tolist())
-        mtf_data = self.mtf.compute_all(df)
-        mtf_concordance = self.mtf.concordance(mtf_data) if mtf_data else None
-
+        sentiment = self._load_sentiment_sync(db, ticker)
+        market_events = self._load_all_events_sync(db)
         event_context = self._load_market_events_sync(db)
-        fused = self.fusion.fuse(
-            ticker=ticker.upper(),
-            technical=tech_signal,
-            fundamental=fund,
-            geo=geo,
-            ml_prediction=ml,
-            volatility_regime=volatility_regime,
-            risk_metrics=risk_metrics,
-            macro_context=macro_context,
-            sentiment=sentiment,
-            mtf=mtf_concordance,
-            event_context=event_context,
+        trends = self._load_trends_sync(db, inst.id)
+
+        return self._analyze_core(
+            df=df, ind_df=ind_df, inst=inst, ticker=ticker,
+            fund_metrics=fund_metrics, divs=divs, geo_score=geo_val,
+            macro_context=macro_context, sentiment=sentiment,
+            event_context=event_context, market_events=market_events,
+            trends=trends, with_ml=with_ml,
         )
-        fused["trends"] = self._load_trends_sync(db, inst.id)
-        fused["recent_events"] = event_context.get("recent_for_llm", [])
-        return fused
 
     async def _load_fundamental_metrics(self, db: AsyncSession, instrument_id: int) -> Optional[dict]:
         from src.db.models import FundamentalMetric

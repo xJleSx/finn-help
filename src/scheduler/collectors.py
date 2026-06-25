@@ -48,6 +48,8 @@ async def collect_prices(db: Session) -> set[int]:
             from_date = last_dt.isoformat() if last_dt else (date.today() - timedelta(days=days_back)).isoformat()
             board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
             history = await moex.get_history(inst.ticker, from_date=from_date, board=board)
+            if not history:
+                logger.debug("No price history for %s (board=%s, from=%s)", inst.ticker, board, from_date)
             new_count = 0
             for row in history:
                 d = row.get("TRADEDATE") or row.get("tradedate")

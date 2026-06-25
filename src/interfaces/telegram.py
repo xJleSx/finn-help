@@ -924,53 +924,14 @@ async def _reply_with_allocation(update: Update, capital: float, exclude: set[st
 async def _ask_llm_general(update: Update, text: str, ticker_context: str = ""):
     msg = await update.effective_message.reply_text("🤔 Думаю...")
     try:
-        system_content = personal.get("llm_system_prompt") or (
-            "Ты — финансовый ассистент. "
-            "Отвечай кратко, по делу, на русском. Называй конкретные тикеры и цены."
+        from src.llm.router import llm
+
+        user_id = update.effective_user.id if update.effective_user else None
+        answer = await llm.answer_question(
+            question=text,
+            user_id=user_id,
+            ticker_context=ticker_context,
         )
-        context_block = (
-            f"\n\nВот реальные данные об инструменте из БД:\n{ticker_context}\n\n"
-            f"Используй эти данные в ответе (цены, проценты, даты — всё фактическое)."
-        ) if ticker_context else ""
-        prompt = (
-            f"Пользователь задал вопрос: {text}\n\n"
-            f"{context_block}"
-            "Ответь коротко и полезно — что купить, зачем. "
-            "Если вопрос про дивиденды — назови конкретные российские акции "
-            "с примерными ценами и дивидендной доходностью. "
-            "Если про небольшие суммы — подскажи, какие акции/БПИФ доступны "
-            "для покупки от 500–1000 ₽."
-        )
-        messages = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": prompt},
-        ]
-
-        if settings.groq_api_key:
-
-            client = AsyncGroq(api_key=settings.groq_api_key)
-            response = await client.chat.completions.create(
-                model=settings.groq_model,
-                messages=messages,
-                temperature=0.3,
-                max_tokens=512,
-            )
-            answer = response.choices[0].message.content
-        else:
-
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{settings.ollama_url}/api/chat",
-                    json={
-                        "model": settings.ollama_model,
-                        "messages": messages,
-                        "temperature": 0.3,
-                        "max_tokens": 512,
-                        "stream": False,
-                    },
-                )
-                data = resp.json()
-                answer = data.get("message", {}).get("content", "")
 
         if not answer:
             answer = "Не могу сформулировать ответ. Попробуйте уточнить вопрос или указать тикер через /analyze"

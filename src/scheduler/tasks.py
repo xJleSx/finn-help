@@ -18,6 +18,7 @@ from src.scheduler.collectors import (
     generate_signals,
 )
 from src.signal.engine import SignalFusionEngine
+from src.trading.brokers.sync import sync_portfolio_from_broker
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,10 @@ async def daily_update():
         await collect_macro(db)
 
         await collect_social_sentiment()
+
+        sync_result = await sync_portfolio_from_broker()
+        if sync_result.get("positions_synced", 0) > 0 or sync_result.get("removed", 0) > 0:
+            logger.info("Portfolio synced: %d positions, %d removed", sync_result["positions_synced"], sync_result.get("removed", 0))
 
         db.query(SignalModel).filter(func.date(SignalModel.date) == date.today()).delete()
         db.commit()

@@ -32,8 +32,17 @@ async def sync_portfolio_from_broker(account_id: str = "") -> dict[str, object]:
                 figi = pos["figi"]
                 inst = db.query(Instrument).filter_by(figi=figi).first()
                 if not inst:
-                    logger.warning("Instrument with figi %s not found in local DB, skipping", figi)
-                    continue
+                    ticker = pos.get("ticker", figi)
+                    inst_type = pos.get("instrument_type", "stock")
+                    logger.info("Auto-creating instrument %s (figi=%s) from broker portfolio", ticker, figi)
+                    inst = Instrument(
+                        ticker=ticker,
+                        full_name=ticker,
+                        figi=figi,
+                        instrument_type=inst_type,
+                    )
+                    db.add(inst)
+                    db.flush()
 
                 qty = pos["quantity"]
                 avg_price = pos["average_price"]
