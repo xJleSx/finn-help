@@ -525,3 +525,77 @@ class FundamentalMetric(Base):
     __table_args__ = (
         Index("ix_fundamental_metrics_instr_date", "instrument_id", "date"),
     )
+
+
+class FinancialReport(Base):
+    __tablename__ = "financial_reports"
+
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
+    report_date = Column(Date, nullable=False, index=True)
+    period_type = Column(String(10), nullable=False)
+    currency = Column(String(3), default="RUB")
+    source = Column(String(50), default="manual")
+
+    net_profit = Column(Float, comment="Чистая прибыль")
+    revenue = Column(Float, comment="Выручка")
+    net_interest_income = Column(Float, comment="Чистые процентные доходы (для банков)")
+    operating_income = Column(Float, comment="Операционные доходы")
+    total_assets = Column(Float, comment="Активы")
+    total_liabilities = Column(Float, comment="Обязательства")
+    total_equity = Column(Float, comment="Собственный капитал")
+    loan_portfolio = Column(Float, comment="Кредитный портфель (для банков)")
+    customer_deposits = Column(Float, comment="Средства клиентов (для банков)")
+    cost_income_ratio = Column(Float, comment="CIR")
+    roe = Column(Float, comment="ROE %")
+    roa = Column(Float, comment="ROA %")
+    net_margin = Column(Float, comment="Чистая процентная маржа")
+    npl_ratio = Column(Float, comment="NPL %")
+    provision_coverage = Column(Float, comment="Покрытие резервами")
+    capital_adequacy = Column(Float, comment="Норматив достаточности капитала")
+
+    extra = Column(JSON)
+
+    instrument = relationship("Instrument", backref="financial_reports")
+
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "report_date", "period_type", name="uq_fin_report_date"),
+        Index("ix_financial_reports_instr_date", "instrument_id", "report_date"),
+    )
+
+
+class BondOffering(Base):
+    __tablename__ = "bond_offerings"
+
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
+    offering_date = Column(Date, nullable=False)
+    isin = Column(String(12), index=True)
+
+    coupon_type = Column(String(20), nullable=False)
+    coupon_rate = Column(Float, comment="Ставка купона % годовых")
+    coupon_period_days = Column(Integer, comment="Купонный период в днях")
+    spread_to_key_rate = Column(Float, comment="Спред к ключевой ставке")
+    yield_to_maturity = Column(Float, comment="YTM %")
+    duration_years = Column(Float, comment="Дюрация в годах")
+
+    maturity_date = Column(Date, comment="Дата погашения")
+    maturity_years = Column(Float, comment="Срок обращения в годах")
+    credit_rating = Column(String(10), comment="Кредитный рейтинг")
+    volume = Column(Float, comment="Объём выпуска (RUB)")
+
+    has_amortization = Column(Boolean, default=False)
+    has_offer = Column(Boolean, default=False)
+    min_lot_rub = Column(Float, comment="Минимальная заявка (RUB)")
+    qual_investor_only = Column(Boolean, default=False)
+    nominal_price = Column(Float, comment="Номинальная цена")
+    current_price_pct = Column(Float, comment="Цена в % от номинала")
+
+    extra = Column(JSON)
+
+    instrument = relationship("Instrument", backref="bond_offerings")
+
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "isin", name="uq_bond_offering_isin"),
+        Index("ix_bond_offerings_instr", "instrument_id"),
+    )

@@ -88,6 +88,7 @@ class SignalFusionEngine:
     def fuse(
         self,
         ticker: str,
+        instrument_type: str = "stock",
         technical: Optional[dict] = None,
         fundamental: Optional[dict] = None,
         geo: Optional[dict] = None,
@@ -342,6 +343,7 @@ class SignalFusionEngine:
 
         fused = {
             "ticker": ticker,
+            "instrument_type": instrument_type,
             "action": action,
             "confidence": round(confidence, 2),
             "weighted_score": round(weighted_score, 2),

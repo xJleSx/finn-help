@@ -39,6 +39,20 @@ class LLMRouter:
         raw = await self._ollama_advise(signal)
         return self._process_output(raw, signal)
 
+    async def report(self, signal: dict[str, object], user_id: str | int | None = None) -> str:
+        self._enrich_with_risk_profile(signal, user_id=user_id)
+        await self._enrich_with_wolfram(signal)
+
+        if self._use_groq:
+            try:
+                raw = await self._groq_report(signal)
+                return self._process_report(raw, signal)
+            except Exception as e:
+                logger.warning(f"Groq report failed: {e}, trying local...")
+
+        raw = await self._ollama_report(signal)
+        return self._process_report(raw, signal)
+
     def _enrich_with_risk_profile(self, signal: dict[str, object], user_id: str | int | None = None) -> None:
         try:
             from src.user_profile import profile_manager
@@ -106,7 +120,7 @@ class LLMRouter:
                 lines.append(f"Макро: {', '.join(parts)}")
 
             from src.db.models import Instrument, Price, Signal as SignalModel
-            from datetime import date, timedelta
+            from datetime import date
             from sqlalchemy import func
 
             today_signals = (
@@ -244,6 +258,161 @@ class LLMRouter:
         except Exception as e:
             logger.warning(f"ollama failed: {e}")
             return self._fallback_text(signal)
+
+    async def _groq_report(self, signal: dict[str, object]) -> str:
+        try:
+            from groq import AsyncGroq
+
+            client = AsyncGroq(api_key=settings.groq_api_key)
+            response = await client.chat.completions.create(
+                model=self._groq_model,
+                messages=[
+                    {"role": "system", "content": prompts.REPORT_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompts.build_report_message(signal)},
+                ],
+                temperature=0.2,
+                max_tokens=1024,
+            )
+            return response.choices[0].message.content or self._fallback_report(signal)
+        except ImportError:
+            logger.warning("groq package not installed")
+            return self._fallback_report(signal)
+
+    async def _ollama_report(self, signal: dict[str, object]) -> str:
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                payload = {
+                    "model": self._ollama_model,
+                    "messages": [
+                        {"role": "system", "content": prompts.REPORT_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompts.build_report_message(signal)},
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 1024,
+                    "stream": False,
+                }
+                resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
+                resp.raise_for_status()
+                data: Any = resp.json()
+                result: Any = data.get("message", {}).get("content", self._fallback_report(signal))
+                return cast(str, result)
+        except Exception as e:
+            logger.warning(f"ollama report failed: {e}")
+            return self._fallback_report(signal)
+
+    def _process_report(self, raw: str, signal: dict[str, object]) -> str:
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+            cleaned = re.sub(r"\s*```$", "", cleaned)
+        try:
+            parsed = json.loads(cleaned)
+            return self._render_report(parsed)
+        except (json.JSONDecodeError, ValueError):
+            logger.debug("LLM report output not valid JSON, using fallback: %.100s", raw)
+            return self._fallback_report(signal)
+
+    def _render_report(self, parsed: dict) -> str:
+        lines: list[str] = []
+        company_profile = parsed.get("company_profile", "")
+        financial_highlights = parsed.get("financial_highlights", [])
+        offering = parsed.get("offering_analysis", {})
+        strengths = parsed.get("strengths", [])
+        weaknesses = parsed.get("weaknesses", [])
+        verdict = parsed.get("verdict", "")
+        rating = parsed.get("rating")
+        rating_explain = parsed.get("rating_explain", "")
+        action = parsed.get("action", "")
+        portfolio_advice = parsed.get("portfolio_advice", "")
+
+        if company_profile:
+            lines.append("## Компания")
+            lines.append(company_profile)
+            lines.append("")
+
+        if financial_highlights:
+            lines.append("## Финансовые показатели")
+            for h in financial_highlights:
+                lines.append(f"  {h}")
+            lines.append("")
+
+        if offering:
+            desc = offering.get("description", "")
+            params = offering.get("parameters", [])
+            pros = offering.get("pros", [])
+            cons = offering.get("cons", [])
+            if desc:
+                lines.append("## Анализ предложения")
+                lines.append(desc)
+                lines.append("")
+            if params:
+                for p in params:
+                    lines.append(f"  {p}")
+                lines.append("")
+            if pros:
+                lines.append("  Преимущества:")
+                for p in pros:
+                    lines.append(f"    + {p}")
+                lines.append("")
+            if cons:
+                lines.append("  Недостатки:")
+                for c in cons:
+                    lines.append(f"    - {c}")
+                lines.append("")
+
+        if strengths:
+            lines.append("## Сильные стороны")
+            for s in strengths:
+                lines.append(f"  + {s}")
+            lines.append("")
+
+        if weaknesses:
+            lines.append("## Слабые стороны / Риски")
+            for w in weaknesses:
+                lines.append(f"  - {w}")
+            lines.append("")
+
+        if verdict:
+            lines.append("## Вердикт")
+            lines.append(verdict)
+            lines.append("")
+
+        if rating is not None:
+            stars = "★" * rating + "☆" * (5 - rating)
+            lines.append(f"Оценка: {stars} ({rating}/5)")
+            if rating_explain:
+                lines.append(f"  {rating_explain}")
+            lines.append("")
+
+        if portfolio_advice or action:
+            if action:
+                action_labels = {
+                    "BUY": "К покупке", "SELL": "К продаже",
+                    "HOLD": "Держать", "CAUTIOUS_BUY": "Осторожная покупка",
+                    "WATCH": "Наблюдение",
+                }
+                label = action_labels.get(action, action)
+                lines.append(f"Рекомендация: {label}")
+            if portfolio_advice:
+                lines.append(f"  {portfolio_advice}")
+
+        return "\n".join(lines) if lines else (verdict or "Нет данных для формирования отчёта")
+
+    def _fallback_report(self, signal: dict[str, object]) -> str:
+        ticker: Any = signal.get("ticker", "?")
+        action: Any = signal.get("action", "NEUTRAL")
+        confidence: Any = signal.get("confidence", 0)
+        reasons: Any = signal.get("reasons", [])
+
+        lines = [f"Отчёт по {ticker}"]
+        lines.append("")
+        lines.append("Данных для полноценного обзора недостаточно. Основные выводы по сигналу:")
+        lines.append(f"Действие: {action} (уверенность {confidence:.0%})")
+        for r in reasons[:5]:
+            lines.append(f"  {r}")
+        return "\n".join(lines)
 
     def _process_output(self, raw: str, signal: dict[str, object]) -> str:
         cleaned = raw.strip()

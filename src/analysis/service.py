@@ -11,7 +11,7 @@ from src.analysis.multi_timeframe import MultiTimeframeAnalyzer
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.volatility import VolatilityRegimeDetector
 from src.constants import NEWS_SENTIMENT_DAYS
-from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, MarketEvent, News, Price, Signal
+from src.db.models import BondOffering, Dividend, FinancialReport, GeoRiskScore, Indicator, Instrument, MarketEvent, News, Price, Signal
 from src.llm.router import llm
 from src.analysis.ml.price_targets import build_trade_plan, to_dict as trade_plan_to_dict
 from src.signal.engine import SignalFusionEngine, compute_risk_metrics
@@ -386,6 +386,118 @@ class AnalysisService:
                 }
         return result
 
+    async def _load_latest_report(self, db: AsyncSession, instrument_id: int) -> dict | None:
+        result = await db.execute(
+            select(FinancialReport)
+            .where(FinancialReport.instrument_id == instrument_id)
+            .order_by(FinancialReport.report_date.desc())
+            .limit(1)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "report_date": str(row.report_date),
+            "period_type": row.period_type,
+            "net_profit": row.net_profit,
+            "revenue": row.revenue,
+            "net_interest_income": row.net_interest_income,
+            "operating_income": row.operating_income,
+            "total_assets": row.total_assets,
+            "total_liabilities": row.total_liabilities,
+            "total_equity": row.total_equity,
+            "loan_portfolio": row.loan_portfolio,
+            "customer_deposits": row.customer_deposits,
+            "cost_income_ratio": row.cost_income_ratio,
+            "roe": row.roe,
+            "roa": row.roa,
+            "net_margin": row.net_margin,
+            "npl_ratio": row.npl_ratio,
+            "capital_adequacy": row.capital_adequacy,
+        }
+
+    def _load_latest_report_sync(self, db, instrument_id: int) -> dict | None:
+        row = (
+            db.query(FinancialReport)
+            .filter_by(instrument_id=instrument_id)
+            .order_by(FinancialReport.report_date.desc())
+            .first()
+        )
+        if row is None:
+            return None
+        return {
+            "report_date": str(row.report_date),
+            "period_type": row.period_type,
+            "net_profit": row.net_profit,
+            "revenue": row.revenue,
+            "net_interest_income": row.net_interest_income,
+            "operating_income": row.operating_income,
+            "total_assets": row.total_assets,
+            "total_liabilities": row.total_liabilities,
+            "total_equity": row.total_equity,
+            "loan_portfolio": row.loan_portfolio,
+            "customer_deposits": row.customer_deposits,
+            "cost_income_ratio": row.cost_income_ratio,
+            "roe": row.roe,
+            "roa": row.roa,
+            "net_margin": row.net_margin,
+            "npl_ratio": row.npl_ratio,
+            "capital_adequacy": row.capital_adequacy,
+        }
+
+    async def _load_bond_offering(self, db: AsyncSession, instrument_id: int) -> dict | None:
+        result = await db.execute(
+            select(BondOffering)
+            .where(BondOffering.instrument_id == instrument_id)
+            .order_by(BondOffering.offering_date.desc())
+            .limit(1)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "coupon_type": row.coupon_type,
+            "coupon_rate": row.coupon_rate,
+            "coupon_period_days": row.coupon_period_days,
+            "spread_to_key_rate": row.spread_to_key_rate,
+            "yield_to_maturity": row.yield_to_maturity,
+            "duration_years": row.duration_years,
+            "maturity_years": row.maturity_years,
+            "credit_rating": row.credit_rating,
+            "has_amortization": row.has_amortization,
+            "has_offer": row.has_offer,
+            "min_lot_rub": row.min_lot_rub,
+            "qual_investor_only": row.qual_investor_only,
+            "nominal_price": row.nominal_price,
+            "current_price_pct": row.current_price_pct,
+        }
+
+    def _load_bond_offering_sync(self, db, instrument_id: int) -> dict | None:
+        row = (
+            db.query(BondOffering)
+            .filter_by(instrument_id=instrument_id)
+            .order_by(BondOffering.offering_date.desc())
+            .first()
+        )
+        if row is None:
+            return None
+        return {
+            "coupon_type": row.coupon_type,
+            "coupon_rate": row.coupon_rate,
+            "coupon_period_days": row.coupon_period_days,
+            "spread_to_key_rate": row.spread_to_key_rate,
+            "yield_to_maturity": row.yield_to_maturity,
+            "duration_years": row.duration_years,
+            "maturity_years": row.maturity_years,
+            "credit_rating": row.credit_rating,
+            "has_amortization": row.has_amortization,
+            "has_offer": row.has_offer,
+            "min_lot_rub": row.min_lot_rub,
+            "qual_investor_only": row.qual_investor_only,
+            "nominal_price": row.nominal_price,
+            "current_price_pct": row.current_price_pct,
+        }
+
     def _load_sentiment_sync(self, db, ticker: str) -> dict:
         from datetime import datetime, timedelta, timezone
 
@@ -455,6 +567,8 @@ class AnalysisService:
         event_context: dict,
         market_events: list[MarketEvent],
         trends: dict,
+        financial_report: dict | None = None,
+        bond_offering: dict | None = None,
         with_ml: bool = True,
     ) -> dict:
         tech_signal = self.analyzer.generate_signal(ind_df)
@@ -469,6 +583,7 @@ class AnalysisService:
         trade_plan = self._build_trade_plan(df, ind_df, tech_signal) if not ind_df.empty else None
         fused = self.fusion.fuse(
             ticker=ticker.upper(),
+            instrument_type=str(inst.instrument_type or "stock"),
             technical=tech_signal,
             fundamental=fund,
             geo=geo,
@@ -483,6 +598,11 @@ class AnalysisService:
         )
         fused["trends"] = trends
         fused["recent_events"] = event_context.get("recent_for_llm", [])
+        if financial_report:
+            fused["financial_report"] = financial_report
+            fused["financial_facts"] = self.fundamental.analyze_report(financial_report)
+        if bond_offering:
+            fused["bond_offering"] = bond_offering
         return fused
 
     async def analyze_single(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> dict:
@@ -511,13 +631,16 @@ class AnalysisService:
         event_context = await self._load_market_events(db)
         market_events = await self._load_all_events(db)
         trends = await self._load_trends(db, inst.id)
+        financial_report = await self._load_latest_report(db, inst.id)
+        bond_offering = await self._load_bond_offering(db, inst.id)
 
         return self._analyze_core(
             df=df, ind_df=ind_df, inst=inst, ticker=ticker,
             fund_metrics=fund_metrics, divs=divs, geo_score=geo_score,
             macro_context=macro_context, sentiment=sentiment,
             event_context=event_context, market_events=market_events,
-            trends=trends, with_ml=with_ml,
+            trends=trends, financial_report=financial_report,
+            bond_offering=bond_offering, with_ml=with_ml,
         )
 
     async def analyze_all(
@@ -610,13 +733,16 @@ class AnalysisService:
         market_events = self._load_all_events_sync(db)
         event_context = self._load_market_events_sync(db)
         trends = self._load_trends_sync(db, inst.id)
+        financial_report = self._load_latest_report_sync(db, inst.id)
+        bond_offering = self._load_bond_offering_sync(db, inst.id)
 
         return self._analyze_core(
             df=df, ind_df=ind_df, inst=inst, ticker=ticker,
             fund_metrics=fund_metrics, divs=divs, geo_score=geo_val,
             macro_context=macro_context, sentiment=sentiment,
             event_context=event_context, market_events=market_events,
-            trends=trends, with_ml=with_ml,
+            trends=trends, financial_report=financial_report,
+            bond_offering=bond_offering, with_ml=with_ml,
         )
 
     async def _load_fundamental_metrics(self, db: AsyncSession, instrument_id: int) -> Optional[dict]:

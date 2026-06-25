@@ -160,6 +160,70 @@ class FundamentalAnalyzer:
             "fundamental_metrics": metrics_snapshot,
         }
 
+    def analyze_report(self, report: dict) -> list[str]:
+        """Анализ финансовой отчётности (МСФО/РСБУ) — возвращает список фактов для LLM."""
+        facts = []
+        period = report.get("period_type", "")
+        date_str = report.get("report_date", "")
+
+        np_val = report.get("net_profit")
+        if np_val is not None:
+            facts.append(f"Чистая прибыль ({period} {date_str}): {_fmt_big(np_val)} ₽")
+
+        rev = report.get("revenue")
+        if rev is not None:
+            facts.append(f"Выручка: {_fmt_big(rev)} ₽")
+
+        nii = report.get("net_interest_income")
+        if nii is not None:
+            facts.append(f"Чистые процентные доходы: {_fmt_big(nii)} ₽")
+
+        assets = report.get("total_assets")
+        if assets is not None:
+            facts.append(f"Активы: {_fmt_big(assets)} ₽")
+
+        liabilities = report.get("total_liabilities")
+        if liabilities is not None:
+            facts.append(f"Обязательства: {_fmt_big(liabilities)} ₽")
+
+        equity = report.get("total_equity")
+        if equity is not None:
+            facts.append(f"Собственный капитал: {_fmt_big(equity)} ₽")
+
+        loan = report.get("loan_portfolio")
+        if loan is not None:
+            facts.append(f"Кредитный портфель: {_fmt_big(loan)} ₽")
+
+        deposits = report.get("customer_deposits")
+        if deposits is not None:
+            facts.append(f"Средства клиентов: {_fmt_big(deposits)} ₽")
+
+        roe = report.get("roe")
+        if roe is not None:
+            facts.append(f"ROE: {roe:.1f}%")
+
+        roa = report.get("roa")
+        if roa is not None:
+            facts.append(f"ROA: {roa:.1f}%")
+
+        npl = report.get("npl_ratio")
+        if npl is not None:
+            facts.append(f"NPL (просрочка): {npl:.1f}%")
+
+        adequacy = report.get("capital_adequacy")
+        if adequacy is not None:
+            facts.append(f"Достаточность капитала: {adequacy:.1f}%")
+
+        cir = report.get("cost_income_ratio")
+        if cir is not None:
+            facts.append(f"CIR (расходы/доходы): {cir:.1f}%")
+
+        margin = report.get("net_margin")
+        if margin is not None:
+            facts.append(f"Чистая процентная маржа: {margin:.1f}%")
+
+        return facts
+
 
 def _fmt_big(val: float) -> str:
     if val >= 1e12:

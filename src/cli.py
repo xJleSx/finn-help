@@ -16,7 +16,7 @@ from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.config import personal
 from src.db.connection import get_session, init_db
-from src.db.models import Dividend, Instrument, Portfolio, Price
+from src.db.models import BondOffering, Dividend, FinancialReport, Instrument, Portfolio, Price
 from src.llm.router import llm
 from src.social.cli import social_app
 
@@ -185,6 +185,7 @@ async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True)
 def analyze(
     ticker: str = typer.Argument(..., help="Тикер (например, SBER)"),
     with_llm: bool = typer.Option(True, "--llm/--no-llm", help="Использовать LLM для совета"),
+    report: bool = typer.Option(False, "--report", "-r", help="Формат инвестиционного обзора"),
 ):
     """Проанализировать инструмент"""
 
@@ -203,9 +204,18 @@ def analyze(
 
             with Progress(console=console) as p:
                 p.add_task("Анализ...", total=None)
-                fused, advice = await run_analysis(ticker, with_llm)
+                if report:
+                    fused = analysis_service._analyze_single_sync(db, inst, ticker.upper())
+                    from src.llm.router import llm
+                    advice = await llm.report(fused)
+                else:
+                    fused, advice = await run_analysis(ticker, with_llm)
 
             if not fused:
+                return
+
+            if report:
+                console.print(advice)
                 return
 
             df = pd.DataFrame(
@@ -379,6 +389,175 @@ def auto():
         console.print("[green]✓[/green] Цикл завершён. Все инструменты проанализированы.")
 
     asyncio.run(_run())
+
+
+@app.command()
+def financials(
+    ticker: str = typer.Argument(..., help="Тикер (например, SBER)"),
+    period: str = typer.Option("Q1", "--period", "-p", help="Период: Q1, Q2, Q3, Q4, annual, ttm"),
+    year: int = typer.Option(2026, "--year", "-y", help="Год отчёта"),
+    net_profit: Optional[float] = typer.Option(None, "--net-profit", help="Чистая прибыль (RUB)"),
+    revenue: Optional[float] = typer.Option(None, "--revenue", help="Выручка (RUB)"),
+    net_interest_income: Optional[float] = typer.Option(None, "--interest-income", help="Чистые процентные доходы (RUB)"),
+    total_assets: Optional[float] = typer.Option(None, "--assets", help="Активы (RUB)"),
+    total_liabilities: Optional[float] = typer.Option(None, "--liabilities", help="Обязательства (RUB)"),
+    total_equity: Optional[float] = typer.Option(None, "--equity", help="Собственный капитал (RUB)"),
+    loan_portfolio: Optional[float] = typer.Option(None, "--loan-portfolio", help="Кредитный портфель (RUB)"),
+    view: bool = typer.Option(False, "--view", "-v", help="Показать сохранённые отчёты"),
+):
+    """Добавить или посмотреть финансовую отчётность инструмента (МСФО/РСБУ)"""
+    db = get_session()
+    try:
+        inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+        if not inst:
+            console.print(f"[red]Инструмент {ticker} не найден[/red]")
+            return
+
+        if view:
+            reports = (
+                db.query(FinancialReport)
+                .filter_by(instrument_id=inst.id)
+                .order_by(FinancialReport.report_date.desc())
+                .all()
+            )
+            if not reports:
+                console.print(f"[yellow]Нет данных для {ticker}[/yellow]")
+                return
+            table = Table(title=f"📋 Отчётность {ticker.upper()}")
+            table.add_column("Дата", style="cyan")
+            table.add_column("Период", style="white")
+            table.add_column("Чистая прибыль", style="yellow")
+            table.add_column("Активы", style="yellow")
+            table.add_column("Капитал", style="yellow")
+            for r in reports:
+                np_str = f"{r.net_profit:,.0f}" if r.net_profit else "—"
+                ta_str = f"{r.total_assets:,.0f}" if r.total_assets else "—"
+                te_str = f"{r.total_equity:,.0f}" if r.total_equity else "—"
+                table.add_row(str(r.report_date), r.period_type, np_str, ta_str, te_str)
+            console.print(table)
+            return
+
+        if not any([net_profit, revenue, net_interest_income, total_assets, total_liabilities, total_equity, loan_portfolio]):
+            console.print("[red]Укажите хотя бы один финансовый показатель[/red]")
+            console.print("Пример: finn financials SBER --net-profit 162.49e9 --assets 8620.3e9 --period Q1 --year 2026")
+            return
+
+        from datetime import date as dt_date
+        report_date = dt_date(year, 1, 1)
+        existing = (
+            db.query(FinancialReport)
+            .filter_by(instrument_id=inst.id, report_date=report_date, period_type=period)
+            .first()
+        )
+        if existing:
+            console.print("[yellow]Отчёт за этот период уже существует, обновляю...[/yellow]")
+
+        report = existing or FinancialReport(
+            instrument_id=inst.id,
+            report_date=report_date,
+            period_type=period,
+        )
+        if net_profit is not None:
+            report.net_profit = net_profit
+        if revenue is not None:
+            report.revenue = revenue
+        if net_interest_income is not None:
+            report.net_interest_income = net_interest_income
+        if total_assets is not None:
+            report.total_assets = total_assets
+        if total_liabilities is not None:
+            report.total_liabilities = total_liabilities
+        if total_equity is not None:
+            report.total_equity = total_equity
+        if loan_portfolio is not None:
+            report.loan_portfolio = loan_portfolio
+
+        db.add(report)
+        db.commit()
+        console.print(f"[green]✓ Отчётность {ticker} ({period} {year}) сохранена[/green]")
+    finally:
+        db.close()
+
+
+@app.command()
+def bond(
+    ticker: str = typer.Argument(..., help="Тикер облигации (например, SU26238RMFS5)"),
+    coupon_type: str = typer.Option("fixed", "--coupon-type", "-t", help="Тип купона: fixed, floater, zero"),
+    coupon_rate: Optional[float] = typer.Option(None, "--coupon", "-c", help="Ставка купона % годовых"),
+    coupon_period: Optional[int] = typer.Option(None, "--period-days", "-d", help="Купонный период в днях"),
+    spread: Optional[float] = typer.Option(None, "--spread", "-s", help="Спред к ключевой ставке (для флоатера)"),
+    ytm: Optional[float] = typer.Option(None, "--ytm", help="YTM — доходность к погашению %"),
+    maturity_years: Optional[float] = typer.Option(None, "--maturity", "-m", help="Срок обращения в годах"),
+    rating: Optional[str] = typer.Option(None, "--rating", "-r", help="Кредитный рейтинг (AAA, AA, A, BBB)"),
+    volume: Optional[float] = typer.Option(None, "--volume", help="Объём выпуска (RUB)"),
+    amortization: bool = typer.Option(False, "--amortization", "-a", help="Амортизация"),
+    offer: bool = typer.Option(False, "--offer", "-o", help="Оферта"),
+    min_lot: Optional[float] = typer.Option(None, "--min-lot", "-l", help="Минимальная заявка (RUB)"),
+    qual_only: bool = typer.Option(False, "--qual", "-q", help="Только для квал. инвесторов"),
+    isin: Optional[str] = typer.Option(None, "--isin", help="ISIN выпуска"),
+    view: bool = typer.Option(False, "--view", "-v", help="Показать сохранённые параметры"),
+):
+    """Добавить или посмотреть параметры облигации"""
+    db = get_session()
+    try:
+        inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+        if not inst:
+            console.print(f"[red]Инструмент {ticker} не найден[/red]")
+            return
+
+        if view:
+            offerings = (
+                db.query(BondOffering)
+                .filter_by(instrument_id=inst.id)
+                .order_by(BondOffering.offering_date.desc())
+                .all()
+            )
+            if not offerings:
+                console.print(f"[yellow]Нет данных для {ticker}[/yellow]")
+                return
+            table = Table(title=f"📋 Облигация {ticker.upper()}")
+            table.add_column("ISIN", style="cyan")
+            table.add_column("Купон", style="yellow")
+            table.add_column("Ставка", style="yellow")
+            table.add_column("Рейтинг", style="white")
+            table.add_column("Срок", style="white")
+            table.add_column("Мин. заявка", style="yellow")
+            for o in offerings:
+                coupon_str = f"{o.coupon_rate:.2f}%" if o.coupon_rate else "—"
+                rating_str = o.credit_rating or "—"
+                mat_str = f"{o.maturity_years:.1f}г" if o.maturity_years else "—"
+                lot_str = f"{o.min_lot_rub:,.0f}" if o.min_lot_rub else "—"
+                table.add_row(o.isin or "—", o.coupon_type, coupon_str, rating_str, mat_str, lot_str)
+            console.print(table)
+            return
+
+        if not any([coupon_rate, spread, ytm, rating]):
+            console.print("[red]Укажите хотя бы один параметр облигации[/red]")
+            console.print("Пример: finn bond SU26238RMFS5 --coupon 17.41 --rating AAA --maturity 2.5 --min-lot 1400000")
+            return
+
+        offering = BondOffering(
+            instrument_id=inst.id,
+            offering_date=date.today(),
+            isin=isin or inst.isin or "",
+            coupon_type=coupon_type,
+            coupon_rate=coupon_rate,
+            coupon_period_days=coupon_period or 30,
+            spread_to_key_rate=spread,
+            yield_to_maturity=ytm,
+            maturity_years=maturity_years,
+            credit_rating=rating,
+            volume=volume,
+            has_amortization=amortization,
+            has_offer=offer,
+            min_lot_rub=min_lot,
+            qual_investor_only=qual_only,
+        )
+        db.add(offering)
+        db.commit()
+        console.print(f"[green]✓ Параметры облигации {ticker} сохранены[/green]")
+    finally:
+        db.close()
 
 
 @app.command()
