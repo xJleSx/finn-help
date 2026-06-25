@@ -317,7 +317,7 @@ def get_portfolio_positions(db) -> list[dict]:
         price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
         last_price = price.close if price else 0
         current_value = float(last_price * p.quantity) if last_price and p.quantity else 0
-        profit_pct = round(((last_price / p.avg_price) - 1) * 100, 2) if last_price and p.avg_price else 0
+        profit_pct = round(((last_price / p.avg_price) - 1) * 100, 2) if last_price and p.avg_price and p.avg_price > 0 else 0
         rows.append({
             "ticker": inst.ticker if inst else "?",
             "name": inst.full_name if inst else "",

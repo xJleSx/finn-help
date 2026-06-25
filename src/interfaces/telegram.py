@@ -958,6 +958,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     msg = await update.effective_message.reply_text("⏳ Синхронизация с T-Bank...")
+    sync_errors: list[str] = []
     try:
         from src.trading.brokers.sync import sync_portfolio_from_broker
         sync_result = await sync_portfolio_from_broker()
@@ -967,8 +968,10 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sync_result.get("status") == "no_accounts":
             await msg.edit_text("❌ Нет счетов в T-Bank")
             return
+        sync_errors = [e for e in sync_result.get("errors", []) if e]
     except Exception as e:
         logger.warning("Sync failed: %s", e)
+        sync_errors = [str(e)]
 
     db = get_session()
     try:
@@ -996,6 +999,11 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
         lines = ["📊 *Портфель (T-Bank)*\n"]
+        if sync_errors:
+            lines.append("⚠️ *Ошибки синка:*\n")
+            for e in sync_errors[:3]:
+                lines.append(f"• {e[:120]}")
+            lines.append("")
         total_value = 0.0
         total_cost = 0.0
         for r in rows:
@@ -1007,8 +1015,8 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pnl = val - cost
             pnl_pct = ((cur / avg) - 1) * 100 if avg > 0 else 0.0
             emoji = "🟢" if pnl > 0.5 else ("🔴" if pnl < -0.5 else "⚪")
-            pnl_display = "" if abs(pnl) < 1 else f"{pnl:+,.0f}"
-            pnl_pct_display = "" if abs(pnl_pct) < 0.1 else f"{pnl_pct:+.1f}%"
+            pnl_display = "" if abs(pnl) < 0.5 else f"{pnl:+,.2f}"
+            pnl_pct_display = "" if abs(pnl_pct) < 0.01 else f"{pnl_pct:+.2f}%"
             if pnl_display and pnl_pct_display:
                 pnl_line = f"   P&L: {pnl_display} ₽ ({pnl_pct_display})"
             else:
@@ -1025,8 +1033,8 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_pnl = total_value - total_cost
         total_pnl_pct = ((total_value / total_cost) - 1) * 100 if total_cost > 0 else 0.0
         total_emoji = "🟢" if total_pnl > 0.5 else ("🔴" if total_pnl < -0.5 else "⚪")
-        total_pnl_str = "" if abs(total_pnl) < 1 else f"{total_pnl:+,.0f}"
-        total_pnl_pct_str = "" if abs(total_pnl_pct) < 0.1 else f"{total_pnl_pct:+.1f}%"
+        total_pnl_str = "" if abs(total_pnl) < 0.5 else f"{total_pnl:+,.2f}"
+        total_pnl_pct_str = "" if abs(total_pnl_pct) < 0.01 else f"{total_pnl_pct:+.2f}%"
         pnl_suffix = f" | P&L: {total_pnl_str} ₽ ({total_pnl_pct_str})" if total_pnl_str and total_pnl_pct_str else " | P&L: ~0 ₽"
         lines.append(
             f"\n{total_emoji} *Итого:* {total_value:,.0f} ₽{pnl_suffix}"

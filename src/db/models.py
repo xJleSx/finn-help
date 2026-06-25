@@ -34,6 +34,7 @@ class Instrument(Base):
     currency = Column(String(3), default="RUB")
     figi = Column(String(50), index=True)
     moex_uid = Column(String(50))
+    nominal = Column(Float, comment="Face value for bonds (руб), 0 for non-bonds")
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     prices = relationship("Price", back_populates="instrument", lazy="dynamic")

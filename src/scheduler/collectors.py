@@ -12,6 +12,7 @@ from src.constants import (
     DIVIDEND_CHECK_DAYS,
     NEWS_MAX_PER_FEED,
 )
+from src.db.connection import get_session
 from src.db.models import (
     Dividend,
     GeoRiskScore,
@@ -31,6 +32,77 @@ divergence = SentimentDivergenceDetector()
 geo_risk = GeoRiskScorer()
 
 
+def _first(v1, v2):
+    return v1 if v1 is not None else v2
+
+
+async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date: str, moex: MOEXCollector) -> int:
+    board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
+    history = await moex.get_history(inst.ticker, from_date=from_date, board=board)
+    if not history:
+        logger.debug("No price history for %s (board=%s, from=%s)", inst.ticker, board, from_date)
+        return 0
+
+    nominal: float | None = None
+    if str(inst.instrument_type) == "bond":
+        nominal = inst.nominal
+        if nominal is None:
+            info = await moex.get_security_info(inst.ticker)
+            fv = info.get("face_value")
+            if fv:
+                nominal = float(fv)
+                inst.nominal = nominal
+                db.flush()
+        if nominal is None:
+            logger.warning("No face value for bond %s, skipping normalization", inst.ticker)
+
+    def _bond_normalize(v: float | None) -> float | None:
+        if v is not None and nominal is not None:
+            return v * nominal / 100
+        return v
+
+    new_count = 0
+    for row in history:
+        d = row.get("TRADEDATE") or row.get("tradedate")
+        if isinstance(d, str):
+            d = date.fromisoformat(d)
+        if not d:
+            continue
+        exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
+        if exists:
+            continue
+        p = Price(
+            instrument_id=inst.id,
+            date=d,
+            open=_bond_normalize(_first(row.get("OPEN"), row.get("open"))),
+            high=_bond_normalize(_first(row.get("HIGH"), row.get("high"))),
+            low=_bond_normalize(_first(row.get("LOW"), row.get("low"))),
+            close=_bond_normalize(_first(row.get("CLOSE"), row.get("close"))),
+            volume=_first(row.get("VOLUME"), row.get("volume")),
+        )
+        db.add(p)
+        new_count += 1
+    return new_count
+
+
+async def fetch_price_history_for_instrument(ticker: str, instrument_type: str) -> int:
+    """Авто-загрузка цен для нового инструмента при синке портфеля."""
+    from_date = (date.today() - timedelta(days=DEFAULT_HISTORY_DAYS)).isoformat()
+    db = get_session()
+    try:
+        inst = db.query(Instrument).filter_by(ticker=ticker).first()
+        if not inst:
+            logger.warning("Instrument %s not found in DB, cannot fetch price history", ticker)
+            return 0
+        async with MOEXCollector() as moex:
+            new_count = await _fetch_prices_for_instrument(db, inst, from_date, moex)
+        if new_count:
+            db.commit()
+        return new_count
+    finally:
+        db.close()
+
+
 async def collect_prices(db: Session) -> set[int]:
     updated_ids: set[int] = set()
     async with MOEXCollector() as moex:
@@ -46,32 +118,7 @@ async def collect_prices(db: Session) -> set[int]:
             last_dt = last_dates.get(inst.id)
             days_back = DEFAULT_HISTORY_DAYS
             from_date = last_dt.isoformat() if last_dt else (date.today() - timedelta(days=days_back)).isoformat()
-            board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
-            history = await moex.get_history(inst.ticker, from_date=from_date, board=board)
-            if not history:
-                logger.debug("No price history for %s (board=%s, from=%s)", inst.ticker, board, from_date)
-            new_count = 0
-            for row in history:
-                d = row.get("TRADEDATE") or row.get("tradedate")
-                if isinstance(d, str):
-                    d = date.fromisoformat(d)
-                if not d:
-                    continue
-                exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
-                if not exists:
-                    def _first(v1, v2):
-                        return v1 if v1 is not None else v2
-                    p = Price(
-                        instrument_id=inst.id,
-                        date=d,
-                        open=_first(row.get("OPEN"), row.get("open")),
-                        high=_first(row.get("HIGH"), row.get("high")),
-                        low=_first(row.get("LOW"), row.get("low")),
-                        close=_first(row.get("CLOSE"), row.get("close")),
-                        volume=_first(row.get("VOLUME"), row.get("volume")),
-                    )
-                    db.add(p)
-                    new_count += 1
+            new_count = await _fetch_prices_for_instrument(db, inst, from_date, moex)
             db.commit()
             if new_count > 0:
                 updated_ids.add(int(inst.id))
