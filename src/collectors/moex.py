@@ -22,6 +22,9 @@ BOARD_MAP = {
 
 BOND_BOARDS = ["TQCB", "TQBD", "TQOB"]
 
+# Доски, где MOEX возвращает цену в % от номинала
+BOND_PCT_BOARDS = {"TQBD", "TQOB"}
+
 
 class MOEXCollector:
     BASE = settings.moex_iss_url
@@ -103,7 +106,8 @@ class MOEXCollector:
             to_date = date.today().isoformat()
 
         if board == "bond":
-            return await self._get_bond_history(ticker, from_date, to_date)
+            rows, _ = await self._get_bond_history(ticker, from_date, to_date)
+            return rows
 
         path = BOARD_MAP.get(board)
         if not path:
@@ -115,7 +119,7 @@ class MOEXCollector:
         )
         return self._parse_table(data, "history")
 
-    async def _get_bond_history(self, ticker: str, from_date: str, to_date: str) -> list[dict]:
+    async def _get_bond_history(self, ticker: str, from_date: str, to_date: str) -> tuple[list[dict], str | None]:
         for board_id in BOND_BOARDS:
             path = f"/history/engines/stock/markets/bonds/boards/{board_id}/securities/{ticker}.json"
             try:
@@ -125,11 +129,11 @@ class MOEXCollector:
                 )
                 rows = self._parse_table(data, "history")
                 if rows:
-                    return rows
+                    return rows, board_id
             except Exception as e:
                 logger.debug("Bond history not found on %s for %s: %s", board_id, ticker, e)
                 continue
-        return []
+        return [], None
 
     async def get_dividends(self, ticker: str) -> list[dict]:
         data = await self._fetch_json(
@@ -159,6 +163,12 @@ class MOEXCollector:
         )
         rows = self._parse_table(data, "marketdata")
         return rows[0] if rows else {}
+
+    async def get_bond_history_with_board(
+        self, ticker: str, from_date: str, to_date: str,
+    ) -> tuple[list[dict], str | None]:
+        """Like get_history but also returns the MOEX board ID (TQCB/TQBD/TQOB)."""
+        return await self._get_bond_history(ticker, from_date, to_date)
 
     async def get_bonds(self) -> list[dict]:
         seen = set()

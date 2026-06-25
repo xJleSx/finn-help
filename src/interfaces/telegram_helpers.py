@@ -316,6 +316,10 @@ def get_portfolio_positions(db) -> list[dict]:
         inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
         price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
         last_price = price.close if price else 0
+        # Fallback: если номинал известен, а цена подозрительно низкая (< 50% номинала) —
+        # значит MOEX вернул % от номинала, а не рубли (старые данные или TQBD/TQOB board)
+        if last_price and inst and inst.nominal and last_price < inst.nominal * 0.5:
+            last_price = last_price * inst.nominal / 100
         current_value = float(last_price * p.quantity) if last_price and p.quantity else 0
         profit_pct = round(((last_price / p.avg_price) - 1) * 100, 2) if last_price and p.avg_price and p.avg_price > 0 else 0
         rows.append({
