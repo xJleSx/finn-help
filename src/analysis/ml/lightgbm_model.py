@@ -36,6 +36,8 @@ class LightGBMClassifier:
 
     def load(self, version: Optional[str] = None):
         self._model = load_from_registry(self.model_name, version=version)
+        if self._model is not None and hasattr(self._model, 'set_params'):
+            self._model.set_params(predict_disable_shape_check=True)
         return self._model
 
     def train(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> bool:
@@ -163,6 +165,8 @@ class LightGBMClassifier:
 
     def _predict_latest(self, features: pd.DataFrame) -> np.ndarray:
         latest = features.iloc[-1:]
+        if hasattr(self._model, 'set_params'):
+            self._model.set_params(predict_disable_shape_check=True)
         try:
             return self._model.predict_proba(latest)[0, 1]
         except Exception:
