@@ -3,9 +3,13 @@ from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import pandas as pd
+
+from src.analysis.ml.price_targets import build_trade_plan, to_dict as trade_plan_to_dict
 from src.analysis.service import analysis_service
 from src.db.models import Indicator, Instrument, Price, Signal, User
 from src.interfaces.api.auth import get_current_user, get_db
@@ -13,6 +17,11 @@ from src.llm.router import llm
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["instruments"])
+
+
+class AskBody(BaseModel):
+    question: str
+    ticker_context: str = ""
 
 
 @router.get("/api/instruments")
@@ -164,6 +173,65 @@ async def get_signal(ticker: str, db: AsyncSession = Depends(get_db)):
     return fused
 
 
+@router.get("/api/instruments/{ticker}/trade-plan")
+async def get_trade_plan(
+    ticker: str,
+    profile: str = Query("balanced"),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
+    inst = result.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(404, "Instrument not found")
+
+    price_result = await db.execute(
+        select(Price).where(Price.instrument_id == inst.id).order_by(Price.date)
+    )
+    prices = price_result.scalars().all()
+    if len(prices) < 20:
+        raise HTTPException(400, "Not enough price data")
+
+    df = pd.DataFrame(
+        [
+            {"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume}
+            for p in prices
+        ]
+    )
+    ind_result = await db.execute(
+        select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date)
+    )
+    inds = ind_result.scalars().all()
+    ind_df = pd.DataFrame(
+        [
+            {
+                "date": i.date, "rsi": i.rsi, "atr": i.atr,
+                "sma_20": i.sma_20, "sma_50": i.sma_50,
+                "macd_hist": i.macd_hist,
+            }
+            for i in inds
+        ]
+    )
+
+    if ind_df.empty:
+        raise HTTPException(400, "No indicator data")
+
+    latest = df.iloc[-1]
+    ind_latest = ind_df.iloc[-1]
+    close = float(latest["close"])
+    sma20 = float(ind_latest.get("sma_20") or close)
+    atr = float(ind_latest.get("atr") or close * 0.02)
+    if atr <= 0 or close <= 0:
+        raise HTTPException(400, "Invalid price data")
+
+    plan = build_trade_plan(close, sma20, atr, df, profile=profile)
+    return {
+        "ticker": ticker.upper(),
+        "profile": profile,
+        "current_price": close,
+        **trade_plan_to_dict(plan),
+    }
+
+
 @router.get("/api/instruments/{ticker}/advice")
 async def get_advice(
     ticker: str,
@@ -171,5 +239,19 @@ async def get_advice(
     user: Optional[User] = Depends(get_current_user),
 ):
     _, fused = await _resolve_signal(ticker, db)
-    advice = await llm.advise(fused)
+    advice = await llm.advise(fused, user_id=user.id if user else None)
     return {"signal": fused, "advice": advice, "user_id": user.id if user else None}
+
+
+@router.post("/api/ask")
+async def ask_question(
+    body: AskBody,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    answer = await llm.answer_question(
+        question=body.question,
+        user_id=user.id if user else None,
+        ticker_context=body.ticker_context,
+    )
+    return {"answer": answer, "user_id": user.id if user else None, "risk_profile": getattr(user, "risk_profile", "balanced") if user else "balanced"}

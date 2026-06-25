@@ -73,6 +73,7 @@ class TBankClient:
                     {
                         "figi": p.figi,
                         "ticker": p.ticker if hasattr(p, 'ticker') and p.ticker else p.figi,
+                        "instrument_type": str(p.instrument_type),
                         "quantity": self._decimal(p.quantity),
                         "average_price": self._money(p.average_position_price),
                         "current_price": self._money(p.current_price),

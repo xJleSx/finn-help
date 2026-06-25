@@ -25,8 +25,8 @@ class LLMRouter:
             else None
         )
 
-    async def advise(self, signal: dict[str, object]) -> str:
-        self._enrich_with_risk_profile(signal)
+    async def advise(self, signal: dict[str, object], user_id: str | int | None = None) -> str:
+        self._enrich_with_risk_profile(signal, user_id=user_id)
         await self._enrich_with_wolfram(signal)
 
         if self._use_groq:
@@ -39,8 +39,15 @@ class LLMRouter:
         raw = await self._ollama_advise(signal)
         return self._process_output(raw, signal)
 
-    def _enrich_with_risk_profile(self, signal: dict[str, object]) -> None:
+    def _enrich_with_risk_profile(self, signal: dict[str, object], user_id: str | int | None = None) -> None:
         try:
+            from src.user_profile import profile_manager
+
+            if user_id is not None:
+                profile = profile_manager.get(str(user_id))
+                signal["risk_profile"] = profile.risk_profile
+                return
+
             from src.db.connection import get_session
             from src.db.models import UserSetting
 
@@ -67,6 +74,133 @@ class LLMRouter:
                 logger.debug("WolframAlpha enriched %s: %d facts", ticker, len(data))
         except Exception as e:
             logger.warning("WolframAlpha enrichment failed for %s: %s", ticker, e)
+
+    def _profile_label(self, user_id: str | int | None = None) -> str:
+        try:
+            from src.user_profile import profile_manager
+
+            if user_id is not None:
+                return profile_manager.get(str(user_id)).risk_profile
+        except Exception:
+            pass
+        return "balanced"
+
+    def _market_context_block(self, db=None) -> str:
+        try:
+            if db is None:
+                from src.db.connection import get_session
+                db = get_session()
+                should_close = True
+            else:
+                should_close = False
+
+            lines = []
+            from src.collectors.macro import MacroCollector
+
+            macro = MacroCollector.latest_values(db)
+            if macro:
+                parts = []
+                for k, v in macro.items():
+                    if v is not None:
+                        parts.append(f"{k}={v}")
+                lines.append(f"Макро: {', '.join(parts)}")
+
+            from src.db.models import Instrument, Price, Signal as SignalModel
+            from datetime import date, timedelta
+            from sqlalchemy import func
+
+            today_signals = (
+                db.query(SignalModel)
+                .filter(func.date(SignalModel.date) == date.today())
+                .order_by(SignalModel.confidence.desc())
+                .limit(10)
+                .all()
+            )
+            if today_signals:
+                top = []
+                for s in today_signals:
+                    inst = db.query(Instrument).filter_by(id=s.instrument_id).first()
+                    ticker = inst.ticker if inst else "?"
+                    top.append(f"{ticker}: {s.action} ({s.confidence:.0%})")
+                lines.append(f"Топ-сигналы сегодня: {'; '.join(top)}")
+
+            bmk = db.query(Price).join(Instrument).filter(Instrument.ticker == "IMOEX").order_by(Price.date.desc()).first()
+            if bmk:
+                lines.append(f"IMOEX: {bmk.close:.0f}")
+
+            result = "\n".join(lines)
+            if should_close:
+                db.close()
+            return result
+        except Exception as e:
+            logger.debug("market_context_block failed: %s", e)
+            return ""
+
+    async def answer_question(
+        self,
+        question: str,
+        user_id: str | int | None = None,
+        ticker_context: str = "",
+    ) -> str:
+        profile = self._profile_label(user_id)
+
+        from src.db.connection import get_session
+
+        db = get_session()
+        try:
+            market_ctx = self._market_context_block(db)
+        finally:
+            db.close()
+
+        system_prompt = prompts.QUESTION_SYSTEM_PROMPT.format(profile=profile)
+        user_prompt = prompts.build_question_message(
+            question=question,
+            profile=profile,
+            market_context=market_ctx,
+            ticker_context=ticker_context,
+        )
+
+        if self._use_groq:
+            try:
+                return await self._groq_question(system_prompt, user_prompt)
+            except Exception as e:
+                logger.warning(f"Groq question failed: {e}, trying local...")
+
+        return await self._ollama_question(system_prompt, user_prompt)
+
+    async def _groq_question(self, system: str, user: str) -> str:
+        from groq import AsyncGroq
+
+        client = AsyncGroq(api_key=settings.groq_api_key)
+        response = await client.chat.completions.create(
+            model=self._groq_model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.3,
+            max_tokens=1024,
+        )
+        return response.choices[0].message.content or ""
+
+    async def _ollama_question(self, system: str, user: str) -> str:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            payload = {
+                "model": self._ollama_model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 1024,
+                "stream": False,
+            }
+            resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
+            resp.raise_for_status()
+            data: Any = resp.json()
+            return cast(str, data.get("message", {}).get("content", ""))
 
     async def _groq_advise(self, signal: dict[str, object]) -> str:
         try:

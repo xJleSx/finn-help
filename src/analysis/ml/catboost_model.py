@@ -151,8 +151,7 @@ class CatBoostClassifierModel:
         result["rsi_norm"] = result["rsi"] / 100
         result["macd_signal_binary"] = (result["macd_hist"] > 0).astype(int)
         for c in self.EVENT_FEATURE_COLS:
-            if c in df.columns:
-                result[c] = df[c].values
+            result[c] = df[c].values if c in df.columns else 0
         result = result.dropna()
         return result
 

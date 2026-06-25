@@ -98,6 +98,7 @@ class SignalFusionEngine:
         sentiment: Optional[dict] = None,
         mtf: Optional[dict] = None,
         event_context: Optional[dict] = None,
+        trade_plan: Optional[dict] = None,
         user_id: Optional[str] = None,
     ) -> dict:
         reasons = []
@@ -376,6 +377,9 @@ class SignalFusionEngine:
                 "atr_ratio": volatility_regime.get("atr_ratio"),
                 "hv": volatility_regime.get("hv"),
             }
+
+        if trade_plan:
+            fused["trade_plan"] = trade_plan
 
         return fused
 

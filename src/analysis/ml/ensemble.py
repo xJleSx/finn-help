@@ -16,6 +16,22 @@ logger = logging.getLogger(__name__)
 
 EVENT_FEATURE_COLS = ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]
 
+FEATURE_COLS = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
+
+
+def _build_features(df: pd.DataFrame) -> pd.DataFrame:
+    needed = FEATURE_COLS
+    result = df[needed].copy() if all(c in df.columns for c in needed) else df.copy()
+    result["price_sma20"] = result["close"] / result["sma_20"].replace(0, np.nan)
+    result["price_sma50"] = result["close"] / result["sma_50"].replace(0, np.nan)
+    result["sma20_sma50"] = result["sma_20"] / result["sma_50"].replace(0, np.nan)
+    result["rsi_norm"] = result["rsi"] / 100
+    result["macd_signal_binary"] = (result["macd_hist"] > 0).astype(int)
+    for c in EVENT_FEATURE_COLS:
+        if c in df.columns:
+            result[c] = df[c].values
+    return result
+
 
 class EnsemblePredictor:
     def __init__(self, ticker: str = ""):
@@ -57,27 +73,10 @@ class EnsemblePredictor:
         return self._cat
 
     def _build_x(self, df: pd.DataFrame) -> np.ndarray | None:
-        needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
-        if not all(c in df.columns for c in needed):
+        if not all(c in df.columns for c in FEATURE_COLS):
             return None
-        features = df[needed].copy()
-        features["price_sma20"] = features["close"] / features["sma_20"].replace(0, np.nan)
-        features["price_sma50"] = features["close"] / features["sma_50"].replace(0, np.nan)
-        features["sma20_sma50"] = features["sma_20"] / features["sma_50"].replace(0, np.nan)
-        features["rsi_norm"] = features["rsi"] / 100
-        features["macd_signal_binary"] = (features["macd_hist"] > 0).astype(int)
-        for c in EVENT_FEATURE_COLS:
-            if c in df.columns:
-                features[c] = df[c].values
+        features = _build_features(df)
         return features.dropna().values
-
-    def _build_y(self, df: pd.DataFrame) -> np.ndarray | None:
-        lookahead = 5
-        threshold = 0.03
-        future_returns = df["close"].shift(-lookahead) / df["close"] - 1
-        y = np.where(future_returns > threshold, 1, np.where(future_returns < -threshold, 0, np.nan))
-        mask = ~np.isnan(y)
-        return y[mask].astype(int) if mask.sum() >= 10 else None
 
     def _get_weights(self, oos_list: list[dict]) -> list[float]:
         weights = [model_weight_from_oos(oos) for oos in oos_list]
@@ -223,22 +222,12 @@ class EnsemblePredictor:
             from sklearn.linear_model import LogisticRegression
             from sklearn.preprocessing import StandardScaler
 
-            needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
-            if not all(c in df.columns for c in needed):
+            if not all(c in df.columns for c in FEATURE_COLS):
                 return None
             lookahead = 5
             threshold = 0.03
 
-            features = df[needed].copy()
-            features["price_sma20"] = features["close"] / features["sma_20"].replace(0, np.nan)
-            features["price_sma50"] = features["close"] / features["sma_50"].replace(0, np.nan)
-            features["sma20_sma50"] = features["sma_20"] / features["sma_50"].replace(0, np.nan)
-            features["rsi_norm"] = features["rsi"] / 100
-            features["macd_signal_binary"] = (features["macd_hist"] > 0).astype(int)
-            for c in EVENT_FEATURE_COLS:
-                if c in df.columns:
-                    features[c] = df[c].values
-            features = features.dropna()
+            features = _build_features(df).dropna()
 
             if len(features) < 50:
                 return None
@@ -286,20 +275,10 @@ class EnsemblePredictor:
 
         lookahead = 5
         threshold = 0.03
-        needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
-        if not all(c in df.columns for c in needed):
+        if not all(c in df.columns for c in FEATURE_COLS):
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
-        features = df[needed].copy()
-        features["price_sma20"] = features["close"] / features["sma_20"].replace(0, np.nan)
-        features["price_sma50"] = features["close"] / features["sma_50"].replace(0, np.nan)
-        features["sma20_sma50"] = features["sma_20"] / features["sma_50"].replace(0, np.nan)
-        features["rsi_norm"] = features["rsi"] / 100
-        features["macd_signal_binary"] = (features["macd_hist"] > 0).astype(int)
-        for c in EVENT_FEATURE_COLS:
-            if c in df.columns:
-                features[c] = df[c].values
-
+        features = _build_features(df)
         future_returns = df["close"].shift(-lookahead) / df["close"] - 1
         aligned = features.iloc[:-lookahead].copy()
         labels = future_returns.iloc[: len(aligned)].values

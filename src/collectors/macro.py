@@ -39,25 +39,65 @@ class MacroCollector:
     async def _fetch_brent(self) -> dict | None:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                "https://iss.moex.com/iss/engines/market/pips/securities.json",
-                params={"securities": "BRENT", "iss.only": "marketdata"},
+                "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities.json",
+                params={
+                    "securities.columns": "SECID,LASTTRADEDATE,PREVOPENPOSITION,ASSETCODE",
+                    "iss.only": "securities",
+                    "limit": "100",
+                },
             )
             resp.raise_for_status()
             data = resp.json()
-            rows = (data.get("marketdata") or {}).get("data", [])
-            cols = (data.get("marketdata") or {}).get("columns", [])
-            if not rows or not cols:
-                return None
+            rows = (data.get("securities") or {}).get("data", [])
+            cols = (data.get("securities") or {}).get("columns", [])
+
+            contracts = []
             for row in rows:
                 try:
-                    idx = cols.index("LAST")
-                    val = row[idx]
+                    asset_idx = cols.index("ASSETCODE")
+                    secid_idx = cols.index("SECID")
+                    ltd_idx = cols.index("LASTTRADEDATE")
+                    oi_idx = cols.index("PREVOPENPOSITION")
+                    if row[asset_idx] == "BR":
+                        contracts.append({
+                            "secid": row[secid_idx],
+                            "last_trade": date.fromisoformat(row[ltd_idx]) if row[ltd_idx] else None,
+                            "oi": int(row[oi_idx]) if row[oi_idx] else 0,
+                        })
+                except (ValueError, IndexError, TypeError):
+                    continue
+
+            if not contracts:
+                return None
+
+            today = date.today()
+            active = [c for c in contracts if c["last_trade"] and c["last_trade"] >= today]
+            if not active:
+                active = contracts
+            front = max(active, key=lambda c: c["oi"])
+
+            resp2 = await client.get(
+                f"https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities/{front['secid']}.json",
+                params={
+                    "iss.only": "marketdata",
+                    "marketdata.columns": "SECID,LAST",
+                },
+            )
+            resp2.raise_for_status()
+            data2 = resp2.json()
+            md_rows = (data2.get("marketdata") or {}).get("data", [])
+            md_cols = (data2.get("marketdata") or {}).get("columns", [])
+
+            for row in md_rows:
+                try:
+                    last_idx = md_cols.index("LAST")
+                    val = row[last_idx]
                     if val is not None:
                         return {
-                            "date": date.today(),
+                            "date": today,
                             "indicator_type": "brent",
                             "value": float(val),
-                            "source": "MOEX",
+                            "source": f"MOEX/{front['secid']}",
                         }
                 except (ValueError, IndexError, TypeError):
                     continue
@@ -66,25 +106,27 @@ class MacroCollector:
     async def _fetch_key_rate(self) -> dict | None:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                "https://www.cbr.ru/hd_base/KeyRate/XML",
-                params={"date_req": date.today().strftime("%d.%m.%Y")},
+                "https://www.cbr.ru/hd_base/KeyRate",
+                params={"UniDbQuery.Formatted": "True", "UniDbQuery.Date": date.today().strftime("%d.%m.%Y")},
             )
             resp.raise_for_status()
-        import xml.etree.ElementTree as ET
+        from lxml import html
 
-        root = ET.fromstring(resp.content)
-        for rate in root.findall(".//Rate"):
-            try:
-                val = rate.find("Value")
-                if val is not None and val.text:
+        tree = html.fromstring(resp.text)
+        rows = tree.xpath("//table[@class='data']//tr")
+        for row in rows[1:]:
+            cells = row.xpath(".//td")
+            if len(cells) >= 2:
+                val = cells[1].text_content().strip().replace(",", ".")
+                try:
                     return {
                         "date": date.today(),
                         "indicator_type": "key_rate",
-                        "value": float(val.text.replace(",", ".")),
+                        "value": float(val),
                         "source": "CBR",
                     }
-            except (AttributeError, ValueError):
-                continue
+                except ValueError:
+                    continue
         return None
 
     async def _fetch_usd_rate(self) -> dict | None:
@@ -132,75 +174,54 @@ class MacroCollector:
     async def _fetch_cpi(self) -> dict | None:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                "https://www.cbr.ru/hd_base/infl/XML",
-                params={"date_req": date.today().strftime("%d.%m.%Y")},
+                "https://www.cbr.ru/hd_base/infl",
+                params={"UniDbQuery.Formatted": "True", "UniDbQuery.Date": date.today().strftime("%d.%m.%Y")},
             )
             resp.raise_for_status()
-        import xml.etree.ElementTree as ET
+        from lxml import html
 
-        root = ET.fromstring(resp.content)
-        for item in root.findall(".//Infl"):
-            try:
-                val = item.find("Value")
-                if val is not None and val.text:
+        tree = html.fromstring(resp.text)
+        rows = tree.xpath("//table[@class='data']//tr")
+        for row in rows[1:]:
+            cells = row.xpath(".//td")
+            if len(cells) >= 2:
+                val = cells[1].text_content().strip().replace(",", ".")
+                try:
                     return {
                         "date": date.today(),
                         "indicator_type": "cpi",
-                        "value": float(val.text.replace(",", ".")),
+                        "value": float(val),
                         "source": "CBR",
                     }
-            except (AttributeError, ValueError):
-                continue
+                except ValueError:
+                    continue
         return None
 
     async def _fetch_ofz_yield(self) -> dict | None:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://www.cbr.ru/hd_base/zcyc_params/XML",
-                params={"date_req": date.today().strftime("%d.%m.%Y")},
-            )
+            resp = await client.get("https://www.cbr.ru/hd_base/zcyc_params")
             resp.raise_for_status()
-        import xml.etree.ElementTree as ET
+        from lxml import html
 
-        root = ET.fromstring(resp.content)
-        for item in root.findall(".//Param"):
-            try:
-                period = item.find("Period")
-                val = item.find("Value")
-                if period is not None and period.text and val is not None and val.text:
-                    if "10" in period.text:
-                        return {
-                            "date": date.today(),
-                            "indicator_type": "ofz_10y",
-                            "value": float(val.text.replace(",", ".")),
-                            "source": "CBR",
-                        }
-            except (AttributeError, ValueError):
-                continue
+        tree = html.fromstring(resp.text)
+        rows = tree.xpath("//table[contains(@class, 'data')]//tr")
+        for row in rows[1:]:
+            cells = row.xpath(".//td")
+            if len(cells) >= 13:
+                yield_10y = cells[9].text_content().strip().replace(",", ".")
+                try:
+                    return {
+                        "date": date.today(),
+                        "indicator_type": "ofz_10y",
+                        "value": float(yield_10y),
+                        "source": "CBR",
+                    }
+                except ValueError:
+                    continue
         return None
 
     async def _fetch_m2(self) -> dict | None:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://www.cbr.ru/hd_base/mb/XML",
-                params={"date_req": date.today().strftime("%d.%m.%Y")},
-            )
-            resp.raise_for_status()
-        import xml.etree.ElementTree as ET
-
-        root = ET.fromstring(resp.content)
-        for item in root.findall(".//MB"):
-            try:
-                val = item.find("Value")
-                if val is not None and val.text:
-                    return {
-                        "date": date.today(),
-                        "indicator_type": "m2",
-                        "value": float(val.text.replace(",", ".")),
-                        "source": "CBR",
-                    }
-            except (AttributeError, ValueError):
-                continue
+        logger.warning("M2 data source (CBR XML API) no longer available — skipped")
         return None
 
     @staticmethod
