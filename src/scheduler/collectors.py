@@ -53,7 +53,7 @@ async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date:
         need_normalize = False
 
     nominal: float | None = None
-    if need_normalize:
+    if board == "bond":
         nominal = inst.nominal
         if nominal is None:
             info = await moex.get_security_info(inst.ticker)
@@ -62,8 +62,6 @@ async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date:
                 nominal = float(fv)
                 inst.nominal = nominal
                 db.flush()
-        if nominal is None:
-            logger.warning("No face value for bond %s, skipping normalization", inst.ticker)
 
     def _bond_normalize(v: float | None) -> float | None:
         if v is not None and nominal is not None:
