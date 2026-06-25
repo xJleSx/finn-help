@@ -66,14 +66,21 @@ class TBankClient:
         if not self._client:
             raise RuntimeError("Client not initialized")
         resp = await self._client.operations.get_portfolio(account_id=account_id)  # type: ignore[attr-defined]
+        allowed_types = {
+            InstrumentType.INSTRUMENT_TYPE_SHARE,
+            InstrumentType.INSTRUMENT_TYPE_BOND,
+            InstrumentType.INSTRUMENT_TYPE_ETF,
+        }
+        type_names = {"share", "etf", "bond"}
         positions = []
         for p in resp.positions:
-            if p.instrument_type in ("share", "etf", "bond"):
+            it = p.instrument_type
+            if it in allowed_types or str(it).lower() in type_names:
                 positions.append(
                     {
                         "figi": p.figi,
                         "ticker": p.ticker if hasattr(p, 'ticker') and p.ticker else p.figi,
-                        "instrument_type": str(p.instrument_type),
+                        "instrument_type": str(it),
                         "quantity": self._decimal(p.quantity),
                         "average_price": self._money(p.average_position_price),
                         "current_price": self._money(p.current_price),
