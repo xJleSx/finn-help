@@ -42,7 +42,7 @@ jobs:
           --health-retries 10
     env:
       JWT_SECRET: ci-test-secret
-      DATABASE_URL: postgresql+psycopg2://finn:finn@localhost:5432/finn
+      DATABASE_URL: postgresql+asyncpg://finn:finn@localhost:5432/finn
     steps:
       - uses: actions/checkout@v4
 
@@ -54,6 +54,14 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --group dev
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -U finn -d finn && break
+            echo "Waiting for Postgres... ($i)"
+            sleep 2
+          done
 
       - name: Run migrations
         run: uv run alembic upgrade head
