@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,11 @@ def _save_registry(registry: dict[str, Any]) -> None:
     REGISTRY_FILE.write_text(json.dumps(registry, indent=2, ensure_ascii=False))
 
 
-def save_model(model: Any, name: str, metrics: Optional[dict[str, Any]] = None, params: Optional[dict[str, Any]] = None) -> str:
+def save_model(
+    model: Any, name: str,
+    metrics: Optional[dict[str, Any]] = None,
+    params: Optional[dict[str, Any]] = None,
+) -> str:
     import cloudpickle  # type: ignore[import-untyped]
 
     version = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")

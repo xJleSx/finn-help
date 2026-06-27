@@ -171,7 +171,9 @@ class CatBoostClassifierModel:
             base = features[self.BASE_FEATURE_COLS].iloc[-1:]
             return float(self._model.predict_proba(base)[0, 1])  # type: ignore[union-attr]
 
-    def _train_on_the_fly(self, df: pd.DataFrame, features: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> tuple[Any, dict[str, Any] | None] | None:
+    def _train_on_the_fly(
+        self, df: pd.DataFrame, features: pd.DataFrame, anomaly_mask: np.ndarray | None = None,
+    ) -> tuple[Any, dict[str, Any] | None] | None:
         try:
             lookahead = 5
             threshold = 0.03

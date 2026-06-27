@@ -339,7 +339,7 @@ async def _check_daily_pnl() -> None:
             latest_price = (
                 db.query(Price.close).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
             )
-            price = float(latest_price[0]) if latest_price else float(p.avg_price or 0)  
+            price = float(latest_price[0]) if latest_price else float(p.avg_price or 0)
             current_value += float(p.quantity or 0) * price
         await async_update_day_value(current_value)
         await async_update_drawdown(current_value)

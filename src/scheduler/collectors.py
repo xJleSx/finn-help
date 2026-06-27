@@ -2,7 +2,7 @@ import logging
 from datetime import date, timedelta
 from typing import Any
 
-import pandas as pd  
+import pandas as pd
 from sqlalchemy.orm import Session
 
 from src.collectors.cbr import CBRCollector
@@ -102,7 +102,7 @@ async def fetch_price_history_for_instrument(ticker: str, instrument_type: str) 
         if not inst:
             logger.warning("Instrument %s not found in DB, cannot fetch price history", ticker)
             return 0
-        async with MOEXCollector() as moex:  
+        async with MOEXCollector() as moex:
             new_count = await _fetch_prices_for_instrument(db, inst, from_date, moex)
         if new_count:
             db.commit()
@@ -113,14 +113,18 @@ async def fetch_price_history_for_instrument(ticker: str, instrument_type: str) 
 
 async def collect_prices(db: Session) -> set[int]:
     updated_ids: set[int] = set()
-    async with MOEXCollector() as moex:  
+    async with MOEXCollector() as moex:
         instruments = db.query(Instrument).all()
         if not instruments:
             return updated_ids
 
         from sqlalchemy import func as sqlfunc
 
-        last_dates: dict[int, date | None] = dict(db.query(Price.instrument_id, sqlfunc.max(Price.date)).group_by(Price.instrument_id).all())  # type: ignore[arg-type]
+        last_dates: dict[int, date | None] = dict(
+            db.query(Price.instrument_id, sqlfunc.max(Price.date))
+            .group_by(Price.instrument_id)
+            .all()
+        )  # type: ignore[arg-type]
 
         for inst in instruments:
             last_dt = last_dates.get(int(inst.id))
@@ -156,7 +160,7 @@ def _check_price_freshness(db: Session, max_age_days: int = STALENESS_THRESHOLD_
 
 
 async def collect_dividends(db: Session) -> None:
-    async with MOEXCollector() as moex:  
+    async with MOEXCollector() as moex:
         instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
         if not instruments:
             return
@@ -256,7 +260,7 @@ def compute_indicators(db: Session, instrument_ids: set[int] | None = None) -> N
 async def collect_news(db: Session) -> list[dict[str, Any]]:
     from src.db.models import NewsInstrument
 
-    collector = NewsCollector()  
+    collector = NewsCollector()
     news_list = await collector.fetch_all(max_per_feed=NEWS_MAX_PER_FEED)
 
     ticker_map: dict[str, int] = {}
@@ -344,7 +348,7 @@ async def collect_fundamental(db: Session) -> None:
         return
 
     today = date.today()
-    async with FundamentalDataCollector() as collector:  
+    async with FundamentalDataCollector() as collector:
         for inst in instruments:
             last_price_row = db.query(Price.close).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
             last_price = float(last_price_row[0]) if last_price_row and last_price_row[0] is not None else None

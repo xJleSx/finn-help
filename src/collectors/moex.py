@@ -121,7 +121,9 @@ class MOEXCollector:
         )
         return self._parse_table(data, "history")
 
-    async def _get_bond_history(self, ticker: str, from_date: str, to_date: str) -> tuple[list[dict[str, Any]], str | None]:
+    async def _get_bond_history(
+        self, ticker: str, from_date: str, to_date: str
+    ) -> tuple[list[dict[str, Any]], str | None]:
         for board_id in BOND_BOARDS:
             path = f"/history/engines/stock/markets/bonds/boards/{board_id}/securities/{ticker}.json"
             try:

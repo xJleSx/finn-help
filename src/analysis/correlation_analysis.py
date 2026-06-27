@@ -1,5 +1,4 @@
 import logging
-
 from typing import cast
 
 import pandas as pd
