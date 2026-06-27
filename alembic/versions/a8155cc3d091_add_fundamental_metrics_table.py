@@ -4,11 +4,12 @@ Revision ID: a8155cc3d091
 Revises: 87ed6b3d580d
 Create Date: 2026-06-23 00:00:00.000000
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import sqlite
+
+from alembic import op
 
 revision: str = "a8155cc3d091"
 down_revision: Union[str, None] = "87ed6b3d580d"
@@ -34,7 +35,10 @@ def upgrade():
         sa.Column("revenue", sa.Float(), nullable=True),
         sa.Column("net_income", sa.Float(), nullable=True),
         sa.Column("extra", sa.JSON(), nullable=True),
-        sa.ForeignKeyConstraint(["instrument_id"], ["instruments.id"], ),
+        sa.ForeignKeyConstraint(
+            ["instrument_id"],
+            ["instruments.id"],
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_fundamental_metrics_instr_date", "fundamental_metrics", ["instrument_id", "date"])

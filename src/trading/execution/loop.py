@@ -42,7 +42,7 @@ def _load_daily_counters() -> None:
             _trades_today = int(row.value)
         row2 = db.query(UserSetting).filter(UserSetting.key == _KEY_RESET_DAY).first()
         if row2:
-            _last_reset_day = row2.value
+            _last_reset_day = str(row2.value)
     finally:
         db.close()
 
@@ -52,12 +52,12 @@ def _save_daily_counters() -> None:
     try:
         existing = db.query(UserSetting).filter(UserSetting.key == _KEY_TRADES).first()
         if existing:
-            existing.value = str(_trades_today)
+            existing.value = str(_trades_today)  # type: ignore[assignment]
         else:
             db.add(UserSetting(key=_KEY_TRADES, value=str(_trades_today)))
         existing2 = db.query(UserSetting).filter(UserSetting.key == _KEY_RESET_DAY).first()
         if existing2:
-            existing2.value = str(_last_reset_day or "")
+            existing2.value = str(_last_reset_day or "")  # type: ignore[assignment]
         else:
             db.add(UserSetting(key=_KEY_RESET_DAY, value=str(_last_reset_day or "")))
         db.commit()
@@ -139,6 +139,7 @@ async def _check_var() -> tuple[bool, str]:
         if len(all_returns) < 20:
             return True, "ok"
         import numpy as np
+
         var_95 = float(abs(np.percentile(all_returns, 5)))
         return check_var_limit(var_95)
     finally:
@@ -149,6 +150,7 @@ async def _check_liquidity(ticker: str) -> tuple[bool, str]:
     db = get_session()
     try:
         from src.db.models import Instrument, Price
+
         inst = db.query(Instrument).filter_by(ticker=ticker).first()
         if not inst:
             return True, "ok"
@@ -174,6 +176,7 @@ async def _check_news(ticker: str) -> tuple[bool, str]:
     db = get_session()
     try:
         from src.db.models import Instrument, News, NewsInstrument
+
         inst = db.query(Instrument).filter_by(ticker=ticker).first()
         if not inst:
             return True, "ok"
@@ -185,10 +188,7 @@ async def _check_news(ticker: str) -> tuple[bool, str]:
             .limit(10)
             .all()
         )
-        scores = [
-            n.sentiment_weighted or n.sentiment_score or 0
-            for n in recent_news
-        ]
+        scores = [n.sentiment_weighted or n.sentiment_score or 0 for n in recent_news]
         return check_news_sentiment(scores)
     finally:
         db.close()
@@ -246,12 +246,31 @@ async def _process_signals() -> None:
                 from src.db.models import Price as PriceModel
 
                 port_value = db2.query(PortModel).all()
-                total_value = sum(
-                    (p.quantity or 0) * ((db2.query(PriceModel.close).filter_by(instrument_id=p.instrument_id).order_by(PriceModel.date.desc()).first() or (0,))[0] or p.avg_price or 0)
-                    for p in port_value
-                ) or 100000
+                total_value = (
+                    sum(
+                        (p.quantity or 0)
+                        * (
+                            (
+                                db2.query(PriceModel.close)
+                                .filter_by(instrument_id=p.instrument_id)
+                                .order_by(PriceModel.date.desc())
+                                .first()
+                                or (0,)
+                            )[0]
+                            or p.avg_price
+                            or 0
+                        )
+                        for p in port_value
+                    )
+                    or 100000
+                )
 
-                last_price_row = db2.query(PriceModel).filter_by(instrument_id=s.instrument_id).order_by(PriceModel.date.desc()).first()
+                last_price_row = (
+                    db2.query(PriceModel)
+                    .filter_by(instrument_id=s.instrument_id)
+                    .order_by(PriceModel.date.desc())
+                    .first()
+                )
                 last_price = last_price_row.close if last_price_row else 100
             except Exception:
                 total_value = 100000
@@ -301,7 +320,7 @@ async def _check_stop_losses() -> None:
             if not price or not price.close:
                 continue
 
-            await position_tracker.execute_triggers(order.ticker, price.close)
+            await position_tracker.execute_triggers(str(order.ticker), float(price.close))
     finally:
         db.close()
 
@@ -318,13 +337,10 @@ async def _check_daily_pnl() -> None:
             if not p.instrument_id:
                 continue
             latest_price = (
-                db.query(Price.close)
-                .filter_by(instrument_id=p.instrument_id)
-                .order_by(Price.date.desc())
-                .first()
+                db.query(Price.close).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
             )
-            price = latest_price[0] if latest_price else (p.avg_price or 0)
-            current_value += (p.quantity or 0) * price
+            price = float(latest_price[0]) if latest_price else float(p.avg_price or 0)  
+            current_value += float(p.quantity or 0) * price
         await async_update_day_value(current_value)
         await async_update_drawdown(current_value)
         pnl, pnl_pct = get_day_pnl()
@@ -337,6 +353,7 @@ async def _rebalance_portfolio() -> None:
     db = get_session()
     try:
         from src.notifications.service import NotificationService
+
         ns = NotificationService()
         alerts = ns.check_rebalance(db)
         for alert in alerts:
@@ -367,6 +384,7 @@ async def run_execution_loop(interval: int = 300) -> None:
 
     try:
         from src.db.connection import init_db
+
         init_db()
     except Exception:
         pass
@@ -390,7 +408,7 @@ async def run_execution_loop(interval: int = 300) -> None:
                     await _process_signals()
                     await _check_stop_losses()
 
-                    elapsed = (datetime.now(timezone.utc).timestamp() - last_rebalance)
+                    elapsed = datetime.now(timezone.utc).timestamp() - last_rebalance
                     if elapsed > rebalance_interval:
                         await _rebalance_portfolio()
                         last_rebalance = datetime.now(timezone.utc).timestamp()

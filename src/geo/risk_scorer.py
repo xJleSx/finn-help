@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 
 class GeoRiskScorer:
-    def __init__(self):
+    def __init__(self) -> None:
         self.sanctions_keywords = [
             "санкции",
             "sanctions",
@@ -26,7 +26,7 @@ class GeoRiskScorer:
             "капитала",
         ]
 
-    def score(self, news_list: list[dict], currency_volatility: float = 0.0) -> dict:
+    def score(self, news_list: list[dict[str, Any]], currency_volatility: float = 0.0) -> dict[str, Any]:
         components = {
             "sanctions_risk": self._count_keywords(news_list, self.sanctions_keywords),
             "instability": self._count_keywords(news_list, self.instability_keywords),
@@ -61,7 +61,7 @@ class GeoRiskScorer:
 
         return result
 
-    def _count_keywords(self, news_list: list[dict], keywords: list[str]) -> float:
+    def _count_keywords(self, news_list: list[dict[str, Any]], keywords: list[str]) -> float:
         if not news_list:
             return 0.0
         count = 0

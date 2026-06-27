@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -13,21 +13,21 @@ MODEL_DIR.mkdir(parents=True, exist_ok=True)
 REGISTRY_FILE = MODEL_DIR / "registry.json"
 
 
-def _load_registry() -> dict:
+def _load_registry() -> dict[str, Any]:
     if REGISTRY_FILE.exists():
         try:
-            return json.loads(REGISTRY_FILE.read_text())
+            return json.loads(REGISTRY_FILE.read_text())  # type: ignore[no-any-return]
         except Exception:
             return {}
     return {}
 
 
-def _save_registry(registry: dict):
+def _save_registry(registry: dict[str, Any]) -> None:
     REGISTRY_FILE.write_text(json.dumps(registry, indent=2, ensure_ascii=False))
 
 
-def save_model(model: Any, name: str, metrics: Optional[dict] = None, params: Optional[dict] = None) -> str:
-    import cloudpickle
+def save_model(model: Any, name: str, metrics: Optional[dict[str, Any]] = None, params: Optional[dict[str, Any]] = None) -> str:
+    import cloudpickle  # type: ignore[import-untyped]
 
     version = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     model_path = MODEL_DIR / f"{name}__{version}.pkl"
@@ -80,8 +80,7 @@ def load_model(name: str, version: Optional[str] = None) -> Any:
         actual_hash = hashlib.md5(path.read_bytes()).hexdigest()
         if actual_hash != meta["hash"]:
             raise ValueError(
-                f"Model hash mismatch for '{name}' version {version}: "
-                f"expected {meta['hash']}, got {actual_hash}"
+                f"Model hash mismatch for '{name}' version {version}: expected {meta['hash']}, got {actual_hash}"
             )
 
     with open(path, "rb") as f:
@@ -91,7 +90,7 @@ def load_model(name: str, version: Optional[str] = None) -> Any:
     return model
 
 
-def list_models() -> list[dict]:
+def list_models() -> list[dict[str, Any]]:
     registry = _load_registry()
     result = []
     for name, data in registry.items():
@@ -109,7 +108,7 @@ def list_models() -> list[dict]:
     return result
 
 
-def get_model_metrics(name: str, version: Optional[str] = None) -> dict:
+def get_model_metrics(name: str, version: Optional[str] = None) -> dict[str, Any]:
     registry = _load_registry()
     if name not in registry:
         return {}
@@ -120,7 +119,7 @@ def get_model_metrics(name: str, version: Optional[str] = None) -> dict:
     return meta["metrics"] if meta else {}
 
 
-def delete_model(name: str, version: Optional[str] = None):
+def delete_model(name: str, version: Optional[str] = None) -> None:
     registry = _load_registry()
     if name not in registry:
         return
@@ -149,7 +148,7 @@ def delete_model(name: str, version: Optional[str] = None):
     logger.info("Model %s version %s deleted", name, version or "all")
 
 
-def cleanup_old_versions(name: str, keep: int = 3):
+def cleanup_old_versions(name: str, keep: int = 3) -> None:
     registry = _load_registry()
     if name not in registry:
         return

@@ -31,7 +31,6 @@ class TestGroqAdvise:
         router = LLMRouter()
         signal = {"action": "HOLD", "confidence": 0.5, "ticker": "T", "reasons": [], "max_portfolio_pct": 10}
 
-        import sys
         with (
             patch.dict("sys.modules", {"groq": None}),
             patch("src.llm.router.prompts") as mock_prompts,

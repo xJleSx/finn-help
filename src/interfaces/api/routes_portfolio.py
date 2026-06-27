@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Any, Optional, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
@@ -18,7 +18,7 @@ router = APIRouter(tags=["portfolio"])
 async def get_portfolio(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_user),
-):
+) -> list[dict[str, Any]]:
     from src.db.models import Portfolio
 
     q = select(Portfolio).where(Portfolio.user_id == user.id)
@@ -43,7 +43,8 @@ async def get_portfolio(
                 "current_price": float(current_price),
                 "value": float(current_price * p.quantity) if current_price and p.quantity else 0,
                 "profit_pct": round(((current_price / p.avg_price) - 1) * 100, 2)
-                if current_price and p.avg_price else 0,
+                if current_price and p.avg_price
+                else 0,
             }
         )
     return output
@@ -60,7 +61,7 @@ async def add_portfolio_position(
     body: AddPositionBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_user),
-):
+) -> dict[str, str]:
     from src.db.models import Portfolio
 
     result = await db.execute(select(Instrument).where(Instrument.ticker == body.ticker.upper()))
@@ -73,9 +74,9 @@ async def add_portfolio_position(
     )
     existing = existing_result.scalar_one_or_none()
     if existing:
-        existing.quantity += body.quantity
+        existing.quantity += body.quantity  # type: ignore[assignment]
         if body.avg_price:
-            existing.avg_price = body.avg_price
+            existing.avg_price = body.avg_price  # type: ignore[assignment]
     else:
         pos = Portfolio(user_id=user.id, instrument_id=inst.id, quantity=body.quantity, avg_price=body.avg_price)
         db.add(pos)
@@ -88,7 +89,7 @@ async def allocate_portfolio(
     capital: float = 50000.0,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_user),
-):
+) -> Any:
     from src.portfolio.allocator import allocator
 
     try:
@@ -103,7 +104,7 @@ async def allocate_portfolio(
 async def report_portfolio_csv(
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user),
-):
+) -> PlainTextResponse:
     from src.db.models import Portfolio
     from src.reports import generate_portfolio_csv
 
@@ -131,7 +132,8 @@ async def report_portfolio_csv(
                 "current_price": float(current_price),
                 "value": float(current_price * p.quantity) if current_price and p.quantity else 0,
                 "profit_pct": round(((current_price / p.avg_price) - 1) * 100, 2)
-                if current_price and p.avg_price else 0,
+                if current_price and p.avg_price
+                else 0,
             }
         )
     csv_content = generate_portfolio_csv(positions)
@@ -143,12 +145,12 @@ async def report_portfolio_csv(
 
 
 @router.get("/api/reports/signals")
-async def report_signals_csv(db: AsyncSession = Depends(get_db)):
+async def report_signals_csv(db: AsyncSession = Depends(get_db)) -> PlainTextResponse:
     from src.reports import generate_signals_csv
 
     result = await db.execute(select(Signal).order_by(Signal.date.desc()).limit(50))
     signals = result.scalars().all()
-    signal_list = [s.fused_json or {} for s in signals if s.fused_json]
+    signal_list: list[dict[str, Any]] = [cast(dict[str, Any], s.fused_json) or {} for s in signals if s.fused_json]
     csv_content = generate_signals_csv(signal_list)
     return PlainTextResponse(
         csv_content,
@@ -158,7 +160,7 @@ async def report_signals_csv(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/api/reports/sectors")
-async def report_sectors_csv(db: AsyncSession = Depends(get_db)):
+async def report_sectors_csv(db: AsyncSession = Depends(get_db)) -> PlainTextResponse:
     from src.analysis.sector import sector_analyzer
     from src.reports import generate_sector_report_csv
 

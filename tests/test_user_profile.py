@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import json
-import tempfile
-from pathlib import Path
-
 import pytest
 
-from src.user_profile import PROFILES_DIR, UserProfile, UserProfileManager, RISK_PROFILES
+from src.user_profile import PROFILES_DIR, RISK_PROFILES, UserProfile, UserProfileManager
 
 
 class TestUserProfile:
@@ -45,6 +41,7 @@ class TestUserProfileManager:
     def temp_profiles_dir(self, tmp_path):
         original = PROFILES_DIR
         import src.user_profile as up
+
         up.PROFILES_DIR = tmp_path / "profiles"
         up.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
         yield

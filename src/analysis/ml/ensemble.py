@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -35,10 +35,10 @@ def _build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 class EnsemblePredictor:
     def __init__(self, ticker: str = ""):
-        self._xgb = None
-        self._lgb = None
-        self._cat = None
-        self._meta = None
+        self._xgb: Any = None
+        self._lgb: Any = None
+        self._cat: Any = None
+        self._meta: Any = None
         self._ticker = ticker
 
     @property
@@ -46,7 +46,7 @@ class EnsemblePredictor:
         return f"ensemble_{self._ticker}" if self._ticker else "ensemble"
 
     @property
-    def xgb(self):
+    def xgb(self) -> Any:
         if self._xgb is None:
             from src.analysis.ml.xgboost_model import XGBoostClassifier
 
@@ -54,7 +54,7 @@ class EnsemblePredictor:
         return self._xgb
 
     @property
-    def lgb(self):
+    def lgb(self) -> Any:
         if self._lgb is None:
             from src.analysis.ml.lightgbm_model import LightGBMClassifier
 
@@ -62,7 +62,7 @@ class EnsemblePredictor:
         return self._lgb
 
     @property
-    def cat(self):
+    def cat(self) -> Any:
         if self._cat is None:
             try:
                 from src.analysis.ml.catboost_model import CatBoostClassifierModel
@@ -78,14 +78,14 @@ class EnsemblePredictor:
         features = _build_features(df)
         return features.dropna().values
 
-    def _get_weights(self, oos_list: list[dict]) -> list[float]:
+    def _get_weights(self, oos_list: list[dict[str, Any]]) -> list[float]:
         weights = [model_weight_from_oos(oos) for oos in oos_list]
         total = sum(weights)
         if total > 0:
             return [w / total for w in weights]
         return [1.0 / max(len(weights), 1)] * len(weights)
 
-    def predict(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> dict:
+    def predict(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> dict[str, Any]:
         models = [("xgb", self.xgb), ("lgb", self.lgb), ("cat", self.cat)]
         results = []
         oos_list = []
@@ -179,14 +179,14 @@ class EnsemblePredictor:
                 results[name] = False
         return results
 
-    def save_meta(self, metrics: Optional[dict] = None) -> str:
+    def save_meta(self, metrics: Optional[dict[str, Any]] = None) -> str:
         meta_data = {
             "meta": self._meta,
             "ticker": self._ticker,
         }
         return save_model(meta_data, self.model_name, metrics=metrics)
 
-    def load_meta(self, version: Optional[str] = None):
+    def load_meta(self, version: Optional[str] = None) -> Any:
         data = load_from_registry(self.model_name, version=version)
         self._meta = data.get("meta")
         return self._meta
@@ -217,10 +217,10 @@ class EnsemblePredictor:
             success = False
         return success
 
-    def _stacking_predict(self, df: pd.DataFrame, base_preds: list[dict]) -> float | None:
+    def _stacking_predict(self, df: pd.DataFrame, base_preds: list[dict[str, Any]]) -> float | None:
         try:
-            from sklearn.linear_model import LogisticRegression
-            from sklearn.preprocessing import StandardScaler
+            from sklearn.linear_model import LogisticRegression  # type: ignore[import-untyped]
+            from sklearn.preprocessing import StandardScaler  # type: ignore[import-untyped]
 
             if not all(c in df.columns for c in FEATURE_COLS):
                 return None
@@ -234,7 +234,7 @@ class EnsemblePredictor:
 
             future_returns = df["close"].shift(-lookahead) / df["close"] - 1
             aligned = features.iloc[:-lookahead]
-            labels = future_returns.iloc[: len(aligned)].values
+            labels = np.asarray(future_returns.iloc[: len(aligned)].values).astype(float)
             y = np.where(labels > threshold, 1, np.where(labels < -threshold, 0, np.nan))
             mask = ~np.isnan(y)
             if mask.sum() < 40:
@@ -269,7 +269,7 @@ class EnsemblePredictor:
             logger.warning(f"Stacking meta-learner failed: {e}")
             return None
 
-    def _walk_forward_validate(self, df: pd.DataFrame, model) -> dict:
+    def _walk_forward_validate(self, df: pd.DataFrame, model: Any) -> dict[str, Any]:
         if df.empty or len(df) < 60:
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
@@ -281,7 +281,7 @@ class EnsemblePredictor:
         features = _build_features(df)
         future_returns = df["close"].shift(-lookahead) / df["close"] - 1
         aligned = features.iloc[:-lookahead].copy()
-        labels = future_returns.iloc[: len(aligned)].values
+        labels = np.asarray(future_returns.iloc[: len(aligned)].values).astype(float)
         y_raw = np.where(labels > threshold, 1, np.where(labels < -threshold, 0, np.nan))
         mask = ~np.isnan(y_raw)
         if mask.sum() < 30:

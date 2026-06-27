@@ -38,7 +38,7 @@ _LAST_WEEKLY_WEEK: int | None = None
 _LAST_MONTHLY_MONTH: int | None = None
 
 
-async def run_forever(interval: int = UPDATE_INTERVAL):
+async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
     global _running, _LAST_SNAPSHOT_DAY, _LAST_WEEKLY_WEEK, _LAST_MONTHLY_MONTH
     if _running:
         logger.warning("Scheduler already running")
@@ -69,8 +69,10 @@ async def run_forever(interval: int = UPDATE_INTERVAL):
                     report = await generate_daily_report()
                     if report and report.report_text:
                         from src.interfaces.telegram import app as bot_app
+
                         if bot_app is not None:
                             from src.notifications.service import NotificationService
+
                             ns = NotificationService()
                             for uid, cid in ns.get_subscribers("daily"):
                                 target = cid or uid

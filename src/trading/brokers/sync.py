@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from src.config import settings
 from src.db.connection import get_session
@@ -10,20 +11,20 @@ from src.trading.brokers.tbank import TBankClient
 logger = logging.getLogger(__name__)
 
 
-async def sync_portfolio_from_broker(account_id: str = "") -> dict[str, object]:
+async def sync_portfolio_from_broker(account_id: str = "") -> dict[str, Any]:
     if not settings.tinkoff_token:
         return {"status": "no_token", "positions_synced": 0}
 
     use_sandbox = settings.tinkoff_sandbox
-    stats = {"status": "ok", "positions_synced": 0, "errors": []}
+    stats: dict[str, Any] = {"status": "ok", "positions_synced": 0, "errors": []}
 
     async with TBankClient(use_sandbox=use_sandbox) as client:
         accounts = await client.get_accounts()
         if not accounts:
             return {"status": "no_accounts", **stats}
 
-        targets = [account_id] if account_id else [a["id"] for a in accounts]
-        all_positions: list[dict[str, object]] = []
+        targets: list[str] = [account_id] if account_id else [str(a["id"]) for a in accounts]
+        all_positions: list[dict[str, Any]] = []
         for target in targets:
             try:
                 all_positions.extend(await client.get_portfolio(target))

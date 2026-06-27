@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class SentimentDivergenceDetector:
-    def detect(self, db: Optional[Session] = None, news_list: Optional[list[dict]] = None) -> dict:
+    def detect(self, db: Optional[Session] = None, news_list: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
         if db:
             cutoff = datetime.now(timezone.utc) - timedelta(days=NEWS_SENTIMENT_DAYS)
             recent_news = db.query(News).filter(News.created_at >= cutoff).limit(1000).all()

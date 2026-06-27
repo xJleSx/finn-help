@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -117,8 +117,6 @@ async def test_execute_auto_success(mock_tbank, mock_settings):
         async with eng._mode_lock:
             eng._mode = TradeMode.AUTO
 
-    import asyncio
-
     await _set()
 
     with (
@@ -175,8 +173,6 @@ async def test_execute_auto_no_figi(mock_tbank, mock_settings):
         async with eng._mode_lock:
             eng._mode = TradeMode.AUTO
 
-    import asyncio
-
     await _set()
 
     with (
@@ -210,8 +206,6 @@ async def test_execute_auto_quantity_less_than_lot(mock_tbank, mock_settings):
     async def _set():
         async with eng._mode_lock:
             eng._mode = TradeMode.AUTO
-
-    import asyncio
 
     await _set()
 
@@ -249,8 +243,8 @@ async def test_approve_order_trading_disabled():
 
 @pytest.mark.asyncio
 async def test_approve_order():
-    from src.trading.execution.engine import approve_order
     import src.trading.execution.engine as eng
+    from src.trading.execution.engine import approve_order
 
     r = eng.OrderRecord(ticker="VTBR", direction="BUY", quantity=20, price=0.05, mode=TradeMode.MANUAL)
     r.status = "pending_approval"
@@ -334,8 +328,6 @@ async def test_execute_auto_no_accounts(mock_tbank, mock_settings):
         async with eng._mode_lock:
             eng._mode = TradeMode.AUTO
 
-    import asyncio
-
     await _set()
 
     with (
@@ -378,8 +370,6 @@ async def test_execute_auto_exception(mock_tbank, mock_settings):
     async def _set():
         async with eng._mode_lock:
             eng._mode = TradeMode.AUTO
-
-    import asyncio
 
     await _set()
 

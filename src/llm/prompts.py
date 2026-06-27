@@ -200,9 +200,7 @@ FEW_SHOT_PREFIX = """
 
 
 def build_user_message(signal: dict[str, object]) -> str:
-    return FEW_SHOT_PREFIX + USER_TEMPLATE.format(
-        signal_json=json.dumps(signal, ensure_ascii=False, indent=2)
-    )
+    return FEW_SHOT_PREFIX + USER_TEMPLATE.format(signal_json=json.dumps(signal, ensure_ascii=False, indent=2))
 
 
 REPORT_SYSTEM_PROMPT = """Ты — аналитический редактор FinAdvisor. Твоя задача — на основе структурированного сигнала от аналитического движка написать инвестиционный обзор в жанре финансовой журналистики.
@@ -406,9 +404,7 @@ REPORT_FEW_SHOT = """
 
 
 def build_report_message(signal: dict[str, object]) -> str:
-    return REPORT_FEW_SHOT + REPORT_USER_TEMPLATE.format(
-        signal_json=json.dumps(signal, ensure_ascii=False, indent=2)
-    )
+    return REPORT_FEW_SHOT + REPORT_USER_TEMPLATE.format(signal_json=json.dumps(signal, ensure_ascii=False, indent=2))
 
 
 QUESTION_SYSTEM_PROMPT = """Ты — финансовый ассистент FinAdvisor. Отвечаешь на вопросы пользователей о российском фондовом рынке (MOEX).
@@ -422,6 +418,9 @@ QUESTION_SYSTEM_PROMPT = """Ты — финансовый ассистент Fin
 4. Никогда не советуй вкладывать все деньги в один актив.
 5. Если сумма маленькая (< 5000 ₽) — рекоменлуй БПИФ (FXRL, SBMX, TMOS, AKIM) или дешёвые акции (VTBR ~0.01₽, etc).
 6. Пиши кратко, по делу, на русском. Без воды.
+7. **Если в ticker_context есть «Финансовая отчётность»** — используй эти цифры (чистая прибыль, активы, ROE, NPL) в ответе. Для банков выделяй NPL, достаточность капитала, ROE. Для небанков — выручку, чистую прибыль, активы.
+8. **Если в ticker_context есть «Параметры выпуска»** (для облигаций) — сравни купон с ключевой ставкой, укажи кредитный рейтинг, YTM, минимальную заявку.
+9. **Если в ticker_context есть новости** — учитывай их сентимент при оценке рисков. Негативные новости (🔴) — повод для осторожности.
 
 ## АДАПТАЦИЯ ПОД ПРОФИЛЬ
 

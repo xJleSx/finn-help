@@ -21,12 +21,10 @@ class SocialDataSource(ABC):
     source_name: str = ""
 
     @abstractmethod
-    async def fetch_posts(self, since: datetime | None = None) -> list[RawPost]:
-        ...
+    async def fetch_posts(self, since: datetime | None = None) -> list[RawPost]: ...
 
     @abstractmethod
-    async def fetch_author_stats(self, author_nick: str) -> dict[str, Any] | None:
-        ...
+    async def fetch_author_stats(self, author_nick: str) -> dict[str, Any] | None: ...
 
     def normalize(self, raw: dict[str, Any]) -> RawPost:
         return RawPost(

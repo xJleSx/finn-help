@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from typing import cast
 
 from src.config import personal, settings
 from src.db.connection import get_session
@@ -44,13 +45,23 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
                 db.add(p)
                 new_count += 1
             else:
-                exists.high = max(exists.high, c["high"]) if exists.high else c["high"]
-                exists.low = min(exists.low, c["low"]) if exists.low else c["low"]
-                exists.close = c["close"]
-                if exists.volume:
-                    exists.volume += c["volume"]
+                _high = cast(float, c["high"])
+                _low = cast(float, c["low"])
+                _close = cast(float, c["close"])
+                _volume = cast(int, c["volume"])
+                if exists.high:
+                    _new_high = max(float(exists.high), _high)
+                    exists.high = _new_high  # type: ignore[assignment]
                 else:
-                    exists.volume = c["volume"]
+                    exists.high = _high  # type: ignore[assignment]
+                if exists.low:
+                    _new_low = min(float(exists.low), _low)
+                    exists.low = _new_low  # type: ignore[assignment]
+                else:
+                    exists.low = _low  # type: ignore[assignment]
+                exists.close = _close  # type: ignore[assignment]
+                new_vol = _volume + (int(exists.volume) if exists.volume else 0)
+                exists.volume = new_vol  # type: ignore[assignment]
         db.commit()
         logger.info("Added/updated %d candles for %s (%s)", new_count, ticker, interval)
     finally:
@@ -63,7 +74,7 @@ async def update_all_favorites(interval: str = "5min", days: int = 5) -> dict[st
     if not settings.tinkoff_token:
         return stats
 
-    tickers = personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP", "YNDX", "TATN"])
+    tickers: list[str] = cast(list[str], personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP", "YNDX", "TATN"]))
 
     db = get_session()
     try:
@@ -71,7 +82,7 @@ async def update_all_favorites(interval: str = "5min", days: int = 5) -> dict[st
         for t in tickers:
             inst = db.query(Instrument).filter_by(ticker=t).first()
             if inst and inst.figi:
-                figi_map[t] = inst.figi
+                figi_map[t] = str(inst.figi)
     finally:
         db.close()
 

@@ -1,7 +1,8 @@
 import logging
 from datetime import date, timedelta
+from typing import Any
 
-import pandas as pd
+import pandas as pd  
 from sqlalchemy.orm import Session
 
 from src.collectors.cbr import CBRCollector
@@ -32,22 +33,22 @@ divergence = SentimentDivergenceDetector()
 geo_risk = GeoRiskScorer()
 
 
-def _first(v1, v2):
+def _first(v1: Any, v2: Any) -> Any:
     return v1 if v1 is not None else v2
 
 
 async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date: str, moex: MOEXCollector) -> int:
-    board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
-    history = await moex.get_history(inst.ticker, from_date=from_date, board=board)
+    board: str = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
+    history = await moex.get_history(str(inst.ticker), from_date=from_date, board=board)
     if not history:
         logger.debug("No price history for %s (board=%s, from=%s)", inst.ticker, board, from_date)
         return 0
 
     nominal: float | None = None
     if board == "bond":
-        nominal = inst.nominal
+        nominal = float(inst.nominal) if inst.nominal is not None else None
         if nominal is None:
-            info = await moex.get_security_info(inst.ticker)
+            info = await moex.get_security_info(str(inst.ticker))
             fv = info.get("face_value")
             if fv:
                 nominal = float(fv)
@@ -81,7 +82,10 @@ async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date:
         p = Price(
             instrument_id=inst.id,
             date=d,
-            open=_o, high=_h, low=_l, close=_c,
+            open=_o,
+            high=_h,
+            low=_l,
+            close=_c,
             volume=_first(row.get("VOLUME"), row.get("volume")),
         )
         db.add(p)
@@ -98,7 +102,7 @@ async def fetch_price_history_for_instrument(ticker: str, instrument_type: str) 
         if not inst:
             logger.warning("Instrument %s not found in DB, cannot fetch price history", ticker)
             return 0
-        async with MOEXCollector() as moex:
+        async with MOEXCollector() as moex:  
             new_count = await _fetch_prices_for_instrument(db, inst, from_date, moex)
         if new_count:
             db.commit()
@@ -109,17 +113,17 @@ async def fetch_price_history_for_instrument(ticker: str, instrument_type: str) 
 
 async def collect_prices(db: Session) -> set[int]:
     updated_ids: set[int] = set()
-    async with MOEXCollector() as moex:
+    async with MOEXCollector() as moex:  
         instruments = db.query(Instrument).all()
         if not instruments:
             return updated_ids
 
         from sqlalchemy import func as sqlfunc
 
-        last_dates = dict(db.query(Price.instrument_id, sqlfunc.max(Price.date)).group_by(Price.instrument_id).all())
+        last_dates: dict[int, date | None] = dict(db.query(Price.instrument_id, sqlfunc.max(Price.date)).group_by(Price.instrument_id).all())  # type: ignore[arg-type]
 
         for inst in instruments:
-            last_dt = last_dates.get(inst.id)
+            last_dt = last_dates.get(int(inst.id))
             days_back = DEFAULT_HISTORY_DAYS
             from_date = last_dt.isoformat() if last_dt else (date.today() - timedelta(days=days_back)).isoformat()
             new_count = await _fetch_prices_for_instrument(db, inst, from_date, moex)
@@ -130,7 +134,7 @@ async def collect_prices(db: Session) -> set[int]:
     return updated_ids
 
 
-def _check_price_freshness(db: Session, max_age_days: int = STALENESS_THRESHOLD_DAYS):
+def _check_price_freshness(db: Session, max_age_days: int = STALENESS_THRESHOLD_DAYS) -> None:
     from sqlalchemy import func as sqlfunc
 
     subq = (
@@ -151,24 +155,24 @@ def _check_price_freshness(db: Session, max_age_days: int = STALENESS_THRESHOLD_
         logger.warning("Stale data: %s (%s) — last price %s, >%d days ago", ticker, itype, last_date, max_age_days)
 
 
-async def collect_dividends(db: Session):
-    async with MOEXCollector() as moex:
+async def collect_dividends(db: Session) -> None:
+    async with MOEXCollector() as moex:  
         instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
         if not instruments:
             return
 
         from sqlalchemy import func as sqlfunc
 
-        last_dates = dict(
-            db.query(Dividend.instrument_id, sqlfunc.max(Dividend.date)).group_by(Dividend.instrument_id).all()
+        last_dates: dict[int, date | None] = dict(
+            db.query(Dividend.instrument_id, sqlfunc.max(Dividend.date)).group_by(Dividend.instrument_id).all()  # type: ignore[arg-type]
         )
 
         for inst in instruments:
-            last_dt = last_dates.get(inst.id)
+            last_dt = last_dates.get(int(inst.id))
             if last_dt and (date.today() - last_dt).days < DIVIDEND_CHECK_DAYS:
                 continue
             try:
-                dividends = await moex.get_dividends(inst.ticker)
+                dividends = await moex.get_dividends(str(inst.ticker))
                 for row in dividends:
                     d = row.get("registryclosedate") or row.get("recordDate") or row.get("recorddate")
                     amt = row.get("value") or row.get("dividendGross")
@@ -190,7 +194,7 @@ async def collect_dividends(db: Session):
                 logger.warning(f"Dividends failed for {inst.ticker}: {e}")
 
 
-def compute_indicators(db: Session, instrument_ids: set[int] | None = None):
+def compute_indicators(db: Session, instrument_ids: set[int] | None = None) -> None:
     from src.analysis.technical import TechnicalAnalyzer
 
     analyzer = TechnicalAnalyzer()
@@ -205,10 +209,10 @@ def compute_indicators(db: Session, instrument_ids: set[int] | None = None):
     all_prices = db.query(Price).filter(Price.instrument_id.in_(ids)).order_by(Price.instrument_id, Price.date).all()
     prices_by_inst: dict[int, list[Price]] = {}
     for p in all_prices:
-        prices_by_inst.setdefault(p.instrument_id, []).append(p)
+        prices_by_inst.setdefault(int(p.instrument_id), []).append(p)
 
     for inst in instruments:
-        prices = prices_by_inst.get(inst.id, [])
+        prices = prices_by_inst.get(int(inst.id), [])
         if len(prices) < 50:
             continue
         df = pd.DataFrame(
@@ -249,15 +253,15 @@ def compute_indicators(db: Session, instrument_ids: set[int] | None = None):
         db.commit()
 
 
-async def collect_news(db: Session) -> list[dict]:
+async def collect_news(db: Session) -> list[dict[str, Any]]:
     from src.db.models import NewsInstrument
 
-    collector = NewsCollector()
+    collector = NewsCollector()  
     news_list = await collector.fetch_all(max_per_feed=NEWS_MAX_PER_FEED)
 
     ticker_map: dict[str, int] = {}
     for inst in db.query(Instrument).all():
-        ticker_map[inst.ticker.upper()] = inst.id
+        ticker_map[str(inst.ticker).upper()] = int(inst.id)
 
     saved_news: list[News] = []
     for item in news_list:
@@ -286,15 +290,15 @@ async def collect_news(db: Session) -> list[dict]:
         search_text = f"{n.title or ''} {n.summary or ''}".upper()
         for ticker, inst_id in ticker_map.items():
             if len(ticker) >= 2 and ticker in search_text:
-                exists = db.query(NewsInstrument).filter_by(news_id=n.id, instrument_id=inst_id).first()
-                if not exists:
+                ni_exists = db.query(NewsInstrument).filter_by(news_id=n.id, instrument_id=inst_id).first()
+                if not ni_exists:
                     db.add(NewsInstrument(news_id=n.id, instrument_id=inst_id))
 
     db.commit()
     return news_list
 
 
-async def compute_geo_risk(db: Session, news_list: list[dict]):
+async def compute_geo_risk(db: Session, news_list: list[dict[str, Any]]) -> None:
     sent = divergence.detect(news_list=news_list)
     cbr = CBRCollector()
     try:
@@ -318,8 +322,8 @@ async def compute_geo_risk(db: Session, news_list: list[dict]):
     existing = db.query(GeoRiskScore).filter_by(date=today).first()
     if existing:
         existing.score = risk["score"]
-        existing.components_json = dict(risk.get("components") or {})
-        existing.sources_json = {"sentiment_divergence": sent, "news_count": len(news_list)}
+        existing.components_json = dict(risk.get("components") or {})  # type: ignore[assignment]
+        existing.sources_json = {"sentiment_divergence": sent, "news_count": len(news_list)}  # type: ignore[assignment]
     else:
         score = GeoRiskScore(
             date=today,
@@ -331,7 +335,7 @@ async def compute_geo_risk(db: Session, news_list: list[dict]):
     db.commit()
 
 
-async def collect_fundamental(db: Session):
+async def collect_fundamental(db: Session) -> None:
     from src.collectors.fundamental import FundamentalDataCollector
     from src.db.models import FundamentalMetric, Price
 
@@ -340,18 +344,13 @@ async def collect_fundamental(db: Session):
         return
 
     today = date.today()
-    async with FundamentalDataCollector() as collector:
+    async with FundamentalDataCollector() as collector:  
         for inst in instruments:
-            last_price_row = (
-                db.query(Price.close)
-                .filter_by(instrument_id=inst.id)
-                .order_by(Price.date.desc())
-                .first()
-            )
+            last_price_row = db.query(Price.close).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
             last_price = float(last_price_row[0]) if last_price_row and last_price_row[0] is not None else None
 
             try:
-                data = await collector.fetch(inst.ticker, last_price=last_price)
+                data = await collector.fetch(str(inst.ticker), last_price=last_price)
             except Exception as e:
                 logger.warning("Fundamental fetch failed for %s: %s", inst.ticker, e)
                 continue
@@ -360,7 +359,9 @@ async def collect_fundamental(db: Session):
             if existing:
                 existing.market_cap = data["market_cap"]
                 existing.shares_outstanding = data["shares_outstanding"]
-                existing.extra = data.get("extra")
+                extra_val = data.get("extra")
+                if extra_val is not None:
+                    existing.extra = extra_val
             else:
                 metric = FundamentalMetric(
                     instrument_id=inst.id,
@@ -373,13 +374,13 @@ async def collect_fundamental(db: Session):
         db.commit()
 
 
-async def generate_signals(db: Session, updated_ids: set[int] | None = None) -> list[dict]:
+async def generate_signals(db: Session, updated_ids: set[int] | None = None) -> list[dict[str, Any]]:
     from src.analysis.service import analysis_service
 
     return analysis_service.analyze_all_sync(db, updated_ids=updated_ids)
 
 
-async def collect_macro(db: Session):
+async def collect_macro(db: Session) -> None:
     from src.collectors.macro import MacroCollector
     from src.db.models import MacroIndicator
 
@@ -393,7 +394,7 @@ async def collect_macro(db: Session):
     db.commit()
 
 
-async def collect_social_sentiment():
+async def collect_social_sentiment() -> None:
     from src.social.registry import registry
     from src.social.sentiment.analyzer import analyzer
 

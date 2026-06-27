@@ -146,6 +146,7 @@ class TestWalkForward:
         y = (rng.normal(0, 1, 150) > 0).astype(int)
 
         from xgboost import XGBClassifier
+
         model = XGBClassifier(n_estimators=10, max_depth=2)
 
         result = walk_forward_validate(model, x, y, n_splits=2, min_train_size=50)
@@ -238,6 +239,7 @@ class TestEdgeCases:
         y = (rng.normal(0, 1, 30) > 0).astype(int)
 
         from xgboost import XGBClassifier
+
         model = XGBClassifier(n_estimators=5, max_depth=2)
 
         result = walk_forward_validate(model, x, y, n_splits=2, min_train_size=25)

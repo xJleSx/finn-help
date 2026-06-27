@@ -3,11 +3,9 @@ import io
 import logging
 import time
 from collections import OrderedDict
-from typing import Optional
+from typing import Any, Optional, cast
 
-import httpx
-from groq import AsyncGroq
-from telegram import Update
+from telegram import Message, Update
 from telegram.error import NetworkError
 from telegram.ext import (
     Application,
@@ -32,7 +30,7 @@ from src.collectors.cbr import CBRCollector
 from src.config import personal, settings
 from src.constants import CACHE_TTL, COOLDOWN_SECONDS, MAX_CACHE_SIZE
 from src.db.connection import get_session
-from src.db.models import Dividend, GeoRiskScore, Indicator, Instrument, News, NewsInstrument, Price, UserSetting
+from src.db.models import GeoRiskScore, Instrument, News, Price, UserSetting
 from src.db.models import Portfolio as PortModel
 from src.db.models import Signal as SignalModel
 from src.interfaces.telegram_helpers import (
@@ -53,18 +51,56 @@ from src.reports import generate_portfolio_csv
 
 logger = logging.getLogger(__name__)
 
-analysis_cache: OrderedDict[str, tuple[float, dict, str]] = OrderedDict()
+analysis_cache: OrderedDict[str, tuple[float, dict[str, Any] | None, str]] = OrderedDict()
 
 _user_cooldowns: dict[int, float] = {}
 
 DETAILED_KEYWORDS = {
-    "анализ", "подробн", "минимальн", "максимальн", "прогноз", "перспектив",
-    "сколько", "почему", "будет", "изменил", "вырос", "упал", "снизил",
-    "повысил", "динамик", "покажи", "расскажи", "объясни", "оцени",
-    "сравни", "каков", "какова", "каково", "какие", "какой", "какое",
-    "какая", "стоит", "что", "когда", "зачем", "цена", "стоимость",
-    "дайте", "нужн", "хоч", "подскаж", "посоветуй", "насколько",
-    "во сколько", "какую", "какую", "каком", "какому", "какими",
+    "анализ",
+    "подробн",
+    "минимальн",
+    "максимальн",
+    "прогноз",
+    "перспектив",
+    "сколько",
+    "почему",
+    "будет",
+    "изменил",
+    "вырос",
+    "упал",
+    "снизил",
+    "повысил",
+    "динамик",
+    "покажи",
+    "расскажи",
+    "объясни",
+    "оцени",
+    "сравни",
+    "каков",
+    "какова",
+    "каково",
+    "какие",
+    "какой",
+    "какое",
+    "какая",
+    "стоит",
+    "что",
+    "когда",
+    "зачем",
+    "цена",
+    "стоимость",
+    "дайте",
+    "нужн",
+    "хоч",
+    "подскаж",
+    "посоветуй",
+    "насколько",
+    "во сколько",
+    "какую",
+    "какую",
+    "каком",
+    "какому",
+    "какими",
 }
 
 TICKER, QUANTITY, PRICE = range(3)
@@ -112,18 +148,22 @@ async def _check_cooldown(update: Update) -> bool:
     return True
 
 
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     query = update.callback_query
+    if not query:
+        return
     await query.answer()
     data = query.data
+    if not data:
+        return
     parts = data.split(":", 1)
     msg = query.message
 
     if parts[0] == "analyze" and len(parts) > 1:
         ticker = parts[1]
-        if msg:
+        if isinstance(msg, Message):
             await msg.reply_text(f"\U0001f50d Анализирую {ticker}...")
         await _reply_with_analysis(update, ticker)
 
@@ -157,7 +197,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await export_portfolio(update, context)
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -194,7 +234,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message or update.effective_user is None or update.effective_chat is None:
         return
     if not await _check_cooldown(update):
@@ -212,7 +252,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(f"✅ Вы подписаны на {type_names.get(ntype, ntype)}")
 
 
-async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message or update.effective_user is None:
         return
     if not await _check_cooldown(update):
@@ -228,7 +268,7 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("❌ Все подписки отменены")
 
 
-async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -238,13 +278,9 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = get_session()
     try:
-        report = (
-            db.query(DailyReport)
-            .order_by(DailyReport.date.desc())
-            .first()
-        )
+        report = db.query(DailyReport).order_by(DailyReport.date.desc()).first()
         if report and report.report_text:
-            text = report.report_text
+            text = str(report.report_text)
             try:
                 await update.effective_message.reply_markdown(text)
             except Exception:
@@ -254,12 +290,14 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     logger.error("Daily report plain text failed too: %s", e)
         else:
-            await update.effective_message.reply_text("Ежедневный отчёт ещё не сформирован. Он появляется после 23:50 МСК.")
+            await update.effective_message.reply_text(
+                "Ежедневный отчёт ещё не сформирован. Он появляется после 23:50 МСК."
+            )
     finally:
         db.close()
 
 
-async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -267,6 +305,7 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("📆 Формирую недельную сводку...")
     try:
         from src.scheduler.reporting import generate_weekly_report_text
+
         text = await generate_weekly_report_text()
         await update.effective_message.reply_markdown(text)
     except Exception:
@@ -274,7 +313,7 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("Не удалось сформировать недельную сводку.")
 
 
-async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -296,7 +335,7 @@ async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("Укажите число: /allocate 100000")
 
 
-async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -312,7 +351,6 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     if amount:
-
         await update.effective_message.reply_text(f"🔬 Рассчитываю сценарии для {amount:,.0f} ₽...")
         picks = allocator.recommend(capital=amount)
         plan = {"recommendation": {"items": picks}}
@@ -330,7 +368,8 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "sector": r["sector"],
                     "name": r["name"] or r["ticker"],
                 }
-                for r in rows if r["value"] > 0
+                for r in rows
+                if r["value"] > 0
             ]
         finally:
             db.close()
@@ -355,7 +394,7 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_markdown(chunk)
 
 
-async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -376,7 +415,7 @@ async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_markdown(result.summary())
 
 
-async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -410,7 +449,7 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
-async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -425,7 +464,7 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _reply_with_analysis(update, ticker)
 
 
-async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -451,7 +490,7 @@ async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
-async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -460,13 +499,12 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.effective_message.reply_text("🏆 Ищу лучшие возможности...")
     try:
-
         picks = allocator.recommend(capital=100_000)
         if not picks:
             await update.effective_message.reply_text("Нет данных. Запустите `finn update`.")
             return
 
-        categories = OrderedDict()
+        categories: OrderedDict[str, list[Any]] = OrderedDict()
         for p in picks:
             cat = p.get("category", "Прочее")
             if cat not in categories:
@@ -488,10 +526,12 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_markdown(text, reply_markup=build_top_keyboard())
     except Exception:
         logger.warning("Top command error", exc_info=True)
-        await update.effective_message.reply_text("\u274c Не удалось загрузить топ. Убедитесь, что запущен `finn update`.")
+        await update.effective_message.reply_text(
+            "\u274c Не удалось загрузить топ. Убедитесь, что запущен `finn update`."
+        )
 
 
-async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -522,7 +562,7 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("❌ Не удалось загрузить новости.")
 
 
-async def export_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def export_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -545,7 +585,7 @@ async def export_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
-async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -557,8 +597,8 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _handle_text(update, text)
 
 
-async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message:
+async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_message or not update.effective_message.text:
         return
     await _handle_text(update, update.effective_message.text)
 
@@ -568,6 +608,7 @@ def _is_detailed_question(text: str, ticker: str) -> bool:
     if len(words) <= 1:
         return False
     from src.interfaces.telegram_helpers import RUSSIAN_NAMES
+
     ticker_variants = {ticker.lower()}
     for russian_name, eng_ticker in RUSSIAN_NAMES.items():
         if eng_ticker == ticker.upper():
@@ -579,124 +620,26 @@ def _is_detailed_question(text: str, ticker: str) -> bool:
 
 
 def _build_stock_context(ticker: str) -> str:
-    db = get_session()
+    """Build stock context for LLM question answering.
+
+    Delegates to the unified AnalysisService.load_ticker_context().
+    """
     try:
-        inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
-        if not inst:
-            return ""
-        prices_q = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
-        if len(prices_q) < 20:
-            return ""
-        closes = [p.close for p in prices_q if p.close]
-        if not closes:
-            return ""
-        last = closes[-1]
-        lines = [
-            f"Название: {inst.full_name or '—'}",
-            f"Сектор: {inst.sector or '—'}",
-            f"Тип: {inst.instrument_type or '—'}",
-            f"Лот: {inst.lot_size or 1} шт",
-            "",
-            f"Текущая цена: {last:.2f} ₽",
-        ]
-        def _add_price_stats(c, label, period_days=None):
-            if len(c) < 2:
-                return
-            mn = min(c)
-            mx = max(c)
-            avg = sum(c) / len(c)
-            chg = (c[-1] - c[0]) / c[0] * 100
-            lines.append(f"Цена {label}: мин {mn:.2f}, макс {mx:.2f}, средняя {avg:.2f}, изм {chg:+.2f}%")
-        _add_price_stats(closes, "за всё время")
-        if len(closes) >= 252:
-            _add_price_stats(closes[-252:], "за 1 год")
-        if len(closes) >= 126:
-            _add_price_stats(closes[-126:], "за 6 мес")
-        if len(closes) >= 63:
-            _add_price_stats(closes[-63:], "за 3 мес")
-        if len(closes) >= 21:
-            _add_price_stats(closes[-21:], "за 1 мес")
-        if len(closes) >= 7:
-            _add_price_stats(closes[-7:], "за 1 нед")
-        ind = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date.desc()).first()
-        if ind:
-            lines.append("")
-            if ind.rsi is not None:
-                rsi_label = "перегрет" if ind.rsi > 70 else ("перепродан" if ind.rsi < 30 else "нейтрален")
-                lines.append(f"RSI: {ind.rsi:.1f} ({rsi_label})")
-            if ind.sma_20 is not None:
-                lines.append(f"SMA 20: {ind.sma_20:.2f} (цена {'выше' if last > ind.sma_20 else 'ниже'})")
-            if ind.sma_50 is not None:
-                lines.append(f"SMA 50: {ind.sma_50:.2f} (цена {'выше' if last > ind.sma_50 else 'ниже'})")
-            if ind.sma_200 is not None:
-                lines.append(f"SMA 200: {ind.sma_200:.2f} (цена {'выше' if last > ind.sma_200 else 'ниже'})")
-            if ind.bb_upper is not None and ind.bb_lower is not None:
-                bb_pos = "у верхней" if last >= ind.bb_upper else ("у нижней" if last <= ind.bb_lower else "в середине")
-                lines.append(f"Боллинджер: {bb_pos} ({ind.bb_lower:.1f}–{ind.bb_upper:.1f})")
-            if ind.macd_hist is not None:
-                lines.append(f"MACD гист: {ind.macd_hist:.2f} ({'бычья' if ind.macd_hist > 0 else 'медвежья'})")
-            if ind.atr is not None:
-                lines.append(f"ATR: {ind.atr:.2f}")
-            if ind.volume_sma_20 is not None and prices_q and prices_q[-1].volume:
-                vol_ratio = prices_q[-1].volume / ind.volume_sma_20 if ind.volume_sma_20 > 0 else 1
-                vol_label = "выше" if vol_ratio > 1.2 else ("ниже" if vol_ratio < 0.8 else "около")
-                lines.append(f"Объём: {vol_label} среднего ({vol_ratio:.1f}x)")
-        divs = (
-            db.query(Dividend)
-            .filter_by(instrument_id=inst.id)
-            .order_by(Dividend.date.desc())
-            .limit(5)
-            .all()
-        )
-        if divs:
-            lines.append("")
-            lines.append("Дивиденды (последние):")
-            for d in divs:
-                yield_pct = d.amount / last * 100 if last > 0 else 0
-                lines.append(f"  {d.date}: {d.amount:.4f} ₽/акцию (дох-ть {yield_pct:.2f}%)")
-        from datetime import datetime, timedelta, timezone
-        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-        recent_news = (
-            db.query(News)
-            .join(NewsInstrument, News.id == NewsInstrument.news_id)
-            .filter(NewsInstrument.instrument_id == inst.id, News.created_at >= cutoff)
-            .order_by(News.created_at.desc())
-            .limit(10)
-            .all()
-        )
-        if recent_news:
-            scores = [n.sentiment_weighted or n.sentiment_score or 0 for n in recent_news]
-            avg = sum(scores) / len(scores)
-            pos = sum(1 for s in scores if s > 0)
-            neg = sum(1 for s in scores if s < 0)
-            lines.append("")
-            lines.append(f"Новости (30д): {len(recent_news)} шт, сентимент {avg:+.2f} (👍{pos} 👎{neg})")
-            for n in recent_news[:5]:
-                s = n.sentiment_weighted or n.sentiment_score or 0
-                icon = "🟢" if s > 0 else ("🔴" if s < 0 else "⚪")
-                lines.append(f"  {icon} {n.title[:100]}")
+        from src.analysis.service import analysis_service
+        from src.db.connection import get_session
+
+        db = get_session()
         try:
-            from src.analysis.service import analysis_service
-            fused = analysis_service._analyze_single_sync(db, inst, ticker.upper(), with_ml=True)
-            if fused:
-                lines.append("")
-                lines.append(f"Сигнал: {fused['action']} (уверенность {fused['confidence']:.0%})")
-                ml = fused.get("components", {}).get("ml", {})
-                if ml and ml.get("change_pct") is not None:
-                    lines.append(f"ML прогноз: {ml['change_pct']:+.2f}% (цель {ml.get('target_price', 0):.0f} ₽)")
-                rr = fused.get("reasons", [])
-                if rr:
-                    lines.append("Обоснование:")
-                    for r in rr[:5]:
-                        lines.append(f"  • {r}")
-        except Exception:
-            pass
-        return "\n".join(lines)
-    finally:
-        db.close()
+            return analysis_service.load_ticker_context(db, ticker)
+        finally:
+            db.close()
+    except Exception:
+        return ""
 
 
-async def _handle_text(update: Update, text: str):
+async def _handle_text(update: Update, text: str) -> None:
+    if not update.effective_message:
+        return
     amount = _extract_allocation_amount(text)
     if amount is not None:
         exclude = _find_excluded_tickers(text)
@@ -735,7 +678,7 @@ def _describe_risk(sharpe: float, max_dd: float) -> str:
     return ", ".join(parts)
 
 
-def _format_data_advice(fused: dict) -> str:
+def _format_data_advice(fused: dict[str, Any]) -> str:
     """Понятный анализ без сложных терминов."""
     parts = []
     components = fused.get("components", {})
@@ -746,7 +689,12 @@ def _format_data_advice(fused: dict) -> str:
     if tech:
         tech_score = tech.get("score", 0)
         tech_action = tech.get("action", "NEUTRAL")
-        tech_labels = {"BUY": "сигнал к покупке", "SELL": "сигнал к продаже", "HOLD": "нейтрально, держать", "NEUTRAL": "нейтрально"}
+        tech_labels = {
+            "BUY": "сигнал к покупке",
+            "SELL": "сигнал к продаже",
+            "HOLD": "нейтрально, держать",
+            "NEUTRAL": "нейтрально",
+        }
         desc = tech_labels.get(tech_action, tech_action.lower())
         extra = ""
         if tech_score > 0.3:
@@ -800,7 +748,7 @@ def _format_data_advice(fused: dict) -> str:
         pw = weekly.get("price_delta") if weekly else None
         if pw is not None:
             arrow = "📈" if pw > 0 else "📉"
-            trend_parts.append(f"{arrow} за неделю {'+'+str(round(pw,1)) if pw > 0 else str(round(pw,1))}%")
+            trend_parts.append(f"{arrow} за неделю {'+' + str(round(pw, 1)) if pw > 0 else str(round(pw, 1))}%")
         if weekly:
             ac = weekly.get("action_changed")
             if ac:
@@ -814,9 +762,13 @@ def _format_data_advice(fused: dict) -> str:
     return ""
 
 
-async def _reply_with_analysis(update: Update, ticker: str):
+async def _reply_with_analysis(update: Update, ticker: str) -> None:
+    if not update.effective_message:
+        return
     now = time.time()
     cached = analysis_cache.get(ticker)
+    fused: dict[str, Any] | None
+    _advice: str
     if cached and (now - cached[0]) < CACHE_TTL:
         fused, _advice = cached[1], cached[2]
         logger.info("Using cached analysis for %s", ticker)
@@ -830,9 +782,7 @@ async def _reply_with_analysis(update: Update, ticker: str):
                 analysis_cache.popitem(last=False)
         except Exception:
             logger.exception("Analysis error for %s", ticker)
-            await msg.edit_text(
-                "\u274c Не удалось проанализировать. Убедитесь, что запущен `finn update`."
-            )
+            await msg.edit_text("\u274c Не удалось проанализировать. Убедитесь, что запущен `finn update`.")
             return
 
     if not fused:
@@ -870,11 +820,12 @@ async def _reply_with_analysis(update: Update, ticker: str):
         await update.effective_message.reply_markdown(chunk, reply_markup=build_analyze_keyboard(ticker))
 
 
-async def _reply_with_allocation(update: Update, capital: float, exclude: set[str] | None = None):
+async def _reply_with_allocation(update: Update, capital: float, exclude: set[str] | None = None) -> None:
+    if not update.effective_message:
+        return
     msg = await update.effective_message.reply_text(f"\U0001f50d Анализирую рынок для {capital:,.0f} ₽...")
 
     try:
-
         picks = allocator.recommend(capital=capital, exclude=exclude)
         if not picks:
             await msg.edit_text("Не удалось подобрать варианты. Запустите `finn update` для загрузки данных.")
@@ -921,7 +872,9 @@ async def _reply_with_allocation(update: Update, capital: float, exclude: set[st
         await msg.edit_text("\u274c Не удалось рассчитать рекомендации. Убедитесь, что запущен `finn update`.")
 
 
-async def _ask_llm_general(update: Update, text: str, ticker_context: str = ""):
+async def _ask_llm_general(update: Update, text: str, ticker_context: str = "") -> None:
+    if not update.effective_message:
+        return
     msg = await update.effective_message.reply_text("🤔 Думаю...")
     try:
         from src.llm.router import llm
@@ -949,7 +902,7 @@ async def _ask_llm_general(update: Update, text: str, ticker_context: str = ""):
         )
 
 
-async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -961,6 +914,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sync_errors: list[str] = []
     try:
         from src.trading.brokers.sync import sync_portfolio_from_broker
+
         sync_result = await sync_portfolio_from_broker()
         if sync_result.get("status") == "no_token":
             await msg.edit_text("❌ TINKOFF_TOKEN не настроен")
@@ -968,7 +922,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sync_result.get("status") == "no_accounts":
             await msg.edit_text("❌ Нет счетов в T-Bank")
             return
-        sync_errors = [e for e in sync_result.get("errors", []) if e]
+        sync_errors = [e for e in cast(list[Any], sync_result.get("errors", [])) if e]
     except Exception as e:
         logger.warning("Sync failed: %s", e)
         sync_errors = [str(e)]
@@ -979,16 +933,17 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not rows:
             try:
                 from src.trading.brokers.tbank import TBankClient
+
                 async with TBankClient(use_sandbox=settings.tinkoff_sandbox) as tbank:
                     accounts = await tbank.get_accounts()
                     if accounts:
-                        balance = await tbank.get_account_balance(accounts[0]["id"])
+                        balance = await tbank.get_account_balance(str(cast(dict[str, Any], accounts[0])["id"]))
                         await msg.edit_text(
                             f"📭 *Портфель пуст*\n\n"
                             f"💵 Доступно: {balance:,.0f} ₽\n\n"
                             f"Сигналы пока не дают BUY/SELL.\n"
                             f"Текущие сигналы: `/portfolio` (обновляется раз в час)",
-                            parse_mode="Markdown"
+                            parse_mode="Markdown",
                         )
                         return
                 await msg.edit_text("📭 Портфель пуст. Нет счетов в T-Bank.")
@@ -1001,8 +956,8 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines = ["📊 *Портфель (T-Bank)*\n"]
         if sync_errors:
             lines.append("⚠️ *Ошибки синка:*\n")
-            for e in sync_errors[:3]:
-                lines.append(f"• {e[:120]}")
+            for err in sync_errors[:3]:
+                lines.append(f"• {err[:120]}")
             lines.append("")
         total_value = 0.0
         total_cost = 0.0
@@ -1035,16 +990,20 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_emoji = "🟢" if total_pnl > 0.5 else ("🔴" if total_pnl < -0.5 else "⚪")
         total_pnl_str = "" if abs(total_pnl) < 0.5 else f"{total_pnl:+,.2f}"
         total_pnl_pct_str = "" if abs(total_pnl_pct) < 0.01 else f"{total_pnl_pct:+.2f}%"
-        pnl_suffix = f" | P&L: {total_pnl_str} ₽ ({total_pnl_pct_str})" if total_pnl_str and total_pnl_pct_str else " | P&L: ~0 ₽"
-        lines.append(
-            f"\n{total_emoji} *Итого:* {total_value:,.0f} ₽{pnl_suffix}"
+        pnl_suffix = (
+            f" | P&L: {total_pnl_str} ₽ ({total_pnl_pct_str})"
+            if total_pnl_str and total_pnl_pct_str
+            else " | P&L: ~0 ₽"
         )
+        lines.append(f"\n{total_emoji} *Итого:* {total_value:,.0f} ₽{pnl_suffix}")
         await msg.edit_text("\n".join(lines), parse_mode="Markdown")
     finally:
         db.close()
 
 
-async def _save_position(update: Update, ticker: str, qty: float, avg_price: float | None = None):
+async def _save_position(update: Update, ticker: str, qty: float, avg_price: float | None = None) -> None:
+    if not update.effective_message:
+        return
     db = get_session()
     try:
         inst = db.query(Instrument).filter_by(ticker=ticker).first()
@@ -1055,16 +1014,18 @@ async def _save_position(update: Update, ticker: str, qty: float, avg_price: flo
             return
         if avg_price is None:
             price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-            avg_price = price.close if price else 0
+            avg_price = float(price.close) if price else 0
 
         existing = db.query(PortModel).filter_by(instrument_id=inst.id).first()
         if existing:
-            existing.quantity += qty
+            existing.quantity += qty  # type: ignore[assignment]
             if existing.avg_price and avg_price:
                 total_qty = existing.quantity
-                existing.avg_price = (existing.avg_price * (total_qty - qty) + avg_price * qty) / total_qty
+                existing.avg_price = float((float(existing.avg_price) * (total_qty - qty) + avg_price * qty) / total_qty)  # type: ignore[assignment]
             db.commit()
-            await update.effective_message.reply_text(f"✅ {ticker}: добавлено {qty} шт. (всего {existing.quantity:.1f} шт.)")
+            await update.effective_message.reply_text(
+                f"✅ {ticker}: добавлено {qty} шт. (всего {existing.quantity:.1f} шт.)"
+            )
         else:
             pos = PortModel(instrument_id=inst.id, quantity=qty, avg_price=avg_price)
             db.add(pos)
@@ -1078,7 +1039,7 @@ async def _save_position(update: Update, ticker: str, qty: float, avg_price: flo
         db.close()
 
 
-async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not await _check_access(update):
         return ConversationHandler.END
     if not update.effective_message:
@@ -1100,22 +1061,24 @@ async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return TICKER
 
 
-async def add_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message:
+async def add_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_message or not update.effective_message.text or not context.user_data:
         return ConversationHandler.END
     context.user_data["add_ticker"] = update.effective_message.text.strip().upper()
     await update.effective_message.reply_text("Введите *количество* (например, 10):", parse_mode="Markdown")
     return QUANTITY
 
 
-async def add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message:
+async def add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_message or not update.effective_message.text or not context.user_data:
         return ConversationHandler.END
     try:
         qty = float(update.effective_message.text.strip().replace(",", "."))
         context.user_data["add_qty"] = qty
     except ValueError:
-        await update.effective_message.reply_text("Количество должно быть числом. Попробуйте ещё раз:", parse_mode="Markdown")
+        await update.effective_message.reply_text(
+            "Количество должно быть числом. Попробуйте ещё раз:", parse_mode="Markdown"
+        )
         return QUANTITY
     await update.effective_message.reply_text(
         "Введите *среднюю цену* (или отправьте `-` для автоматической):",
@@ -1124,8 +1087,8 @@ async def add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return PRICE
 
 
-async def add_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message:
+async def add_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_message or not update.effective_message.text or not context.user_data:
         return ConversationHandler.END
     text = update.effective_message.text.strip()
     if text == "-":
@@ -1134,7 +1097,9 @@ async def add_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             avg_price = float(text.replace(",", "."))
         except ValueError:
-            await update.effective_message.reply_text("Цена должна быть числом или `-`. Попробуйте ещё раз:", parse_mode="Markdown")
+            await update.effective_message.reply_text(
+                "Цена должна быть числом или `-`. Попробуйте ещё раз:", parse_mode="Markdown"
+            )
             return PRICE
 
     ticker = context.user_data.get("add_ticker", "")
@@ -1144,13 +1109,17 @@ async def add_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not context.user_data:
+        return ConversationHandler.END
     context.user_data.clear()
+    if not update.effective_message:
+        return ConversationHandler.END
     await update.effective_message.reply_text("❌ Добавление отменено")
     return ConversationHandler.END
 
 
-async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -1178,9 +1147,11 @@ async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_message.reply_text(f"{ticker} нет в портфеле")
             return
         if qty and qty < existing.quantity:
-            existing.quantity -= qty
+            existing.quantity -= qty  # type: ignore[assignment]
             db.commit()
-            await update.effective_message.reply_text(f"✅ {ticker}: продано {qty} шт. (осталось {existing.quantity:.1f} шт.)")
+            await update.effective_message.reply_text(
+                f"✅ {ticker}: продано {qty} шт. (осталось {existing.quantity:.1f} шт.)"
+            )
         else:
             db.delete(existing)
             db.commit()
@@ -1193,15 +1164,13 @@ async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
-async def social_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def social_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     args = context.args
     ticker = args[0].upper() if args else None
     if not ticker:
-        await update.effective_message.reply_text(
-            "Использование: /social TICKER\nПример: /social SBER"
-        )
+        await update.effective_message.reply_text("Использование: /social TICKER\nПример: /social SBER")
         return
 
     from src.social.sentiment.aggregator import aggregator
@@ -1221,15 +1190,17 @@ async def social_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def pulse(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def pulse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     args = context.args
     author = args[0] if args else None
     if not author:
-        from src.config import personal
+        from src.config import personal as _personal
 
-        authors = personal.get("social_sources", {}).get("pulse", {}).get("authors", [])
+        social_sources: dict[str, Any] = cast(dict[str, Any], _personal.get("social_sources", {}))
+        pulse_config: dict[str, Any] = cast(dict[str, Any], social_sources.get("pulse", {}))
+        authors: list[Any] = cast(list[Any], pulse_config.get("authors", []))
         await update.effective_message.reply_text(
             "Отслеживаемые авторы Пульса:\n" + "\n".join(f"  @{a}" for a in authors)
         )
@@ -1246,15 +1217,13 @@ async def pulse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = await src.fetch_author_stats(author)
     if stats:
         await update.effective_message.reply_text(
-            f"📊 @{author}\n"
-            f"  Подписчиков: {stats.get('followers', '?')}\n"
-            f"  Доходность: {stats.get('yield', '?')}%"
+            f"📊 @{author}\n  Подписчиков: {stats.get('followers', '?')}\n  Доходность: {stats.get('yield', '?')}%"
         )
     else:
         await update.effective_message.reply_text(f"Не удалось получить данные @{author}")
 
 
-async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -1274,7 +1243,7 @@ async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("\u274c Не удалось получить курсы. Попробуйте позже.")
 
 
-async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -1306,19 +1275,19 @@ async def _ns_get_subscribers(ns: NotificationService, notify_type: str = "signa
     return await asyncio.to_thread(ns.get_subscribers, notify_type)
 
 
-async def _ns_get_upcoming_dividends(ns: NotificationService, days_ahead: int = 14) -> list:
+async def _ns_get_upcoming_dividends(ns: NotificationService, days_ahead: int = 14) -> list[Any]:
     return await asyncio.to_thread(ns.get_upcoming_dividends, days_ahead)
 
 
-async def _ns_get_daily_summary(ns: NotificationService):
+async def _ns_get_daily_summary(ns: NotificationService) -> Any:
     return await asyncio.to_thread(ns.get_daily_summary)
 
 
-async def _ns_save_notification(ns: NotificationService, uid: int, notify_type: str, text: str, title: str = ""):
+async def _ns_save_notification(ns: NotificationService, uid: int, notify_type: str, text: str, title: str = "") -> None:
     await asyncio.to_thread(ns.save_notification, uid, notify_type, text, title)
 
 
-async def broadcast_signal(n):
+async def broadcast_signal(n: Any) -> None:
     if app is None:
         logger.warning("Bot not running, skipping signal broadcast")
         return
@@ -1334,7 +1303,7 @@ async def broadcast_signal(n):
             logger.warning(f"Failed to send signal to {uid}: {e}")
 
 
-async def broadcast_dividends():
+async def broadcast_dividends() -> None:
     if app is None:
         logger.warning("Bot not running, skipping dividend broadcast")
         return
@@ -1358,7 +1327,7 @@ async def broadcast_dividends():
                 logger.warning(f"Failed to send dividend to {uid}: {e}")
 
 
-async def broadcast_daily_summary():
+async def broadcast_daily_summary() -> None:
     if app is None:
         logger.warning("Bot not running, skipping daily summary broadcast")
         return
@@ -1384,16 +1353,13 @@ async def broadcast_trade(
     reason: str = "",
     order_id: str = "",
     portfolio_value: Optional[float] = None,
-):
+) -> None:
     if app is None:
         logger.warning("Bot not running, skipping trade broadcast")
         return
 
     emoji = "🟢" if direction == "BUY" else "🔴"
-    text = (
-        f"{emoji} *{ticker}* — {direction} {quantity} шт. по {price:.2f} ₽\n"
-        f"Статус: {status}"
-    )
+    text = f"{emoji} *{ticker}* — {direction} {quantity} шт. по {price:.2f} ₽\nСтатус: {status}"
     if reason:
         text += f"\n📌 Причина: {reason}"
     if order_id:
@@ -1410,7 +1376,7 @@ async def broadcast_trade(
             logger.warning(f"Failed to send trade to {uid}: {e}")
 
 
-app: Optional[Application] = None
+app: Optional[Application[Any, Any, Any, Any, Any, Any]] = None
 _scheduler_task: Optional["asyncio.Task[None]"] = None
 
 
@@ -1420,7 +1386,7 @@ def _stop_scheduler() -> None:
     _sched_stop()
 
 
-async def correlation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def correlation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -1431,7 +1397,7 @@ async def correlation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_markdown(chunk)
 
 
-async def whatif(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def whatif(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -1469,7 +1435,7 @@ async def whatif(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_markdown(chunk)
 
 
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
     if not update.effective_message:
@@ -1477,12 +1443,10 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _check_cooldown(update):
         return
 
-    from src.config import personal
-
     db = get_session()
     try:
         row = db.query(UserSetting).filter_by(key="risk_profile").first()
-        current = row.value if row else "balanced"
+        current: str = str(row.value) if row else "balanced"
 
         if context.args:
             new_profile = context.args[0].lower()
@@ -1492,7 +1456,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             allocator.set_profile(new_profile)
             if row:
-                row.value = new_profile
+                row.value = str(new_profile)  # type: ignore[assignment]
             else:
                 db.add(UserSetting(key="risk_profile", value=new_profile))
             db.commit()
@@ -1508,9 +1472,9 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text = "📊 *Личные настройки*\n\n"
             text += f"👤 Профиль риска: *{names.get(current, current)}*\n"
 
-            p_capital = personal.get("capital", 100_000)
-            p_tickers = personal.get("favorite_tickers", [])
-            p_horizon = personal.get("investment_horizon", "medium")
+            p_capital: int = cast(int, personal.get("capital", 100_000))
+            p_tickers: list[Any] = cast(list[Any], personal.get("favorite_tickers", []))
+            p_horizon: str = cast(str, personal.get("investment_horizon", "medium"))
             horizon_label = {"short": "Краткосрочный", "medium": "Среднесрочный", "long": "Долгосрочный"}
             text += f"💰 Капитал: {p_capital:,.0f} ₽\n"
             text += f"📅 Горизонт: {horizon_label.get(p_horizon, p_horizon)}\n"
@@ -1525,7 +1489,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
-async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -1548,7 +1512,7 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("❌ Ошибка формирования отчёта.")
 
 
-async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message:
         return
     if not await _check_cooldown(update):
@@ -1563,10 +1527,11 @@ async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if trades:
         text += "*Последние сделки:*\n"
         for t in trades[:5]:
-            emoji = "🟢" if t["pnl"] and t["pnl"] >= 0 else "🔴"
+            t_pnl_val: Optional[float] = cast(Optional[float], t.get("pnl"))
+            emoji = "🟢" if t_pnl_val is not None and t_pnl_val >= 0 else "🔴"
             text += f"{emoji} {t['ticker']} {t['direction']} {t['quantity']}шт @ {t['price']:.2f}"
-            if t["pnl"]:
-                text += f" ({t['pnl']:+.0f} ₽)"
+            if t_pnl_val is not None:
+                text += f" ({t_pnl_val:+.0f} ₽)"
             text += "\n"
     if not trades:
         text += "Сделок пока нет."
@@ -1574,13 +1539,13 @@ async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_markdown(chunk)
 
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Unhandled error: %s", context.error, exc_info=context.error)
-    if update and update.effective_message:
+    if isinstance(update, Update) and update.effective_message:
         await update.effective_message.reply_text("Произошла внутренняя ошибка. Попробуйте позже.")
 
 
-async def run_bot():
+async def run_bot() -> None:
     global app, _scheduler_task
     if not settings.telegram_bot_token:
         logger.warning("TELEGRAM_BOT_TOKEN not set in .env")
@@ -1647,6 +1612,7 @@ async def run_bot():
 
     polling_retry_delay = 10
     poll_attempt = 0
+    assert app is not None and app.updater is not None
     while True:
         try:
             await app.updater.start_polling()
@@ -1656,7 +1622,9 @@ async def run_bot():
         except NetworkError as e:
             poll_attempt += 1
             delay = min(polling_retry_delay * (2 ** (poll_attempt - 1)), 300)
-            logger.warning("Telegram polling connection failed (attempt %d): %s — retrying in %ds", poll_attempt, e, delay)
+            logger.warning(
+                "Telegram polling connection failed (attempt %d): %s — retrying in %ds", poll_attempt, e, delay
+            )
             await asyncio.sleep(delay)
 
     retry_count = 0

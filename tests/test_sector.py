@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -68,7 +68,12 @@ class TestSectorPerformance:
         first2.close = 50.0
         last2.close = 55.0
 
-        db.query.return_value.filter.return_value.order_by.return_value.first.side_effect = [first1, last1, first2, last2]
+        db.query.return_value.filter.return_value.order_by.return_value.first.side_effect = [
+            first1,
+            last1,
+            first2,
+            last2,
+        ]
 
         result = sector_analyzer.compute_sector_performance(db, days=30)
         assert "Финансы" in result

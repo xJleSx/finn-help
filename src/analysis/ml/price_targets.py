@@ -1,15 +1,14 @@
 import logging
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 Profile = Literal["conservative", "balanced", "aggressive"]
 
-PROFILES: dict[Profile, dict] = {
+PROFILES: dict[Profile, dict[str, Any]] = {
     "conservative": {"tp_count": 1, "tp_levels": [0.05], "stop_atr": 2.0, "trailing_after": 0.03},
     "balanced": {"tp_count": 2, "tp_levels": [0.07, 0.12], "stop_atr": 1.5, "trailing_after": 0.05},
     "aggressive": {"tp_count": 3, "tp_levels": [0.07, 0.14, 0.20], "stop_atr": 1.0, "trailing_after": 0.05},
@@ -77,7 +76,9 @@ def compute_support_resistance(df: pd.DataFrame, lookback: int = 60) -> tuple[fl
     return nearest_support, nearest_resistance
 
 
-def compute_take_profits(entry: float, resistance: float | None, atr: float, profile: Profile = "balanced") -> list[TakeProfit]:
+def compute_take_profits(
+    entry: float, resistance: float | None, atr: float, profile: Profile = "balanced"
+) -> list[TakeProfit]:
     cfg = PROFILES[profile]
     targets: list[TakeProfit] = []
     for i, pct in enumerate(cfg["tp_levels"]):
@@ -86,12 +87,14 @@ def compute_take_profits(entry: float, resistance: float | None, atr: float, pro
             level = round(resistance, 2)
             pct = (level - entry) / entry
         rr = (level - entry) / (atr * cfg["stop_atr"]) if atr > 0 else 1.0
-        targets.append(TakeProfit(
-            level=level,
-            type=f"tp{i + 1}",
-            return_pct=round(pct * 100, 1),
-            rr=round(max(rr, 0.5), 1),
-        ))
+        targets.append(
+            TakeProfit(
+                level=level,
+                type=f"tp{i + 1}",
+                return_pct=round(pct * 100, 1),
+                rr=round(max(rr, 0.5), 1),
+            )
+        )
     return targets
 
 
@@ -101,15 +104,13 @@ def compute_stop_loss(entry: float, atr: float, side: Literal["buy", "sell"], pr
         stop = entry - atr * cfg["stop_atr"]
     else:
         stop = entry + atr * cfg["stop_atr"]
-    return round(max(stop, 0.01), 2)
+    return float(round(max(stop, 0.01), 2))
 
 
 def compute_risk_reward(entry: float, targets: list[TakeProfit], stop: float) -> float:
     if not targets:
         return 0.0
     avg_target = sum(t.level for t in targets) / len(targets)
-    if side := "buy" if stop < entry else "sell":
-        pass
     risk = abs(entry - stop)
     if risk == 0:
         return 0.0
@@ -137,7 +138,11 @@ def build_trade_plan(
         stop_loss = compute_stop_loss(entry_price, atr, "sell", profile)
 
     cfg = PROFILES[profile]
-    trailing_after = round(entry_price * (1 + cfg["trailing_after"]), 2) if side == "buy" else round(entry_price * (1 - cfg["trailing_after"]), 2)
+    trailing_after = (
+        round(entry_price * (1 + cfg["trailing_after"]), 2)
+        if side == "buy"
+        else round(entry_price * (1 - cfg["trailing_after"]), 2)
+    )
     risk_reward = compute_risk_reward(entry_price, targets, stop_loss)
 
     return TradePlan(
@@ -149,7 +154,7 @@ def build_trade_plan(
     )
 
 
-def to_dict(plan: TradePlan) -> dict:
+def to_dict(plan: TradePlan) -> dict[str, Any]:
     return {
         "entry_zone": {"low": plan.entry_zone.low, "high": plan.entry_zone.high, "current": plan.entry_zone.current},
         "targets": [{"level": t.level, "type": t.type, "return_pct": t.return_pct, "rr": t.rr} for t in plan.targets],

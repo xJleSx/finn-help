@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -19,19 +19,19 @@ logger = logging.getLogger(__name__)
 
 class XGBoostClassifier:
     def __init__(self, ticker: str = ""):
-        self._model: Optional = None
+        self._model: Optional[Any] = None
         self._ticker = ticker
 
     @property
     def model_name(self) -> str:
         return f"xgb_{self._ticker}" if self._ticker else "xgb"
 
-    def save(self, metrics: Optional[dict] = None) -> str:
+    def save(self, metrics: Optional[dict[str, Any]] = None) -> str:
         if self._model is None:
             raise ValueError("No trained model to save")
         return save_model(self._model, self.model_name, metrics=metrics)
 
-    def load(self, version: Optional[str] = None):
+    def load(self, version: Optional[str] = None) -> Any:
         self._model = load_from_registry(self.model_name, version=version)
         return self._model
 
@@ -53,7 +53,7 @@ class XGBoostClassifier:
         self.save(metrics=save_metrics)
         return True
 
-    def predict(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> dict:
+    def predict(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> dict[str, Any]:
         if df.empty or len(df) < 60:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
 
@@ -79,7 +79,7 @@ class XGBoostClassifier:
         if model is None:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
 
-        proba = self._predict_latest(features)
+        proba = float(self._predict_latest(features))
 
         if proba > 0.55:
             action = "BUY"
@@ -109,7 +109,7 @@ class XGBoostClassifier:
         threshold = 0.03
         future_returns = df["close"].shift(-lookahead) / df["close"] - 1
         aligned = features.iloc[:-lookahead].copy()
-        labels = future_returns.iloc[: len(aligned)].values
+        labels = np.asarray(future_returns.iloc[: len(aligned)].values).astype(float)
         y = np.where(labels > threshold, 1, np.where(labels < -threshold, 0, np.nan))
         mask = ~np.isnan(y)
         if mask.sum() < 10 or self._model is None:
@@ -123,7 +123,7 @@ class XGBoostClassifier:
         y_test = y[mask].astype(int)
         return float(np.mean(preds == y_test))
 
-    def fit(self, x_train, y_train):
+    def fit(self, x_train: Any, y_train: Any) -> None:
         self._model = xgb.XGBClassifier(
             n_estimators=50,
             max_depth=3,
@@ -135,8 +135,16 @@ class XGBoostClassifier:
 
     EVENT_FEATURE_COLS = ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]
     BASE_FEATURE_COLS = [
-        "close", "rsi", "macd_hist", "sma_20", "sma_50",
-        "price_sma20", "price_sma50", "sma20_sma50", "rsi_norm", "macd_signal_binary",
+        "close",
+        "rsi",
+        "macd_hist",
+        "sma_20",
+        "sma_50",
+        "price_sma20",
+        "price_sma50",
+        "sma20_sma50",
+        "rsi_norm",
+        "macd_signal_binary",
     ]
 
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -155,15 +163,15 @@ class XGBoostClassifier:
         result = result.dropna()
         return result
 
-    def _predict_latest(self, features: pd.DataFrame) -> np.ndarray:
+    def _predict_latest(self, features: pd.DataFrame) -> float:
         latest = features.iloc[-1:]
         try:
-            return self._model.predict_proba(latest)[0, 1]
+            return float(self._model.predict_proba(latest)[0, 1])  # type: ignore[union-attr]
         except Exception:
             base = features[self.BASE_FEATURE_COLS].iloc[-1:]
-            return self._model.predict_proba(base)[0, 1]
+            return float(self._model.predict_proba(base)[0, 1])  # type: ignore[union-attr]
 
-    def _train_on_the_fly(self, df: pd.DataFrame, features: pd.DataFrame, anomaly_mask: np.ndarray | None = None):
+    def _train_on_the_fly(self, df: pd.DataFrame, features: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> tuple[Any, dict[str, Any] | None] | None:
         try:
             lookahead = 5
             threshold = 0.03
@@ -234,9 +242,10 @@ class XGBoostClassifier:
             logger.warning(f"XGBoost training failed: {e}")
             return None
 
-    def _log_shap(self, model, x_train: np.ndarray, x_val: np.ndarray):
+    def _log_shap(self, model: Any, x_train: np.ndarray, x_val: np.ndarray) -> None:
         try:
-            import shap
+            import shap  # type: ignore[import-not-found]
+
             explainer = shap.TreeExplainer(model)
             shap_values = explainer.shap_values(x_val)
             mean_abs = np.mean(np.abs(shap_values), axis=0)
@@ -251,7 +260,15 @@ class XGBoostClassifier:
 
     def _feature_names(self) -> list[str]:
         names = [
-            "close", "rsi", "macd_hist", "sma_20", "sma_50",
-            "price_sma20", "price_sma50", "sma20_sma50", "rsi_norm", "macd_signal_binary",
+            "close",
+            "rsi",
+            "macd_hist",
+            "sma_20",
+            "sma_50",
+            "price_sma20",
+            "price_sma50",
+            "sma20_sma50",
+            "rsi_norm",
+            "macd_signal_binary",
         ]
         return names + self.EVENT_FEATURE_COLS

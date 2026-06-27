@@ -1,7 +1,7 @@
 import logging
 from contextlib import contextmanager
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -62,7 +62,7 @@ sync_engine = create_engine(
 
 
 @event.listens_for(sync_engine, "connect")
-def _set_sqlite_pragma(dbapi_connection, connection_record):
+def _set_sqlite_pragma(dbapi_connection: Any, connection_record: Any) -> None:
     if "sqlite" in settings.database_url:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
@@ -82,7 +82,7 @@ def close_session() -> None:
 
 
 @contextmanager
-def session_scope():
+def session_scope() -> Any:
     """Provide a transactional scope around a series of operations."""
     session = get_session()
     try:

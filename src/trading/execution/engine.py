@@ -3,7 +3,7 @@ import logging
 from collections import deque
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional, cast
 
 from src.config import personal, settings
 from src.trading.brokers.tbank import TBankClient
@@ -18,15 +18,18 @@ logger = logging.getLogger(__name__)
 def _notify_trade(record: "OrderRecord", reason: str = "") -> None:
     try:
         from src.interfaces.telegram import broadcast_trade
-        asyncio.ensure_future(broadcast_trade(
-            ticker=record.ticker,
-            direction=record.direction,
-            quantity=record.quantity,
-            price=record.price,
-            status=record.status,
-            reason=reason,
-            order_id=record.order_id or "",
-        ))
+
+        asyncio.ensure_future(
+            broadcast_trade(
+                ticker=record.ticker,
+                direction=record.direction,
+                quantity=record.quantity,
+                price=record.price,
+                status=record.status,
+                reason=reason,
+                order_id=record.order_id or "",
+            )
+        )
     except Exception:
         logger.exception("Failed to schedule trade broadcast")
 
@@ -117,7 +120,11 @@ async def execute_order(
         record.order_id = f"dry_{datetime.now(timezone.utc).timestamp()}"
         logger.info(
             "DRY-RUN %s %d %s at %.2f (%s)",
-            direction, quantity, ticker, record.price, reason,
+            direction,
+            quantity,
+            ticker,
+            record.price,
+            reason,
         )
         position_tracker.update(ticker, direction, quantity, record.price)
         _execution_log.append(record)
@@ -158,8 +165,8 @@ async def execute_order(
             inst = _db.query(_InstModel).filter_by(ticker=ticker).first()
             if inst:
                 if not resolved_figi and inst.figi:
-                    resolved_figi = inst.figi
-                lot_size = inst.lot_size or 1
+                    resolved_figi = str(inst.figi)
+                lot_size = int(inst.lot_size or 1)
         finally:
             _db.close()
 
@@ -178,7 +185,8 @@ async def execute_order(
             record.db_id = save_order(record)
             return record
 
-        delay = (personal.get("execution", {}) or {}).get("delay_ms", 500)
+        exec_cfg = personal.get("execution", {})
+        delay = cast("dict[str, Any]", exec_cfg).get("delay_ms", 500) if isinstance(exec_cfg, dict) else 500
         if delay > 0:
             await asyncio.sleep(delay / 1000)
 
@@ -193,7 +201,7 @@ async def execute_order(
                 record.db_id = save_order(record)
                 return record
 
-            account_id = accounts[0]["id"]
+            account_id = str(accounts[0]["id"])
 
             result = await client.place_order(
                 figi=resolved_figi,
@@ -201,42 +209,53 @@ async def execute_order(
                 direction=direction,
                 account_id=account_id,
             )
-            record.order_id = result.get("order_id")
-            record.status = result.get("status", "unknown")
-            executed_lots = result.get("executed_quantity", 0)
+            _order_id = result.get("order_id")
+            record.order_id = str(_order_id) if _order_id is not None else None
+            record.status = str(result.get("status", "unknown"))
+            executed_lots = cast(int, result.get("executed_quantity", 0))
             executed_shares = executed_lots * lot_size
             executed_price = result.get("executed_price")
             if executed_price is not None:
-                record.price = executed_price
+                record.price = cast(float, executed_price)
 
             slippage = 0.0
             if requested_price and requested_price > 0 and executed_price is not None:
-                slippage = abs(executed_price - requested_price) / requested_price
+                slippage = abs(cast(float, executed_price) - requested_price) / requested_price
             logger.info(
                 "ORDER FILLED: %s %d lots (%d shares) %s at %.2f (id=%s)",
-                direction, executed_lots, executed_shares, ticker, record.price, record.order_id,
+                direction,
+                executed_lots,
+                executed_shares,
+                ticker,
+                record.price,
+                record.order_id,
             )
 
             if record.status in ("filled", "partial") and executed_shares > 0:
                 position_tracker.update(ticker, direction, executed_shares, record.price)
-                sl_pct = personal.get("stop_loss_pct", 0.05)
-                tp_pct = personal.get("take_profit_pct", 0.10)
+                sl_pct = cast(float, personal.get("stop_loss_pct", 0.05))
+                tp_pct = cast(float, personal.get("take_profit_pct", 0.10))
                 _sl_db = _get_db()
                 try:
                     from src.db.models import Indicator as _IndicatorModel
-                    latest = _sl_db.query(_IndicatorModel).filter_by(
-                        instrument_id=(inst.id if inst else 0)
-                    ).order_by(_IndicatorModel.date.desc()).first()
-                    if latest and latest.atr and latest.atr > 0 and record.price > 0:
+
+                    latest = (
+                        _sl_db.query(_IndicatorModel)
+                        .filter_by(instrument_id=(inst.id if inst else 0))
+                        .order_by(_IndicatorModel.date.desc())
+                        .first()
+                    )
+                    if latest and latest.atr and float(latest.atr) > 0 and record.price > 0:
                         from src.trading.risk.manager import compute_stop_loss as _compute_sl
-                        atr_result = _compute_sl(record.price, latest.atr, multiplier=2.0)
+
+                        atr_result = _compute_sl(record.price, float(latest.atr), multiplier=2.0)
                         if atr_result and atr_result["stop_loss_pct"]:
                             sl_pct = abs(atr_result["stop_loss_pct"]) / 100
                 except Exception:
                     pass
                 finally:
                     _sl_db.close()
-                rr_ratio = personal.get("rr_ratio", 2.0)
+                rr_ratio = cast(float, personal.get("rr_ratio", 2.0))
                 tp_pct = max(tp_pct, sl_pct * rr_ratio)
                 position_tracker.set_sl_tp(ticker, sl_pct=sl_pct, tp_pct=tp_pct)
 

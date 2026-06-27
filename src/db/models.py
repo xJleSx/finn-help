@@ -322,7 +322,9 @@ class Order(Base):
     quantity = Column(Integer, nullable=False)
     price = Column(Float, nullable=True)
     order_type = Column(String(10), default="market")  # market / limit
-    status = Column(String(30), default="pending")  # pending / approved / submitted / filled / partial / rejected / cancelled
+    status = Column(
+        String(30), default="pending"
+    )  # pending / approved / submitted / filled / partial / rejected / cancelled
     mode = Column(String(20), default="manual")  # dry_run / manual / auto
     reason = Column(Text, default="")
     order_id_ext = Column(String(100), nullable=True)  # external order ID
@@ -402,9 +404,7 @@ class AuthorProfile(Base):
     last_fetched = Column(DateTime(timezone=True))
     cache_json = Column(JSON)
 
-    __table_args__ = (
-        UniqueConstraint("source", "author_nick", name="uq_author_profile_source_nick"),
-    )
+    __table_args__ = (UniqueConstraint("source", "author_nick", name="uq_author_profile_source_nick"),)
 
 
 class SentimentSignal(Base):
@@ -421,9 +421,7 @@ class SentimentSignal(Base):
     source_weight = Column(Float, default=0.5)
     created_at = Column(DateTime, default=func.now())
 
-    __table_args__ = (
-        Index("ix_sentiment_signals_ticker_date", "ticker", "created_at"),
-    )
+    __table_args__ = (Index("ix_sentiment_signals_ticker_date", "ticker", "created_at"),)
 
 
 class MetricSnapshot(Base):
@@ -522,9 +520,7 @@ class FundamentalMetric(Base):
 
     instrument = relationship("Instrument", backref="fundamental_metrics")
 
-    __table_args__ = (
-        Index("ix_fundamental_metrics_instr_date", "instrument_id", "date"),
-    )
+    __table_args__ = (Index("ix_fundamental_metrics_instr_date", "instrument_id", "date"),)
 
 
 class FinancialReport(Base):

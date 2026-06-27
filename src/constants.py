@@ -1,3 +1,5 @@
+from typing import Any
+
 KNOWN_DIVIDEND_STOCKS: dict[str, str] = {
     "SBER": "dividend",
     "GAZP": "dividend",
@@ -48,7 +50,7 @@ SECTOR_LIMITS: dict[str, float] = {
     "Потреб": 0.20,
 }
 
-RISK_PROFILES: dict[str, dict] = {
+RISK_PROFILES: dict[str, dict[str, Any]] = {
     "conservative": {
         "label": "Консервативный",
         "weights": {"technical": 0.30, "fundamental": 0.25, "geo": 0.20, "ml": 0.08, "sentiment": 0.07, "mtf": 0.10},
@@ -81,7 +83,7 @@ COOLDOWN_SECONDS: int = 5
 
 # ── Macro thresholds (signal/engine.py) ──────────────────────────────
 
-MACRO_THRESHOLDS: dict[str, dict] = {
+MACRO_THRESHOLDS: dict[str, dict[str, Any]] = {
     "brent": {"high": 80, "high_adj": 0.03, "low": 50, "low_adj": -0.05},
     "key_rate": {"high": 15, "high_adj": -0.05, "low": 7, "low_adj": 0.03},
     "cpi": {"high": 8, "high_adj": -0.04, "low": 4, "low_adj": 0.02},
@@ -108,7 +110,7 @@ FUND_RISK_HIGH: float = 0.6
 
 # ── Allocator thresholds (portfolio/allocator.py) ────────────────────
 
-ALLOCATOR_CAPITAL_TIERS: list[dict] = [
+ALLOCATOR_CAPITAL_TIERS: list[dict[str, Any]] = [
     {"max_capital": 1000, "min_budget": 500, "max_positions": 1},
     {"max_capital": 3000, "min_budget": 1000, "max_positions": 2},
 ]
@@ -118,7 +120,7 @@ ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL: float = 10000
 ALLOCATOR_LEFTOVER_THRESHOLD: float = 0.10
 ALLOCATOR_LEFTOVER_MIN_ABS: float = 500
 ALLOCATOR_RECOMMEND_MAX_PICKS: int = 15
-ALLOCATOR_RECOMMEND_TIER_PICKS: list[dict] = [
+ALLOCATOR_RECOMMEND_TIER_PICKS: list[dict[str, Any]] = [
     {"max_capital": 1000, "max_picks": 4},
     {"max_capital": 5000, "max_picks": 8},
 ]
@@ -134,3 +136,4 @@ NEWS_SENTIMENT_WEIGHT: float = 0.4
 DEFAULT_HISTORY_DAYS: int = 365
 DIVIDEND_CHECK_DAYS: int = 365
 NEWS_MAX_PER_FEED: int = 5
+NEWS_STALE_HOURS: int = 24

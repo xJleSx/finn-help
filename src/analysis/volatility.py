@@ -1,5 +1,5 @@
 import logging
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import numpy as np
 import pandas as pd
@@ -21,11 +21,11 @@ VOLATILITY_REGIMES: dict[str, _VolatilityThresholds] = {
 
 
 class VolatilityRegimeDetector:
-    def detect(self, df: pd.DataFrame, ind_df: pd.DataFrame) -> dict:
+    def detect(self, df: pd.DataFrame, ind_df: pd.DataFrame) -> dict[str, Any]:
         if df.empty:
             return {"regime": "NORMAL", "atr_ratio": 0.0, "hv": 0.0, "adjustment": 1.0}
 
-        close = df["close"].values
+        close = np.asarray(df["close"], dtype=float)
         returns = np.diff(close) / close[:-1]
         hv = float(np.std(returns) * np.sqrt(252)) if len(returns) > 1 else 0.0
 
@@ -58,7 +58,7 @@ class VolatilityRegimeDetector:
             return "NORMAL"
         return "HIGH"
 
-    def _weight_adjustment(self, regime: str) -> dict:
+    def _weight_adjustment(self, regime: str) -> dict[str, float]:
         if regime == "HIGH":
             return {
                 "technical_mult": 0.7,

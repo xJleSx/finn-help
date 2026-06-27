@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,7 +70,7 @@ def _omega_ratio(returns: np.ndarray, rf: float = 0.0) -> float:
     return float(gains / losses) if losses > 0 else float("inf")
 
 
-def compute_risk_metrics(price_series: list[float]) -> dict:
+def compute_risk_metrics(price_series: list[float]) -> dict[str, Any]:
     arr = np.array(price_series, dtype=float)
     if len(arr) < 10:
         return {"sharpe": 0.0, "sortino": 0.0, "max_drawdown": 0.0, "calmar": 0.0, "omega": 0.0}
@@ -89,19 +89,19 @@ class SignalFusionEngine:
         self,
         ticker: str,
         instrument_type: str = "stock",
-        technical: Optional[dict] = None,
-        fundamental: Optional[dict] = None,
-        geo: Optional[dict] = None,
-        ml_prediction: Optional[dict] = None,
-        volatility_regime: Optional[dict] = None,
-        risk_metrics: Optional[dict] = None,
-        macro_context: Optional[dict] = None,
-        sentiment: Optional[dict] = None,
-        mtf: Optional[dict] = None,
-        event_context: Optional[dict] = None,
-        trade_plan: Optional[dict] = None,
+        technical: Optional[dict[str, Any]] = None,
+        fundamental: Optional[dict[str, Any]] = None,
+        geo: Optional[dict[str, Any]] = None,
+        ml_prediction: Optional[dict[str, Any]] = None,
+        volatility_regime: Optional[dict[str, Any]] = None,
+        risk_metrics: Optional[dict[str, Any]] = None,
+        macro_context: Optional[dict[str, Any]] = None,
+        sentiment: Optional[dict[str, Any]] = None,
+        mtf: Optional[dict[str, Any]] = None,
+        event_context: Optional[dict[str, Any]] = None,
+        trade_plan: Optional[dict[str, Any]] = None,
         user_id: Optional[str] = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         reasons = []
         if user_id:
             from src.user_profile import profile_manager
@@ -173,7 +173,7 @@ class SignalFusionEngine:
             brent = macro_context.get("brent")
             m2 = macro_context.get("m2")
 
-            def _apply(name: str, val: float | None, label: str):
+            def _apply(name: str, val: float | None, label: str) -> None:
                 nonlocal macro_adjustment
                 if val is None:
                     return
@@ -194,20 +194,20 @@ class SignalFusionEngine:
 
             if m2 is not None:
                 cfg = mt.get("m2")
-                if m2 > cfg["high"]:
-                    macro_adjustment += cfg["high_adj"]
+                if m2 > cfg["high"]:  # type: ignore[index]
+                    macro_adjustment += cfg["high_adj"]  # type: ignore[index]
                     macro_reasons.append("M2 расширяется")
-                elif m2 < cfg["low"]:
-                    macro_adjustment += cfg["low_adj"]
+                elif m2 < cfg["low"]:  # type: ignore[index]
+                    macro_adjustment += cfg["low_adj"]  # type: ignore[index]
                     macro_reasons.append("M2 сужается")
 
             if imoex is not None:
                 cfg = mt.get("imoex")
-                if imoex > cfg["high"]:
-                    macro_adjustment += cfg["high_adj"]
+                if imoex > cfg["high"]:  # type: ignore[index]
+                    macro_adjustment += cfg["high_adj"]  # type: ignore[index]
                     macro_reasons.append("IMOEX сильно")
-                elif imoex < cfg["low"]:
-                    macro_adjustment += cfg["low_adj"]
+                elif imoex < cfg["low"]:  # type: ignore[index]
+                    macro_adjustment += cfg["low_adj"]  # type: ignore[index]
                     macro_reasons.append("IMOEX слабый")
 
             if macro_reasons:
@@ -402,7 +402,7 @@ class SignalFusionEngine:
             pct = min(pct, 10)
         return pct
 
-    def _to_native(self, obj):
+    def _to_native(self, obj: Any) -> Any:
         if isinstance(obj, dict):
             return {k: self._to_native(v) for k, v in obj.items()}
         elif isinstance(obj, list):
@@ -411,7 +411,7 @@ class SignalFusionEngine:
             return obj.item()
         return obj
 
-    def save_signal_sync(self, db, instrument_id: int, fused: dict) -> SignalModel:
+    def save_signal_sync(self, db: Any, instrument_id: int, fused: dict[str, Any]) -> SignalModel:
         """Sync version for CLI / scheduler."""
         from src.db.models import Signal as SignalModel
 
@@ -427,7 +427,7 @@ class SignalFusionEngine:
         db.commit()
         return signal
 
-    async def save_signal(self, db: AsyncSession, instrument_id: int, fused: dict) -> SignalModel:
+    async def save_signal(self, db: AsyncSession, instrument_id: int, fused: dict[str, Any]) -> SignalModel:
         fused_clean = self._to_native(fused)
         signal = SignalModel(
             instrument_id=instrument_id,

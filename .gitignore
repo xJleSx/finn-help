@@ -16,3 +16,20 @@ data/
 
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Coverage
+.coverage
+.coverage.*
+
+# mypy
+.mypy_cache/
+
+# ruff
+.ruff_cache/
+
+# pytest
+.pytest_cache/

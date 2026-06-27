@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -55,7 +56,7 @@ SECTOR_SHOCKS: dict[str, dict[str, float]] = {
 }
 
 
-def format_portfolio_for_stress(plan: dict) -> list[dict]:
+def format_portfolio_for_stress(plan: dict[str, Any]) -> list[dict[str, Any]]:
     positions = []
     for cat, data in plan.items():
         for item in data.get("items", []):
@@ -72,25 +73,25 @@ def format_portfolio_for_stress(plan: dict) -> list[dict]:
 
 
 class StressTester:
-    def __init__(self, positions: list[dict]):
+    def __init__(self, positions: list[dict[str, Any]]) -> None:
         self.positions = positions
         self.total = sum(p.get("amount", 0) for p in positions)
 
-    def run_crash_scenarios(self) -> list[dict]:
+    def run_crash_scenarios(self) -> list[dict[str, Any]]:
         results = []
         for name, shocks in CRASH_SCENARIOS.items():
             result = self._apply_shocks(name, shocks)
             results.append(result)
         return results
 
-    def run_sector_shocks(self) -> list[dict]:
+    def run_sector_shocks(self) -> list[dict[str, Any]]:
         results = []
         for name, shocks in SECTOR_SHOCKS.items():
             result = self._apply_shocks(name, shocks)
             results.append(result)
         return results
 
-    def run_custom_shock(self, ticker: str, shock_pct: float) -> dict | None:
+    def run_custom_shock(self, ticker: str, shock_pct: float) -> dict[str, Any] | None:
         for p in self.positions:
             if p["ticker"] == ticker:
                 shocked = p["amount"] * (1 + shock_pct)
@@ -114,7 +115,7 @@ class StressTester:
                 }
         return None
 
-    def _apply_shocks(self, scenario_name: str, shocks: dict[str, float]) -> dict:
+    def _apply_shocks(self, scenario_name: str, shocks: dict[str, float]) -> dict[str, Any]:
         overall = shocks.get("overall", 0.0)
         details = []
         total_after = 0.0
@@ -146,7 +147,7 @@ class StressTester:
             "details": details,
         }
 
-    def worst_historical_period(self, price_series: list[float], window: int = 21) -> dict:
+    def worst_historical_period(self, price_series: list[float], window: int = 21) -> dict[str, Any]:
         arr = np.array(price_series)
         if len(arr) < window + 1:
             return {"max_drawdown": 0.0, "worst_period": "N/A"}
@@ -167,7 +168,7 @@ class StressTester:
             "worst_period": f"{window}-дневное окно с {worst_start}",
         }
 
-    def format_results(self, results: list[dict]) -> str:
+    def format_results(self, results: list[dict[str, Any]]) -> str:
         text = ""
         for r in results:
             emoji = "🔴" if r["loss_pct"] < -0.10 else "🟡" if r["loss_pct"] < -0.05 else "🟢"
@@ -186,7 +187,7 @@ class StressTester:
         return text
 
 
-def format_var_section(positions: list[dict]) -> str:
+def format_var_section(positions: list[dict[str, Any]]) -> str:
     amounts = [p.get("amount", 0) for p in positions if p.get("amount", 0) > 0]
     if len(amounts) < 5:
         return ""
@@ -216,7 +217,7 @@ def format_var_section(positions: list[dict]) -> str:
     return text
 
 
-def format_sector_concentration(positions: list[dict]) -> str:
+def format_sector_concentration(positions: list[dict[str, Any]]) -> str:
     sector_map: dict[str, float] = {}
     total = 0
     for p in positions:

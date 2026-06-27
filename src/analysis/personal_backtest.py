@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Optional
+from typing import Any, Optional, cast
 
 import numpy as np
 
@@ -59,8 +59,8 @@ class PersonalBacktestResult:
     total_commission: float
     total_slippage: float
     n_trades: int
-    equity_curve: list[dict] = field(default_factory=list)
-    monthly_returns: list[dict] = field(default_factory=list)
+    equity_curve: list[dict[str, Any]] = field(default_factory=list)
+    monthly_returns: list[dict[str, Any]] = field(default_factory=list)
     trades: list[TradeRecord] = field(default_factory=list)
     walk_forward: list[WalkForwardFold] = field(default_factory=list)
     benchmark_ticker: str = "IMOEX"
@@ -101,7 +101,7 @@ class PersonalBacktestResult:
         return "\n".join(lines)
 
 
-def _prices_for_ticker(db, ticker: str, start: date, end: date) -> list[dict]:
+def _prices_for_ticker(db: Any, ticker: str, start: date, end: date) -> list[dict[str, Any]]:
     rows = (
         db.query(Price)
         .join(Instrument)
@@ -114,7 +114,7 @@ def _prices_for_ticker(db, ticker: str, start: date, end: date) -> list[dict]:
 
 def _returns(arr: list[float]) -> np.ndarray:
     a = np.array(arr, dtype=float)
-    return np.diff(a) / a[:-1]
+    return np.diff(a) / a[:-1]  # type: ignore[no-any-return]
 
 
 def _sharpe(returns: np.ndarray, annual: int = 252) -> float:
@@ -157,11 +157,11 @@ def run_personal_backtest(
     tax_rate: Optional[float] = None,
     use_tbank_fees: bool = False,
 ) -> PersonalBacktestResult:
-    bt = personal.get("backtest", {})
-    tickers = tickers or personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP"])
-    start = start or date.fromisoformat(bt.get("start_date", "2022-01-01"))
-    end = end or date.fromisoformat(bt.get("end_date", "2026-06-16"))
-    capital = capital or bt.get("initial_capital", 100_000.0)
+    bt: dict[str, Any] = cast(dict[str, Any], personal.get("backtest", {}))
+    tickers = tickers or cast(list[str], personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP"]))
+    start = start or date.fromisoformat(cast(str, bt.get("start_date", "2022-01-01")))
+    end = end or date.fromisoformat(cast(str, bt.get("end_date", "2026-06-16")))
+    capital = capital or cast(float, bt.get("initial_capital", 100_000.0))
 
     if use_tbank_fees:
         # T-Bank fees: 0.3% per trade + exchange fee 0.01%
@@ -169,15 +169,15 @@ def run_personal_backtest(
         slippage_pct = slippage_pct or 0.001
         tax_rate = tax_rate or 0.13
     else:
-        commission_pct = commission_pct or bt.get("commission_pct", 0.05) / 100
-        slippage_pct = slippage_pct or bt.get("slippage_pct", 0.02) / 100
-        tax_rate = tax_rate or bt.get("tax_rate", 0.13)
-    benchmark = bt.get("benchmark_ticker", "IMOEX")
+        commission_pct = commission_pct or cast(float, bt.get("commission_pct", 0.05)) / 100
+        slippage_pct = slippage_pct or cast(float, bt.get("slippage_pct", 0.02)) / 100
+        tax_rate = tax_rate or cast(float, bt.get("tax_rate", 0.13))
+    benchmark = cast(str, bt.get("benchmark_ticker", "IMOEX"))
 
     db = get_session()
     try:
         # prices
-        prices_map: dict[str, list[dict]] = {}
+        prices_map: dict[str, list[dict[str, Any]]] = {}
         for t in tickers:
             prices_map[t] = _prices_for_ticker(db, t, start, end)
         bench_prices = _prices_for_ticker(db, benchmark, start, end)
@@ -186,10 +186,23 @@ def run_personal_backtest(
         if not valid_tickers or len(bench_prices) < 20:
             logger.warning("Not enough price data for backtest tickers=%s", valid_tickers)
             return PersonalBacktestResult(
-                tickers=tickers, start_date=start, end_date=end, initial_capital=capital,
-                final_capital=capital, total_return=0.0, benchmark_return=0.0, alpha=0.0,
-                sharpe=0.0, sortino=0.0, calmar=0.0, max_drawdown=0.0, win_rate=0.0,
-                profit_factor=0.0, total_commission=0.0, total_slippage=0.0, n_trades=0,
+                tickers=tickers,
+                start_date=start,
+                end_date=end,
+                initial_capital=capital,
+                final_capital=capital,
+                total_return=0.0,
+                benchmark_return=0.0,
+                alpha=0.0,
+                sharpe=0.0,
+                sortino=0.0,
+                calmar=0.0,
+                max_drawdown=0.0,
+                win_rate=0.0,
+                profit_factor=0.0,
+                total_commission=0.0,
+                total_slippage=0.0,
+                n_trades=0,
             )
 
         # align lengths
@@ -217,11 +230,18 @@ def run_personal_backtest(
             slip = capital * weight * slippage_pct
             total_commission += comm
             total_slippage += slip
-            trades.append(TradeRecord(
-                date=prices_map[t][0]["date"], ticker=t, action="BUY",
-                price=p, shares=shares, value=capital * weight,
-                commission=comm, slippage=slip,
-            ))
+            trades.append(
+                TradeRecord(
+                    date=prices_map[t][0]["date"],
+                    ticker=t,
+                    action="BUY",
+                    price=p,
+                    shares=shares,
+                    value=capital * weight,
+                    commission=comm,
+                    slippage=slip,
+                )
+            )
 
         portfolio_dates = [p["date"] for p in bench_prices]
 
@@ -281,18 +301,20 @@ def run_personal_backtest(
             wf_sharpe = _sharpe(_returns(test_slice)) if len(test_slice) > 5 else 0
             wf_mdd = _max_dd(test_slice) if len(test_slice) > 1 else 0
 
-            wf_folds.append(WalkForwardFold(
-                fold=fold + 1,
-                train_start=portfolio_dates[ts],
-                train_end=portfolio_dates[min(te - 1, len(portfolio_dates) - 1)],
-                test_start=portfolio_dates[te] if te < len(portfolio_dates) else portfolio_dates[-1],
-                test_end=portfolio_dates[-1],
-                portfolio_return=wf_port_ret,
-                benchmark_return=wf_bench_ret,
-                sharpe=wf_sharpe,
-                max_drawdown=wf_mdd,
-                trades=len(valid_tickers),
-            ))
+            wf_folds.append(
+                WalkForwardFold(
+                    fold=fold + 1,
+                    train_start=portfolio_dates[ts],
+                    train_end=portfolio_dates[min(te - 1, len(portfolio_dates) - 1)],
+                    test_start=portfolio_dates[te] if te < len(portfolio_dates) else portfolio_dates[-1],
+                    test_end=portfolio_dates[-1],
+                    portfolio_return=wf_port_ret,
+                    benchmark_return=wf_bench_ret,
+                    sharpe=wf_sharpe,
+                    max_drawdown=wf_mdd,
+                    trades=len(valid_tickers),
+                )
+            )
 
         result = PersonalBacktestResult(
             tickers=valid_tickers,
@@ -308,9 +330,9 @@ def run_personal_backtest(
             calmar=_calmar(port_returns, equity),
             max_drawdown=_max_dd(equity),
             win_rate=float(np.mean(port_returns > 0)) if len(port_returns) > 0 else 0,
-            profit_factor=float(
-                sum(port_returns[port_returns > 0]) / abs(sum(port_returns[port_returns < 0]))
-            ) if any(port_returns < 0) else float("inf"),
+            profit_factor=float(sum(port_returns[port_returns > 0]) / abs(sum(port_returns[port_returns < 0])))
+            if any(port_returns < 0)
+            else float("inf"),
             total_commission=total_commission,
             total_slippage=total_slippage,
             n_trades=len(trades),

@@ -51,8 +51,8 @@ class SectorAnalyzer:
             )
             if not first or not last or not first.close or not last.close or first.close <= 0:
                 continue
-            ret = (last.close - first.close) / first.close
-            sector = self.sector_for(inst.full_name or "", inst.ticker)
+            ret = float((last.close - first.close) / first.close)
+            sector = self.sector_for(str(inst.full_name or ""), str(inst.ticker))
             if sector not in sector_returns:
                 sector_returns[sector] = []
             sector_returns[sector].append(ret)
@@ -70,10 +70,10 @@ class SectorAnalyzer:
             prices = (
                 db.query(Price).filter(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date).all()
             )
-            closes = [p.close for p in prices if p.close and p.close > 0]
+            closes = [float(p.close) for p in prices if p.close and p.close > 0]
             if len(closes) < 20:
                 continue
-            sector = self.sector_for(inst.full_name or "", inst.ticker)
+            sector = self.sector_for(str(inst.full_name or ""), str(inst.ticker))
             if sector not in sector_prices:
                 sector_prices[sector] = closes[:]
             elif len(closes) > len(sector_prices[sector]):
@@ -110,12 +110,12 @@ class SectorAnalyzer:
             prices = (
                 db.query(Price).filter(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date).all()
             )
-            closes = [p.close for p in prices if p.close and p.close > 0]
+            closes = [float(p.close) for p in prices if p.close and p.close > 0]
             if len(closes) < 10:
                 continue
             returns = np.diff(closes) / closes[:-1]
             vol = float(np.std(returns) * np.sqrt(252))
-            sector = self.sector_for(inst.full_name or "", inst.ticker)
+            sector = self.sector_for(str(inst.full_name or ""), str(inst.ticker))
             if sector not in sector_vols:
                 sector_vols[sector] = []
             sector_vols[sector].append(vol)
@@ -142,8 +142,8 @@ class SectorAnalyzer:
             last = last_result.scalar_one_or_none()
             if not first or not last or not first.close or not last.close or first.close <= 0:
                 continue
-            ret = (last.close - first.close) / first.close
-            sector = self.sector_for(inst.full_name or "", inst.ticker)
+            ret = float((last.close - first.close) / first.close)
+            sector = self.sector_for(str(inst.full_name or ""), str(inst.ticker))
             if sector not in sector_returns:
                 sector_returns[sector] = []
             sector_returns[sector].append(ret)
@@ -163,10 +163,10 @@ class SectorAnalyzer:
                 select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date)
             )
             prices = price_result.scalars().all()
-            closes = [p.close for p in prices if p.close and p.close > 0]
+            closes = [float(p.close) for p in prices if p.close and p.close > 0]
             if len(closes) < 20:
                 continue
-            sector = self.sector_for(inst.full_name or "", inst.ticker)
+            sector = self.sector_for(str(inst.full_name or ""), str(inst.ticker))
             if sector not in sector_prices:
                 sector_prices[sector] = closes[:]
             elif len(closes) > len(sector_prices[sector]):
@@ -205,12 +205,12 @@ class SectorAnalyzer:
                 select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date)
             )
             prices = price_result.scalars().all()
-            closes = [p.close for p in prices if p.close and p.close > 0]
+            closes = [float(p.close) for p in prices if p.close and p.close > 0]
             if len(closes) < 10:
                 continue
             returns = np.diff(closes) / closes[:-1]
             vol = float(np.std(returns) * np.sqrt(252))
-            sector = self.sector_for(inst.full_name or "", inst.ticker)
+            sector = self.sector_for(str(inst.full_name or ""), str(inst.ticker))
             if sector not in sector_vols:
                 sector_vols[sector] = []
             sector_vols[sector].append(vol)

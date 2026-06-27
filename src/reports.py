@@ -1,11 +1,12 @@
 import csv
 import logging
+from typing import Any
 from io import StringIO
 
 logger = logging.getLogger(__name__)
 
 
-def generate_portfolio_csv(positions: list[dict]) -> str:
+def generate_portfolio_csv(positions: list[dict[str, Any]]) -> str:
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow(["Тикер", "Название", "Кол-во", "Средняя", "Цена", "Стоимость", "Доля", "Прибыль %"])
@@ -25,7 +26,7 @@ def generate_portfolio_csv(positions: list[dict]) -> str:
     return output.getvalue()
 
 
-def generate_signals_csv(signals: list[dict]) -> str:
+def generate_signals_csv(signals: list[dict[str, Any]]) -> str:
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow(["Тикер", "Действие", "Уверенность", "Score", "Причины"])
@@ -42,7 +43,7 @@ def generate_signals_csv(signals: list[dict]) -> str:
     return output.getvalue()
 
 
-def generate_analysis_csv(ticker: str, signal: dict, prices: list[dict]) -> str:
+def generate_analysis_csv(ticker: str, signal: dict[str, Any], prices: list[dict[str, Any]]) -> str:
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow([f"Анализ: {ticker}"])
@@ -63,7 +64,7 @@ def generate_analysis_csv(ticker: str, signal: dict, prices: list[dict]) -> str:
     return output.getvalue()
 
 
-def generate_backtest_csv(result) -> str:
+def generate_backtest_csv(result: Any) -> str:
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow(["Параметр", "Значение"])
@@ -95,7 +96,7 @@ def generate_backtest_csv(result) -> str:
     return output.getvalue()
 
 
-def generate_sector_report_csv(sector_perf: dict, sector_vol: dict) -> str:
+def generate_sector_report_csv(sector_perf: dict[str, float], sector_vol: dict[str, float]) -> str:
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow(["Сектор", "Доходность 30д", "Волатильность (годовая)"])

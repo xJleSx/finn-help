@@ -1,6 +1,6 @@
 import logging
 from datetime import date, timedelta
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 from sqlalchemy import delete
 
@@ -18,12 +18,12 @@ class _MemoryCache:
     def get(self, key: str) -> Optional[Any]:
         return self._store.get(key)
 
-    def set(self, key: str, value: Any):
+    def set(self, key: str, value: Any) -> None:
         if len(self._store) >= self._maxsize:
             self._store.pop(next(iter(self._store)), None)
         self._store[key] = value
 
-    def clear(self, prefix: Optional[str] = None):
+    def clear(self, prefix: Optional[str] = None) -> None:
         if prefix:
             keys = [k for k in self._store if k.startswith(prefix)]
             for k in keys:
@@ -43,11 +43,11 @@ def _mem_key(ticker: str, feature_type: str) -> str:
     return f"{ticker.upper()}:{feature_type}"
 
 
-def get_cached(ticker: str, feature_type: str, max_age_days: int = 1) -> Optional[dict]:
+def get_cached(ticker: str, feature_type: str, max_age_days: int = 1) -> Optional[dict[str, Any]]:
     mem_key = _mem_key(ticker, feature_type)
     cached = _mem.get(mem_key)
     if cached is not None:
-        return cached
+        return cast(dict[str, Any], cached)
     db = get_session()
     try:
         row = (
@@ -62,12 +62,12 @@ def get_cached(ticker: str, feature_type: str, max_age_days: int = 1) -> Optiona
         if age > max_age_days:
             return None
         _mem.set(mem_key, row.value_json)
-        return row.value_json
+        return cast(dict[str, Any], row.value_json)
     finally:
         db.close()
 
 
-def set_cache(ticker: str, feature_type: str, value: dict) -> None:
+def set_cache(ticker: str, feature_type: str, value: dict[str, Any]) -> None:
     mem_key = _mem_key(ticker, feature_type)
     _mem.set(mem_key, value)
     db = get_session()
@@ -101,7 +101,7 @@ def clear_stale(max_age_days: int = 7) -> int:
         result = db.execute(delete(FeatureCache).where(FeatureCache.date < cutoff))
         db.commit()
         _mem.clear()
-        return result.rowcount or 0
+        return result.rowcount or 0  # type: ignore[attr-defined]
     finally:
         db.close()
 
@@ -120,7 +120,7 @@ def cached_or_compute(
     return result
 
 
-def clear_memory_cache(ticker: Optional[str] = None):
+def clear_memory_cache(ticker: Optional[str] = None) -> None:
     if ticker:
         _mem.clear(prefix=f"{ticker.upper()}:")
     else:

@@ -2,6 +2,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from src.constants import RISK_PROFILES
 
@@ -17,7 +18,7 @@ class UserProfile:
     risk_profile: str = "balanced"
     investment_horizon: str = "medium"  # short, medium, long
     capital: float = 100_000
-    preferences: dict = field(
+    preferences: dict[str, Any] = field(
         default_factory=lambda: {
             "sectors": [],
             "exclude_tickers": [],
@@ -26,7 +27,7 @@ class UserProfile:
         }
     )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "user_id": self.user_id,
             "risk_profile": self.risk_profile,
@@ -36,7 +37,7 @@ class UserProfile:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "UserProfile":
+    def from_dict(cls, data: dict[str, Any]) -> "UserProfile":
         return cls(
             user_id=data.get("user_id", "default"),
             risk_profile=data.get("risk_profile", "balanced"),
@@ -47,7 +48,7 @@ class UserProfile:
 
 
 class UserProfileManager:
-    def __init__(self):
+    def __init__(self) -> None:
         self._cache: dict[str, UserProfile] = {}
 
     def _path(self, user_id: str) -> Path:
@@ -66,12 +67,12 @@ class UserProfileManager:
         self._cache[user_id] = profile
         return profile
 
-    def save(self, profile: UserProfile):
+    def save(self, profile: UserProfile) -> None:
         path = self._path(profile.user_id)
         path.write_text(json.dumps(profile.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
         self._cache[profile.user_id] = profile
 
-    def update(self, user_id: str, **kwargs) -> UserProfile:
+    def update(self, user_id: str, **kwargs: Any) -> UserProfile:
         profile = self.get(user_id)
         for key, value in kwargs.items():
             if hasattr(profile, key):
@@ -100,22 +101,22 @@ class UserProfileManager:
     def get_max_position(self, user_id: str) -> int:
         profile = self.get(user_id)
         profile_data = RISK_PROFILES.get(profile.risk_profile, RISK_PROFILES["balanced"])
-        return min(profile.preferences.get("max_position_pct", 30), profile_data["max_position_pct"])
+        return int(min(profile.preferences.get("max_position_pct", 30), profile_data["max_position_pct"]))
 
     def get_min_confidence(self, user_id: str) -> float:
         profile = self.get(user_id)
         profile_data = RISK_PROFILES.get(profile.risk_profile, RISK_PROFILES["balanced"])
-        return profile_data["min_confidence"]
+        return float(profile_data["min_confidence"])
 
     def get_geo_threshold(self, user_id: str) -> float:
         profile = self.get(user_id)
         profile_data = RISK_PROFILES.get(profile.risk_profile, RISK_PROFILES["balanced"])
-        return profile_data["geo_threshold"]
+        return float(profile_data["geo_threshold"])
 
     def list_profiles(self) -> list[str]:
-        return list(PROFILES_DIR.glob("*.json"))
+        return [str(p) for p in PROFILES_DIR.glob("*.json")]
 
-    def delete(self, user_id: str):
+    def delete(self, user_id: str) -> None:
         self._cache.pop(user_id, None)
         path = self._path(user_id)
         if path.exists():

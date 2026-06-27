@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -62,7 +63,7 @@ class MultiTimeframeAnalyzer:
 
         return d
 
-    def concordance(self, tf_data: dict[str, pd.DataFrame]) -> dict:
+    def concordance(self, tf_data: dict[str, pd.DataFrame]) -> dict[str, Any]:
         signals = {}
         for tf, df in tf_data.items():
             if df.empty or len(df) < 2:
@@ -86,7 +87,7 @@ class MultiTimeframeAnalyzer:
             "details": signals,
         }
 
-    def _tf_signal(self, df: pd.DataFrame) -> dict:
+    def _tf_signal(self, df: pd.DataFrame) -> dict[str, Any]:
         if df.empty or len(df) < 2:
             return {"direction": 0, "confidence": 0.0}
         latest = df.iloc[-1]

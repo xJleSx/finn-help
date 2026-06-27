@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -91,7 +92,7 @@ def whatif_macro(shock_name: str, portfolio_value: float = 1_000_000) -> str:
     return "\n".join(lines)
 
 
-def _find_correlated(db, ticker: str, limit: int = 3) -> list[tuple[str, float]]:
+def _find_correlated(db: Any, ticker: str, limit: int = 3) -> list[tuple[str, float]]:
 
     inst = db.query(Instrument).filter_by(ticker=ticker).first()
     if not inst:
@@ -104,9 +105,7 @@ def _find_correlated(db, ticker: str, limit: int = 3) -> list[tuple[str, float]]
     other_insts = db.query(Instrument).filter(Instrument.ticker != ticker).limit(20).all()
     results = []
     for other in other_insts:
-        other_prices = (
-            db.query(Price).filter_by(instrument_id=other.id).order_by(Price.date.asc()).all()
-        )
+        other_prices = db.query(Price).filter_by(instrument_id=other.id).order_by(Price.date.asc()).all()
         if len(other_prices) < 30:
             continue
 

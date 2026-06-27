@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import pandas as pd
 from sqlalchemy import select
@@ -51,14 +52,14 @@ class CorrelationAnalyzer:
             .all()
         )
 
-        id_to_ticker = {inst.id: str(inst.ticker) for inst in instruments}
+        id_to_ticker = {int(inst.id): str(inst.ticker) for inst in instruments}
 
         price_dict: dict[str, pd.Series] = {}
-        temp: dict[int, list] = {}
+        temp: dict[int, list[Any]] = {}
         for pid, d, close in all_prices:
             if close is None:
                 continue
-            temp.setdefault(pid, []).append((d, close))
+            temp.setdefault(int(pid), []).append((d, close))
 
         for pid, rows in temp.items():
             ticker = id_to_ticker.get(pid)
@@ -111,7 +112,7 @@ class CorrelationAnalyzer:
             return None
 
         inst_ids = [inst.id for inst in instruments]
-        id_to_ticker = {inst.id: str(inst.ticker) for inst in instruments}
+        id_to_ticker = {int(inst.id): str(inst.ticker) for inst in instruments}
 
         price_result = await db.execute(
             select(Price.instrument_id, Price.date, Price.close)
@@ -121,12 +122,12 @@ class CorrelationAnalyzer:
         all_prices = price_result.all()
 
         price_dict: dict[str, pd.Series] = {}
-        temp: dict[int, list] = {}
+        temp: dict[int, list[Any]] = {}
         for row in all_prices:
             pid, d, close = row[0], row[1], row[2]
             if close is None:
                 continue
-            temp.setdefault(pid, []).append((d, close))
+            temp.setdefault(int(pid), []).append((d, close))
 
         for pid, rows in temp.items():
             ticker = id_to_ticker.get(pid)

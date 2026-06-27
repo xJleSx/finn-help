@@ -1,15 +1,15 @@
 import logging
 from datetime import date, timedelta
-from typing import Optional
+from typing import Any, Optional
 
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import pandas as pd
-
-from src.analysis.ml.price_targets import build_trade_plan, to_dict as trade_plan_to_dict
+from src.analysis.ml.price_targets import build_trade_plan
+from src.analysis.ml.price_targets import to_dict as trade_plan_to_dict
 from src.analysis.service import analysis_service
 from src.db.models import Indicator, Instrument, Price, Signal, User
 from src.interfaces.api.auth import get_current_user, get_db
@@ -28,7 +28,7 @@ class AskBody(BaseModel):
 async def list_instruments(
     type_filter: Optional[str] = Query(None, alias="type"),
     db: AsyncSession = Depends(get_db),
-):
+) -> list[dict[str, Any]]:
     q = select(Instrument)
     if type_filter:
         q = q.where(Instrument.instrument_type == type_filter)
@@ -57,7 +57,7 @@ async def list_instruments(
 
 
 @router.get("/api/instruments/{ticker}")
-async def get_instrument(ticker: str, db: AsyncSession = Depends(get_db)):
+async def get_instrument(ticker: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
     inst = result.scalar_one_or_none()
     if not inst:
@@ -79,7 +79,7 @@ async def get_prices(
     ticker: str,
     days: int = Query(365, le=365 * 5),
     db: AsyncSession = Depends(get_db),
-):
+) -> list[dict[str, Any]]:
     result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
     inst = result.scalar_one_or_none()
     if not inst:
@@ -108,7 +108,7 @@ async def get_indicators(
     ticker: str,
     days: int = Query(90),
     db: AsyncSession = Depends(get_db),
-):
+) -> list[dict[str, Any]]:
     result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
     inst = result.scalar_one_or_none()
     if not inst:
@@ -139,7 +139,7 @@ async def get_indicators(
     ]
 
 
-async def _resolve_signal(ticker: str, db: AsyncSession) -> tuple[Instrument, dict]:
+async def _resolve_signal(ticker: str, db: AsyncSession) -> tuple[Instrument, Any]:
     result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
     inst = result.scalar_one_or_none()
     if not inst:
@@ -163,12 +163,12 @@ async def _resolve_signal(ticker: str, db: AsyncSession) -> tuple[Instrument, di
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    await analysis_service.fusion.save_signal(db, inst.id, fused)
+    await analysis_service.fusion.save_signal(db, int(inst.id), fused)
     return inst, fused
 
 
 @router.get("/api/instruments/{ticker}/signal")
-async def get_signal(ticker: str, db: AsyncSession = Depends(get_db)):
+async def get_signal(ticker: str, db: AsyncSession = Depends(get_db)) -> Any:
     _, fused = await _resolve_signal(ticker, db)
     return fused
 
@@ -178,15 +178,13 @@ async def get_trade_plan(
     ticker: str,
     profile: str = Query("balanced"),
     db: AsyncSession = Depends(get_db),
-):
+) -> dict[str, Any]:
     result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
     inst = result.scalar_one_or_none()
     if not inst:
         raise HTTPException(404, "Instrument not found")
 
-    price_result = await db.execute(
-        select(Price).where(Price.instrument_id == inst.id).order_by(Price.date)
-    )
+    price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
     prices = price_result.scalars().all()
     if len(prices) < 20:
         raise HTTPException(400, "Not enough price data")
@@ -197,15 +195,16 @@ async def get_trade_plan(
             for p in prices
         ]
     )
-    ind_result = await db.execute(
-        select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date)
-    )
+    ind_result = await db.execute(select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date))
     inds = ind_result.scalars().all()
     ind_df = pd.DataFrame(
         [
             {
-                "date": i.date, "rsi": i.rsi, "atr": i.atr,
-                "sma_20": i.sma_20, "sma_50": i.sma_50,
+                "date": i.date,
+                "rsi": i.rsi,
+                "atr": i.atr,
+                "sma_20": i.sma_20,
+                "sma_50": i.sma_50,
                 "macd_hist": i.macd_hist,
             }
             for i in inds
@@ -223,7 +222,7 @@ async def get_trade_plan(
     if atr <= 0 or close <= 0:
         raise HTTPException(400, "Invalid price data")
 
-    plan = build_trade_plan(close, sma20, atr, df, profile=profile)
+    plan = build_trade_plan(close, sma20, atr, df, profile=profile)  # type: ignore[arg-type]
     return {
         "ticker": ticker.upper(),
         "profile": profile,
@@ -237,9 +236,9 @@ async def get_advice(
     ticker: str,
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user),
-):
+) -> dict[str, Any]:
     _, fused = await _resolve_signal(ticker, db)
-    advice = await llm.advise(fused, user_id=user.id if user else None)
+    advice = await llm.advise(fused, user_id=int(user.id) if user else None)
     return {"signal": fused, "advice": advice, "user_id": user.id if user else None}
 
 
@@ -248,10 +247,14 @@ async def ask_question(
     body: AskBody,
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user),
-):
+) -> dict[str, Any]:
     answer = await llm.answer_question(
         question=body.question,
-        user_id=user.id if user else None,
+        user_id=int(user.id) if user else None,
         ticker_context=body.ticker_context,
     )
-    return {"answer": answer, "user_id": user.id if user else None, "risk_profile": getattr(user, "risk_profile", "balanced") if user else "balanced"}
+    return {
+        "answer": answer,
+        "user_id": user.id if user else None,
+        "risk_profile": getattr(user, "risk_profile", "balanced") if user else "balanced",
+    }

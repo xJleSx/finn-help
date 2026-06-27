@@ -7,11 +7,6 @@ from unittest.mock import patch
 import pytest
 
 from src.trading.risk.guards import (
-    _daily_loss_limit,
-    _kill_switch_active,
-    _max_drawdown_pct,
-    _peak_value,
-    _position_limit_pct,
     activate_kill_switch,
     check_concentration,
     check_daily_loss,
@@ -349,7 +344,7 @@ class TestAsyncGuards:
 
     @pytest.mark.asyncio
     async def test_async_update_day_value(self):
-        from src.trading.risk.guards import async_update_day_value, update_day_value
+        from src.trading.risk.guards import async_update_day_value
 
         await async_update_day_value(50000)
         from src.trading.risk.guards import _current_day_value

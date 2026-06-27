@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import date, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -121,7 +121,7 @@ class NotificationService:
     # --- Notification persistence ---
 
     def save_notification(
-        self, user_id: int, notif_type: str, message: str, title: str | None = None, data: dict | None = None
+        self, user_id: int, notif_type: str, message: str, title: str | None = None, data: dict[str, Any] | None = None
     ) -> None:
         db = get_session()
         try:
@@ -205,15 +205,15 @@ class NotificationService:
                 if not inst:
                     continue
 
-                if self.was_signal_sent_today(inst.ticker):
+                if self.was_signal_sent_today(str(inst.ticker)):
                     continue
 
-                fused = s.fused_json or {}
+                fused: dict[str, Any] = s.fused_json if s.fused_json else {}  # type: ignore[assignment]
                 n = SignalNotification(
-                    ticker=inst.ticker,
-                    action=s.action,
-                    prev_action=prev_action,
-                    confidence=s.confidence,
+                    ticker=str(inst.ticker),
+                    action=str(s.action),
+                    prev_action=str(prev_same.action) if prev_same else None,
+                    confidence=float(s.confidence),
                     weighted_score=fused.get("weighted_score", 0),
                     reasons=fused.get("reasons", []),
                     max_portfolio_pct=fused.get("max_portfolio_pct", 10),
@@ -241,10 +241,10 @@ class NotificationService:
             prev_score = prev.score if prev else None
 
             return GeoRiskNotification(
-                score=today_score.score,
-                level=_geo_level(today_score.score),
+                score=float(today_score.score),
+                level=_geo_level(float(today_score.score)),
                 signals=[],
-                prev_score=prev_score,
+                prev_score=float(prev.score) if prev else None,
             )
         finally:
             db.close()
@@ -266,11 +266,11 @@ class NotificationService:
                 if not inst:
                     continue
                 price = db.query(Price).filter_by(instrument_id=d.instrument_id).order_by(Price.date.desc()).first()
-                yield_pct = (d.amount / price.close * 100) if price and price.close else None
+                yield_pct = (float(d.amount) / float(price.close) * 100) if price and price.close else None
                 result.append(
                     DividendNotification(
-                        ticker=inst.ticker,
-                        amount=d.amount,
+                        ticker=str(inst.ticker),
+                        amount=float(d.amount),
                         ex_date=d.date.isoformat() if hasattr(d.date, "isoformat") else str(d.date),
                         yield_pct=round(yield_pct, 2) if yield_pct else None,
                     )
@@ -303,21 +303,21 @@ class NotificationService:
             for s in top:
                 inst = db.query(Instrument).filter_by(id=s.instrument_id).first()
                 if inst:
-                    top_tickers.append(inst.ticker)
+                    top_tickers.append(str(inst.ticker))
 
             total_value = 0.0
             positions = db.query(Portfolio).all()
             for p in positions:
                 price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
                 if price and price.close:
-                    total_value += price.close * p.quantity
+                    total_value += float(price.close) * float(p.quantity)
 
             return DailySummaryNotification(
                 date=daily.isoformat(),
                 total_signals=len(signals),
                 buy_signals=buy,
                 sell_signals=sell,
-                geo_risk=geo_risk,
+                geo_risk=float(geo.score) if geo else 0.0,
                 portfolio_value=total_value if total_value > 0 else None,
                 top_picks=top_tickers,
             )
@@ -336,14 +336,14 @@ class NotificationService:
                 price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
                 if not price or not price.close or not p.avg_price or p.avg_price <= 0:
                     continue
-                current = price.close
-                change_pct = (current - p.avg_price) / p.avg_price
+                current = float(price.close)
+                change_pct = (current - float(p.avg_price)) / float(p.avg_price)
                 if change_pct > 0.20:
                     alerts.append(
                         PriceTargetAlert(
-                            ticker=inst.ticker,
+                            ticker=str(inst.ticker),
                             current_price=current,
-                            target_price=p.avg_price * 1.20,
+                            target_price=float(p.avg_price) * 1.20,
                             target_type="take_profit",
                             triggered_pct=round(change_pct * 100, 1),
                         )
@@ -351,9 +351,9 @@ class NotificationService:
                 elif change_pct < -0.15:
                     alerts.append(
                         PriceTargetAlert(
-                            ticker=inst.ticker,
+                            ticker=str(inst.ticker),
                             current_price=current,
-                            target_price=p.avg_price * 0.85,
+                            target_price=float(p.avg_price) * 0.85,
                             target_type="stop_loss",
                             triggered_pct=round(change_pct * 100, 1),
                         )
@@ -366,8 +366,7 @@ class NotificationService:
         self, ticker: str, prices: list[float], rsi_values: list[float], macd_values: list[float]
     ) -> list[DivergenceAlert]:
 
-
-        alerts = []
+        alerts: list[DivergenceAlert] = []
         if len(prices) < 20 or len(rsi_values) < 20 or len(macd_values) < 10:
             return alerts
         import numpy as np
@@ -423,8 +422,7 @@ class NotificationService:
 
     def check_rebalance(self, db: Session) -> list[RebalanceAlert]:
 
-
-        alerts = []
+        alerts: list[RebalanceAlert] = []
         instruments = db.query(Instrument).all()
         positions = db.query(Portfolio).all()
         if not positions:
@@ -433,13 +431,13 @@ class NotificationService:
         pos_map: dict[int, float] = {}
         for p in positions:
             price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
-            val = (price.close if price and price.close else 0) * p.quantity
-            pos_map[p.instrument_id] = val
-            total_value += val
+            val = float((float(price.close) if price and price.close else 0) * float(p.quantity))
+            pos_map[int(p.instrument_id)] = val
+            total_value += float(val)
         if total_value <= 0:
             return alerts
         for inst in instruments:
-            val = pos_map.get(inst.id, 0)
+            val = pos_map.get(int(inst.id), 0)
             pct = val / total_value * 100
             from src.user_profile import profile_manager
 
@@ -447,7 +445,7 @@ class NotificationService:
             if pct > max_pct * 1.3:
                 alerts.append(
                     RebalanceAlert(
-                        ticker=inst.ticker,
+                        ticker=str(inst.ticker),
                         current_pct=round(pct, 1),
                         target_pct=float(max_pct),
                         deviation_pct=round(pct - max_pct, 1),
@@ -457,11 +455,12 @@ class NotificationService:
         return alerts
 
     async def check_rebalance_async(self, db: object | None = None) -> list[RebalanceAlert]:
-        def _run():
+        def _run() -> list[RebalanceAlert]:
             session = get_session()
             try:
                 return self.check_rebalance(session)
             finally:
                 session.close()
+
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _run)

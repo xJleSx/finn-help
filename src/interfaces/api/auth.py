@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 import bcrypt
 from fastapi import Depends, HTTPException, status
@@ -41,7 +41,7 @@ def create_token(user_id: int, username: str) -> str:
     )
 
 
-def decode_token(token: str) -> dict:
+def decode_token(token: str) -> dict[str, Any]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
@@ -50,7 +50,7 @@ def decode_token(token: str) -> dict:
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with get_async_session() as session:
+    async with get_async_session() as session:  # type: ignore[attr-defined]
         yield session
 
 
