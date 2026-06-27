@@ -10,11 +10,32 @@ from src.db.models import SentimentSignal, SocialPost
 logger = logging.getLogger(__name__)
 
 FINANCE_KEYWORDS = {
-    "акци", "рынок", "инвестици", "дивиденд", "портфел", "трейдинг",
-    "фондов", "облигаци", "валюта", "нефть", "рубль", "индекс",
-    "волатильност", "доходность", "ставк", "ифя", "IPO",
-    "прибыль", "убыт", "капитал", "лонг", "шорт", "трейд",
-    "цена", "покупк", "продаж",
+    "акци",
+    "рынок",
+    "инвестици",
+    "дивиденд",
+    "портфел",
+    "трейдинг",
+    "фондов",
+    "облигаци",
+    "валюта",
+    "нефть",
+    "рубль",
+    "индекс",
+    "волатильност",
+    "доходность",
+    "ставк",
+    "ифя",
+    "IPO",
+    "прибыль",
+    "убыт",
+    "капитал",
+    "лонг",
+    "шорт",
+    "трейд",
+    "цена",
+    "покупк",
+    "продаж",
 }
 
 
@@ -58,10 +79,13 @@ class SocialSentimentAnalyzer:
             skipped = len(posts) - len(relevant)
             if skipped:
                 skipped_ids = [p.id for p in posts if p not in relevant]
-                db.query(SocialPost).filter(SocialPost.id.in_(skipped_ids)).update({
-                    "processed": True,
-                    "processed_at": datetime.now(timezone.utc),
-                }, synchronize_session="fetch")
+                db.query(SocialPost).filter(SocialPost.id.in_(skipped_ids)).update(
+                    {
+                        "processed": True,
+                        "processed_at": datetime.now(timezone.utc),
+                    },
+                    synchronize_session="fetch",
+                )
                 db.commit()
                 logger.info("Social: skipped %d non-finance posts", skipped)
 
@@ -79,10 +103,13 @@ class SocialSentimentAnalyzer:
                 result = self._process_batch(db, batch)
                 signals_created += result
 
-                db.query(SocialPost).filter(SocialPost.id.in_(batch_ids)).update({
-                    "processed": True,
-                    "processed_at": datetime.now(timezone.utc),
-                }, synchronize_session="fetch")
+                db.query(SocialPost).filter(SocialPost.id.in_(batch_ids)).update(
+                    {
+                        "processed": True,
+                        "processed_at": datetime.now(timezone.utc),
+                    },
+                    synchronize_session="fetch",
+                )
                 db.commit()
 
             logger.info("Social: %d signals created", signals_created)

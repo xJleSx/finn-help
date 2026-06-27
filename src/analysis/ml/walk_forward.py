@@ -1,5 +1,6 @@
 import copy
 import logging
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -31,9 +32,7 @@ def temporal_split(n: int, gap: int = GAP_SIZE) -> dict[str, slice]:
     }
 
 
-def build_labels(
-    close_series, lookahead: int = 5, threshold: float = 0.03
-) -> tuple[np.ndarray, np.ndarray]:
+def build_labels(close_series: pd.Series, lookahead: int = 5, threshold: float = 0.03) -> tuple[np.ndarray, np.ndarray]:
     """Generate binary labels from close prices with lookahead."""
     future_returns = close_series.shift(-lookahead) / close_series - 1
     y = np.where(future_returns > threshold, 1, np.where(future_returns < -threshold, 0, np.nan))
@@ -42,13 +41,13 @@ def build_labels(
 
 
 def walk_forward_validate(
-    model_instance,
+    model_instance: Any,
     x: np.ndarray,
     y: np.ndarray,
     n_splits: int = 3,
     min_train_size: int = 60,
     gap: int = GAP_SIZE,
-) -> dict:
+) -> dict[str, Any]:
     if len(x) < min_train_size + 10:
         return {"oos_accuracy": 0.5, "oos_precision": 0.0, "oos_recall": 0.0, "folds_completed": 0, "f1": 0.0}
 
@@ -94,7 +93,6 @@ def walk_forward_validate(
             fp = ((preds == 1) & (y_test == 0)).sum()
             fn = ((preds == 0) & (y_test == 1)).sum()
 
-
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
             recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
             f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
@@ -119,7 +117,7 @@ def walk_forward_validate(
     }
 
 
-def adjust_confidence_by_oos(base_confidence: float, oos_metrics: dict) -> float:
+def adjust_confidence_by_oos(base_confidence: float, oos_metrics: dict[str, Any]) -> float:
     acc = oos_metrics.get("oos_accuracy", 0.5)
     folds = oos_metrics.get("folds_completed", 0)
 
@@ -128,22 +126,22 @@ def adjust_confidence_by_oos(base_confidence: float, oos_metrics: dict) -> float
 
     bonus = (acc - 0.5) * 2.0
     adjusted = base_confidence * (1.0 + max(bonus, -0.5))
-    return round(max(min(adjusted, 1.0), 0.0), 2)
+    return float(round(max(min(adjusted, 1.0), 0.0), 2))
 
 
-def model_weight_from_oos(oos_metrics: dict) -> float:
+def model_weight_from_oos(oos_metrics: dict[str, Any]) -> float:
     """Return model weight based on OOS accuracy. 0 if below threshold."""
     acc = oos_metrics.get("oos_accuracy", 0.5)
     folds = oos_metrics.get("folds_completed", 0)
     if folds == 0 or acc < OOS_ACC_MIN:
         return 0.0
-    return round((acc - 0.5) * 4 * min(folds / 3, 1), 3)
+    return float(round((acc - 0.5) * 4 * min(folds / 3, 1), 3))
 
 
 def baseline_accuracy(
     close_series: pd.Series, y: np.ndarray, mask: np.ndarray, val_slice: slice, y_val: np.ndarray
 ) -> float:
-    close_vals = close_series.iloc[: len(y)].values
+    close_vals: np.ndarray = np.asarray(close_series.iloc[: len(y)].values).astype(float)
     prev_close = np.roll(close_vals, 1)
     prev_close[0] = close_vals[0]
     baseline_preds = (close_vals > prev_close).astype(int)
@@ -151,7 +149,7 @@ def baseline_accuracy(
     return float(np.mean(baseline_val == y_val)) if len(baseline_val) > 0 else 0.0
 
 
-def compute_classification_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+def compute_classification_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, Any]:
     tp = ((y_pred == 1) & (y_true == 1)).sum()
     fp = ((y_pred == 1) & (y_true == 0)).sum()
     fn = ((y_pred == 0) & (y_true == 1)).sum()

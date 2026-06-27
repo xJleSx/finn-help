@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
@@ -311,7 +309,9 @@ class TestAPIEdgeCases:
         assert resp.status_code in (200, 422)
 
     def test_invalid_json_body(self, mock_client, mock_db):
-        resp = mock_client.post("/api/portfolio/allocate", data="not json", headers={"Content-Type": "application/json"})
+        resp = mock_client.post(
+            "/api/portfolio/allocate", data="not json", headers={"Content-Type": "application/json"}
+        )
         assert resp.status_code in (200, 422)
 
     def test_unknown_route_returns_404(self, mock_client, mock_db):
@@ -423,8 +423,8 @@ class TestModelRegistryEdgeCases:
         delete_model("__nonexistent_model_test__")
 
     def test_list_models_empty_registry(self, tmp_path):
-        from src.model_registry import MODEL_DIR, REGISTRY_FILE, list_models
         import src.model_registry as mr
+        from src.model_registry import MODEL_DIR, REGISTRY_FILE, list_models
 
         original_dir = MODEL_DIR
         original_reg = REGISTRY_FILE
@@ -442,6 +442,7 @@ class TestModelRegistryEdgeCases:
 
 try:
     from groq import AsyncGroq  # noqa: F401
+
     _has_groq = True
 except ImportError:
     _has_groq = False
@@ -452,16 +453,16 @@ _telegram_marker = pytest.mark.skipif(not _has_groq, reason="groq not installed"
 @_telegram_marker
 class TestTelegramEdgeCases:
     def test_analysis_cache_miss(self):
-        from src.interfaces.telegram import analysis_cache, CACHE_TTL
+        from src.interfaces.telegram import analysis_cache
 
         key = "__test_cache_miss__"
         cached = analysis_cache.get(key)
         assert cached is None
 
     def test_analysis_cache_ttl_expired(self):
-        from src.interfaces.telegram import analysis_cache, CACHE_TTL
-
         import time
+
+        from src.interfaces.telegram import CACHE_TTL, analysis_cache
 
         key = "__test_cache_expired__"
         analysis_cache[key] = (time.time() - CACHE_TTL - 10, {}, "test")
@@ -514,7 +515,7 @@ class TestRiskGuardsEdgeCases:
         assert dd == 0.0
 
     def test_drawdown_after_reset(self):
-        from src.trading.risk.guards import reset_peak, current_drawdown
+        from src.trading.risk.guards import current_drawdown, reset_peak
 
         reset_peak(100.0)
         dd = current_drawdown()

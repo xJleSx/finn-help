@@ -12,6 +12,7 @@ def historical_var(returns: np.ndarray, confidence: float = 0.95) -> float:
         return 0.0
     return float(abs(np.percentile(returns, (1 - confidence) * 100)))
 
+
 def compute_var(price_series: list[float], confidence: float = 0.95) -> dict[str, float]:
     arr = np.array(price_series, dtype=float)
     if len(arr) < 10:

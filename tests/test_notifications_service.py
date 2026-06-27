@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.db.models import Dividend, GeoRiskScore, Instrument, Notification, Portfolio, Price, Subscription
+from src.db.models import Dividend, GeoRiskScore, Portfolio, Subscription
+from src.db.connection import get_session
 from src.db.models import Signal as SignalModel
 from src.notifications import (
     DailySummaryNotification,
-    DividendNotification,
-    GeoRiskNotification,
-    PriceTargetAlert,
-    RebalanceAlert,
     SignalNotification,
 )
 from src.notifications.service import NotificationService, _geo_level, format_daily_summary_text, format_signal_text
@@ -469,6 +466,7 @@ class TestMarkRead:
 #     db.query(Instrument).filter_by(id=...).first()
 #   Note: .desc() is passed *as argument* to .order_by(), not chained.
 
+
 class TestGetSignalChanges:
     def test_returns_signal_notifications(self, service):
         s1 = MagicMock(spec=SignalModel)
@@ -588,6 +586,7 @@ class TestGetSignalChanges:
 #     db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
 #   .desc() is passed as argument, not chained.
 
+
 class TestGetGeoChange:
     def test_returns_geo_notification(self, service):
         today_score = MagicMock(spec=GeoRiskScore)
@@ -656,6 +655,7 @@ class TestGetGeoChange:
 #     db.query(Dividend).filter(...).order_by(...).all()
 #     db.query(Instrument).filter_by(id=...).first()
 #     db.query(Price).filter_by(instrument_id=...).order_by(Price.date.desc()).first()
+
 
 class TestGetUpcomingDividends:
     def test_returns_dividend_notifications(self, service):
@@ -745,6 +745,7 @@ class TestGetUpcomingDividends:
 #     db.query(Instrument).filter_by(id=...).first()
 #     db.query(Portfolio).all()
 #     db.query(Price).filter_by(instrument_id=...).order_by(...).first()
+
 
 class TestGetDailySummary:
     def test_returns_summary_with_all_fields(self, service):
@@ -850,6 +851,7 @@ class TestGetDailySummary:
 #     db.query(Portfolio).all()
 #     db.query(Instrument).filter_by(id=...).first()
 #     db.query(Price).filter_by(instrument_id=...).order_by(Price.date.desc()).first()
+
 
 class TestCheckPriceTargets:
     def test_take_profit_alert(self, service):
@@ -977,6 +979,7 @@ class TestCheckPriceTargets:
 #
 #   numpy is imported inside the method as `import numpy as np`.
 #   Patch numpy.polyfit at the module level.
+
 
 class TestCheckDivergence:
     # Helper: 20 values for price/rsi, 10 for macd
@@ -1123,6 +1126,7 @@ class TestCheckDivergence:
 #   Takes an explicit db Session argument.  Uses import inside method:
 #     from src.user_profile import profile_manager
 
+
 class TestCheckRebalance:
     def test_returns_alert_when_exceeds_threshold(self, service):
         inst = MagicMock(id=1, ticker="SBER")
@@ -1158,7 +1162,11 @@ class TestCheckRebalance:
         mock_db = MagicMock()
         mock_db.query.return_value.all.side_effect = [[inst1, inst2, inst3], [pos1, pos2, pos3]]
         mock_db.query.return_value.filter_by.return_value.first.side_effect = [inst1, inst2, inst3]
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.side_effect = [price, price, price]
+        mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.side_effect = [
+            price,
+            price,
+            price,
+        ]
 
         with patch("src.user_profile.profile_manager.get_max_position", return_value=30):
             result = service.check_rebalance(mock_db)
@@ -1239,8 +1247,10 @@ class TestCheckRebalance:
 
 # ── check_rebalance_async ─────────────────────────────────────────────────────
 
+
 class TestCheckRebalanceAsync:
-    def test_delegates_to_check_rebalance(self, service):
+    @pytest.mark.asyncio
+    async def test_delegates_to_check_rebalance(self, service):
         inst = MagicMock(id=1, ticker="SBER")
         pos = MagicMock(instrument_id=1, quantity=10)
         price = MagicMock(close=200.0)
@@ -1250,16 +1260,18 @@ class TestCheckRebalanceAsync:
         mock_db.query.return_value.filter_by.return_value.first.return_value = inst
         mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = price
 
-        with patch("src.user_profile.profile_manager.get_max_position", return_value=10):
-            result = service.check_rebalance_async(mock_db)
+        with (
+            patch("src.user_profile.profile_manager.get_max_position", return_value=10),
+            patch.object(service, "check_rebalance", return_value=[MagicMock(ticker="SBER")]),
+        ):
+            result = await service.check_rebalance_async(mock_db)
 
         assert len(result) == 1
         assert result[0].ticker == "SBER"
 
-    def test_returns_empty_when_delegate_returns_empty(self, service):
-        mock_db = MagicMock()
-        mock_db.query.return_value.all.side_effect = [[], []]
-
-        result = service.check_rebalance_async(mock_db)
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_delegate_returns_empty(self, service):
+        with patch.object(service, "check_rebalance", return_value=[]):
+            result = await service.check_rebalance_async(MagicMock())
 
         assert result == []

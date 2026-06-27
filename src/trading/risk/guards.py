@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Optional
+from typing import Optional, cast
 
 from src.config import personal
 
@@ -53,7 +53,7 @@ RISK_PROFILE_MAP = {
 
 
 def _load_risk_params() -> None:
-    profile = (personal.get("risk_profile") or "balanced").lower()
+    profile = str(personal.get("risk_profile") or "balanced").lower()
     mapping = RISK_PROFILE_MAP.get(profile, RISK_PROFILE_MAP["balanced"])
     global _position_limit_pct, _daily_loss_limit, _max_drawdown_pct
     _position_limit_pct = mapping["max_position_pct"]
@@ -62,12 +62,12 @@ def _load_risk_params() -> None:
 
 
 def risk_per_trade() -> float:
-    profile = (personal.get("risk_profile") or "balanced").lower()
+    profile = str(personal.get("risk_profile") or "balanced").lower()
     return RISK_PROFILE_MAP.get(profile, RISK_PROFILE_MAP["balanced"])["risk_per_trade"]
 
 
 def max_position_pct() -> float:
-    profile = (personal.get("risk_profile") or "balanced").lower()
+    profile = str(personal.get("risk_profile") or "balanced").lower()
     return RISK_PROFILE_MAP.get(profile, RISK_PROFILE_MAP["balanced"])["max_position_pct"]
 
 
@@ -311,9 +311,11 @@ async def async_start_day(value: float) -> None:
 
 try:
     _load_risk_params()
-    logger.info("Risk params loaded: position_limit=%.0f%%, daily_loss=%.0f%%, max_drawdown=%.0f%%",
-                 _position_limit_pct * 100 if _position_limit_pct else 0,
-                 _daily_loss_limit * 100 if _daily_loss_limit else 0,
-                 _max_drawdown_pct * 100 if _max_drawdown_pct else 0)
+    logger.info(
+        "Risk params loaded: position_limit=%.0f%%, daily_loss=%.0f%%, max_drawdown=%.0f%%",
+        _position_limit_pct * 100 if _position_limit_pct else 0,
+        _daily_loss_limit * 100 if _daily_loss_limit else 0,
+        _max_drawdown_pct * 100 if _max_drawdown_pct else 0,
+    )
 except Exception:
     logger.warning("Could not load risk params from config, using defaults")

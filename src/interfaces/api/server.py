@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import date
-from typing import Optional
+from typing import Any, AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,8 +36,9 @@ limiter = Limiter(key_func=get_remote_address)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from src.db.connection import init_db
+
     try:
         init_db()
     except Exception as e:
@@ -55,11 +56,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="FinAdvisor API", version="0.1.0", lifespan=lifespan)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
@@ -85,10 +86,10 @@ app.include_router(market_router)
 
 
 @app.get("/api/health")
-async def health(db: AsyncSession = Depends(get_db)):
+async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     healthy = True
-    checks = {}
-    components = {}
+    checks: dict[str, str] = {}
+    components: dict[str, Any] = {}
 
     try:
         result = await db.execute(select(sqlfunc.count(Instrument.id)))
@@ -99,13 +100,14 @@ async def health(db: AsyncSession = Depends(get_db)):
 
     try:
         from src.scheduler.service import _running
+
         components["scheduler_running"] = _running
     except Exception:
         components["scheduler_running"] = None
 
     try:
         last_signal = await db.execute(select(Signal.date).order_by(Signal.date.desc()).limit(1))
-        row = last_signal.scalar_one_or_none()
+        row: Any = last_signal.scalar_one_or_none()
         if row is not None:
             components["last_signal_at"] = row.isoformat() if hasattr(row, "isoformat") else str(row)
         else:
@@ -115,12 +117,12 @@ async def health(db: AsyncSession = Depends(get_db)):
 
     try:
         last_price = await db.execute(select(Price.date).order_by(Price.date.desc()).limit(1))
-        row = last_price.scalar_one_or_none()
-        if row is not None:
-            dt_str = row.isoformat() if hasattr(row, "isoformat") else str(row)
+        price_row: Any = last_price.scalar_one_or_none()
+        if price_row is not None:
+            dt_str = price_row.isoformat() if hasattr(price_row, "isoformat") else str(price_row)
             components["last_price_date"] = dt_str
             try:
-                days = (date.today() - row).days
+                days: int = (date.today() - price_row).days
                 components["price_staleness_days"] = days
                 if days > 2:
                     checks["staleness"] = f"Последняя цена от {dt_str}, {days}д назад"
@@ -131,6 +133,7 @@ async def health(db: AsyncSession = Depends(get_db)):
 
     try:
         from src.model_registry import _load_registry
+
         registry = _load_registry()
         if registry:
             models_summary = {}
@@ -159,9 +162,9 @@ class RegisterBody(BaseModel):
 
 @app.post("/api/auth/register")
 @limiter.limit("5/minute")
-async def register(request: Request, body: RegisterBody, db: AsyncSession = Depends(get_db)):
+async def register(request: Request, body: RegisterBody, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(
-        select(User).where((User.username == body.username) | ((body.email is not None) & (User.email == body.email)))
+        select(User).where((User.username == body.username) | ((body.email is not None) & (User.email == body.email)))  # type: ignore[operator]
     )
     if result.scalar_one_or_none():
         raise HTTPException(400, "Username or email already taken")
@@ -174,8 +177,8 @@ async def register(request: Request, body: RegisterBody, db: AsyncSession = Depe
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    token = create_token(user.id, user.username)
-    return {"access_token": token, "token_type": "bearer", "user_id": user.id, "username": user.username}
+    token = create_token(int(user.id), str(user.username))
+    return {"access_token": token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
 
 
 class LoginBody(BaseModel):
@@ -185,22 +188,22 @@ class LoginBody(BaseModel):
 
 @app.post("/api/auth/login")
 @limiter.limit("10/minute")
-async def login(request: Request, body: LoginBody, db: AsyncSession = Depends(get_db)):
+async def login(request: Request, body: LoginBody, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(select(User).where(User.username == body.username))
     user = result.scalar_one_or_none()
-    if not user or not verify_password(body.password, user.hashed_password):
+    if not user or not verify_password(body.password, str(user.hashed_password)):
         raise HTTPException(401, "Invalid credentials")
-    token = create_token(user.id, user.username)
-    return {"access_token": token, "token_type": "bearer", "user_id": user.id, "username": user.username}
+    token = create_token(int(user.id), str(user.username))
+    return {"access_token": token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
 
 
 @app.get("/api/auth/me")
-async def get_me(user: User = Depends(require_user)):
+async def get_me(user: User = Depends(require_user)) -> dict[str, Any]:
     return {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "role": user.role,
-        "risk_profile": user.risk_profile,
-        "is_active": user.is_active,
+        "id": int(user.id),
+        "username": str(user.username),
+        "email": str(user.email) if user.email is not None else None,
+        "role": str(user.role),
+        "risk_profile": str(user.risk_profile),
+        "is_active": bool(user.is_active),
     }

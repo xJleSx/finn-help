@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import date, timedelta
-from typing import Optional
+from typing import Any, Optional, Self
 
 import httpx
 
@@ -23,12 +23,10 @@ BOARD_MAP = {
 BOND_BOARDS = ["TQCB", "TQBD", "TQOB"]
 
 
-
-
 class MOEXCollector:
     BASE = settings.moex_iss_url
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -36,7 +34,7 @@ class MOEXCollector:
             self._client = httpx.AsyncClient(timeout=30.0)
         return self._client
 
-    async def _fetch_json(self, path: str, params: Optional[dict] = None) -> dict:
+    async def _fetch_json(self, path: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         url = f"{self.BASE}{path}"
         client = await self._get_client()
         last_exc = None
@@ -46,22 +44,27 @@ class MOEXCollector:
                 resp.raise_for_status()
                 data = resp.json()
                 if not isinstance(data, dict):
-                    raise ValueError(
-                        f"MOEX API returned non-dict response for {path}: {type(data).__name__}"
-                    )
+                    raise ValueError(f"MOEX API returned non-dict response for {path}: {type(data).__name__}")
                 return data
             except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as exc:
                 last_exc = exc
                 if attempt < MAX_RETRIES:
                     delay = RETRY_DELAY * (2 ** (attempt - 1))
-                    logger.warning("MOEX API attempt %d/%d failed for %s: %s — retrying in %.1fs", attempt, MAX_RETRIES, path, exc, delay)
+                    logger.warning(
+                        "MOEX API attempt %d/%d failed for %s: %s — retrying in %.1fs",
+                        attempt,
+                        MAX_RETRIES,
+                        path,
+                        exc,
+                        delay,
+                    )
                     await asyncio.sleep(delay)
                 else:
                     logger.error("MOEX API failed after %d attempts for %s: %s", MAX_RETRIES, path, exc)
         raise last_exc  # type: ignore[misc]
 
     @staticmethod
-    def _parse_table(data: dict, table_name: str) -> list[dict]:
+    def _parse_table(data: dict[str, Any], table_name: str) -> list[dict[str, Any]]:
         table = data.get(table_name)
         if not isinstance(table, dict):
             logger.warning("MOEX API: table '%s' not found or not a dict in response", table_name)
@@ -74,18 +77,18 @@ class MOEXCollector:
 
         return [dict(zip(cols, row)) for row in rows]
 
-    async def get_securities(self) -> list[dict]:
+    async def get_securities(self) -> list[dict[str, Any]]:
         data = await self._fetch_json("/securities.json", {"iss.meta": "off"})
         return self._parse_table(data, "securities")
 
-    async def get_stocks(self) -> list[dict]:
+    async def get_stocks(self) -> list[dict[str, Any]]:
         data = await self._fetch_json(
             "/engines/stock/markets/shares/boards/TQBR/securities.json",
             {"iss.meta": "off"},
         )
         return self._parse_table(data, "securities")
 
-    async def get_etfs(self) -> list[dict]:
+    async def get_etfs(self) -> list[dict[str, Any]]:
         data = await self._fetch_json(
             "/engines/stock/markets/shares/boards/TQTF/securities.json",
             {"iss.meta": "off"},
@@ -98,7 +101,7 @@ class MOEXCollector:
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
         board: str = "shares",
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         if from_date is None:
             from_date = (date.today() - timedelta(days=365)).isoformat()
         if to_date is None:
@@ -118,7 +121,7 @@ class MOEXCollector:
         )
         return self._parse_table(data, "history")
 
-    async def _get_bond_history(self, ticker: str, from_date: str, to_date: str) -> tuple[list[dict], str | None]:
+    async def _get_bond_history(self, ticker: str, from_date: str, to_date: str) -> tuple[list[dict[str, Any]], str | None]:
         for board_id in BOND_BOARDS:
             path = f"/history/engines/stock/markets/bonds/boards/{board_id}/securities/{ticker}.json"
             try:
@@ -134,14 +137,14 @@ class MOEXCollector:
                 continue
         return [], None
 
-    async def get_dividends(self, ticker: str) -> list[dict]:
+    async def get_dividends(self, ticker: str) -> list[dict[str, Any]]:
         data = await self._fetch_json(
             f"/securities/{ticker}/dividends.json",
             {"iss.meta": "off"},
         )
         return self._parse_table(data, "dividends")
 
-    async def get_marketdata(self, ticker: str, itype: str = "stock") -> dict:
+    async def get_marketdata(self, ticker: str, itype: str = "stock") -> dict[str, Any]:
         if itype == "bond":
             for board_id in BOND_BOARDS:
                 try:
@@ -164,12 +167,15 @@ class MOEXCollector:
         return rows[0] if rows else {}
 
     async def get_bond_history_with_board(
-        self, ticker: str, from_date: str, to_date: str,
-    ) -> tuple[list[dict], str | None]:
+        self,
+        ticker: str,
+        from_date: str,
+        to_date: str,
+    ) -> tuple[list[dict[str, Any]], str | None]:
         """Like get_history but also returns the MOEX board ID (TQCB/TQBD/TQOB)."""
         return await self._get_bond_history(ticker, from_date, to_date)
 
-    async def get_bonds(self) -> list[dict]:
+    async def get_bonds(self) -> list[dict[str, Any]]:
         seen = set()
         results = []
         for board_id in BOND_BOARDS:
@@ -188,14 +194,14 @@ class MOEXCollector:
                 continue
         return results
 
-    async def get_security_info(self, ticker: str) -> dict:
+    async def get_security_info(self, ticker: str) -> dict[str, Any]:
         """Get basic security info: shares outstanding, sector, ISIN, face value."""
         data = await self._fetch_json(
             f"/securities/{ticker}.json",
             {"iss.meta": "off"},
         )
         desc = self._parse_table(data, "description")
-        info = {}
+        info: dict[str, Any] = {}
         for row in desc:
             name = row.get("name", "")
             value = row.get("value")
@@ -217,13 +223,13 @@ class MOEXCollector:
                 info["issue_date"] = value
         return info
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, *args: Any) -> None:
         await self.close()
 
-    async def close(self):
+    async def close(self) -> None:
         if self._client:
             await self._client.aclose()
             self._client = None

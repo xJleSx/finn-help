@@ -6,11 +6,11 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-_redis = None
+_redis: Any = None
 _memory_cache: dict[str, tuple[float, Any]] = {}
 
 
-def get_redis():
+def get_redis() -> Any:
     global _redis
     if _redis is None:
         try:
@@ -27,7 +27,7 @@ def get_redis():
     return _redis if _redis else None
 
 
-def make_key(prefix: str, *args, **kwargs) -> str:
+def make_key(prefix: str, *args: Any, **kwargs: Any) -> str:
     raw = f"{prefix}:{json.dumps(args, sort_keys=True, default=str)}:{json.dumps(kwargs, sort_keys=True, default=str)}"
     return f"finn:{hashlib.md5(raw.encode()).hexdigest()}"
 
@@ -35,9 +35,9 @@ def make_key(prefix: str, *args, **kwargs) -> str:
 def cached(
     ttl: int = 300,
     prefix: Optional[str] = None,
-) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        def wrapper(*args, **kwargs) -> Any:
+) -> Callable[..., Any]:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             key = make_key(prefix or func.__name__, *args, **kwargs)
             r = get_redis()
             if r:
@@ -69,7 +69,7 @@ def cached(
     return decorator
 
 
-def invalidate(pattern: str):
+def invalidate(pattern: str) -> None:
     key = f"finn:{pattern}"
     r = get_redis()
     if r:

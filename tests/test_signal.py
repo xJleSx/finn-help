@@ -282,7 +282,10 @@ class TestEdgeCases:
         result = engine.fuse(
             ticker="SBER",
             technical={"action": "BUY", "confidence": 0.7, "score": 0.5, "reasons": []},
-            volatility_regime={"regime": "HIGH", "adjustment": {"technical_mult": 0.7, "fundamental_mult": 1.3, "geo_mult": 1.5, "ml_mult": 0.6}},
+            volatility_regime={
+                "regime": "HIGH",
+                "adjustment": {"technical_mult": 0.7, "fundamental_mult": 1.3, "geo_mult": 1.5, "ml_mult": 0.6},
+            },
         )
         assert result["volatility_regime"]["regime"] == "HIGH"
 

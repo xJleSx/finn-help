@@ -44,9 +44,7 @@ class TestDiversificationPenalty:
         assert analyzer.diversification_penalty("SBER", [], None) == 0.0
 
     def test_returns_zero_when_ticker_not_in_matrix(self, analyzer):
-        analyzer._load_correlation_matrix = lambda *a: pd.DataFrame(
-            {"GAZP": [1.0]}, index=["GAZP"]
-        )
+        analyzer._load_correlation_matrix = lambda *a: pd.DataFrame({"GAZP": [1.0]}, index=["GAZP"])
         result = analyzer.diversification_penalty("SBER", ["GAZP"], None)
         assert result == 0.0
 

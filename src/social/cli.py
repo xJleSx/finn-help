@@ -10,12 +10,12 @@ social_app = typer.Typer(help="Social sentiment commands (Pulse, Telegram, etc.)
 
 
 @social_app.command(name="update")
-def social_update():
+def social_update() -> None:
     """Collect new posts from all active social sources"""
     from src.social.registry import registry
     from src.social.sentiment.analyzer import analyzer
 
-    async def _run():
+    async def _run() -> None:
         registry.build_from_config()
         sources = registry.get_active()
         if not sources:
@@ -67,7 +67,7 @@ def social_update():
 
 
 @social_app.command(name="ticker")
-def social_ticker(ticker: str = typer.Argument(..., help="Ticker (e.g. SBER)")):
+def social_ticker(ticker: str = typer.Argument(..., help="Ticker (e.g. SBER)")) -> None:
     """Show social sentiment for a ticker"""
     from src.social.sentiment.aggregator import aggregator
 
@@ -87,7 +87,7 @@ def social_ticker(ticker: str = typer.Argument(..., help="Ticker (e.g. SBER)")):
 
 
 @social_app.command(name="overview")
-def social_overview(days: int = typer.Option(1, "--days", "-d", help="Days to look back")):
+def social_overview(days: int = typer.Option(1, "--days", "-d", help="Days to look back")) -> None:
     """Show market overview from social sentiment"""
     from src.social.sentiment.aggregator import aggregator
 
@@ -107,10 +107,10 @@ def social_overview(days: int = typer.Option(1, "--days", "-d", help="Days to lo
 
 
 @social_app.command(name="snapshot")
-def social_snapshot(period: str = typer.Argument("daily", help="daily / weekly / monthly")):
+def social_snapshot(period: str = typer.Argument("daily", help="daily / weekly / monthly")) -> None:
     """Принудительно снять срез метрик и сформировать отчёт"""
 
-    async def _run():
+    async def _run() -> None:
         from src.scheduler.reporting import generate_daily_report, take_snapshot
 
         console.print(f"[bold]📸 Снятие среза: {period}[/bold]")
@@ -125,10 +125,10 @@ def social_snapshot(period: str = typer.Argument("daily", help="daily / weekly /
 
 
 @social_app.command(name="report")
-def social_report():
+def social_report() -> None:
     """Сформировать ежедневный отчёт (без рассылки)"""
 
-    async def _run():
+    async def _run() -> None:
         from src.scheduler.reporting import generate_daily_report
 
         console.print("[bold]📄 Генерация отчёта...[/bold]")

@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional, cast
 
 import numpy as np
 
@@ -18,7 +18,7 @@ REBALANCE_THRESHOLD = 0.05  # 5% drift triggers rebalance
 
 def _returns(prices: list[float]) -> np.ndarray:
     arr = np.array(prices, dtype=float)
-    return np.diff(arr) / arr[:-1]
+    return np.diff(arr) / arr[:-1]  # type: ignore[no-any-return]
 
 
 def _sharpe(returns: np.ndarray, annual_factor: int = 252) -> float:
@@ -88,7 +88,7 @@ class RegimeInfo:
 class BacktestResult:
     capital: float
     config: BacktestConfig = field(default_factory=BacktestConfig)
-    positions: list[dict] = field(default_factory=list)
+    positions: list[dict[str, Any]] = field(default_factory=list)
     portfolio_returns: list[float] = field(default_factory=list)
     benchmark_returns: list[float] = field(default_factory=list)
     dates: list[str] = field(default_factory=list)
@@ -98,7 +98,7 @@ class BacktestResult:
     monte_carlo: Optional[MonteCarloResult] = None
     regime: Optional[RegimeInfo] = None
 
-    def add_snapshot(self, date_str: str, port_ret: float, bench_ret: float):
+    def add_snapshot(self, date_str: str, port_ret: float, bench_ret: float) -> None:
         self.dates.append(date_str)
         self.portfolio_returns.append(port_ret)
         self.benchmark_returns.append(bench_ret)
@@ -287,7 +287,7 @@ def backtest_allocation(
             .limit(lookback_days + 10)
             .all()
         )
-        imoex_vals = [p.close for p in reversed(imoex_prices) if p.close]
+        imoex_vals = [cast(float, p.close) for p in reversed(imoex_prices) if p.close]
 
         result.positions = picks[:8]
         portfolio_prices: dict[str, list[float]] = {}
@@ -299,7 +299,7 @@ def backtest_allocation(
                 .limit(lookback_days + 10)
                 .all()
             )
-            vals = [x.close for x in reversed(prices) if x.close]
+            vals = [cast(float, x.close) for x in reversed(prices) if x.close]
             if vals:
                 portfolio_prices[p["ticker"]] = vals
 

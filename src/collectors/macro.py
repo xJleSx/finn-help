@@ -1,5 +1,6 @@
 import logging
 from datetime import date
+from typing import Any, cast
 
 import httpx
 
@@ -17,8 +18,8 @@ MACRO_TYPES = (
 
 
 class MacroCollector:
-    async def fetch_all(self) -> list[dict]:
-        results = []
+    async def fetch_all(self) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
         for method in (
             self._fetch_brent,
             self._fetch_key_rate,
@@ -36,7 +37,7 @@ class MacroCollector:
                 logger.warning(f"{method.__name__} failed: {e}")
         return results
 
-    async def _fetch_brent(self) -> dict | None:
+    async def _fetch_brent(self) -> dict[str, Any] | None:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities.json",
@@ -59,11 +60,13 @@ class MacroCollector:
                     ltd_idx = cols.index("LASTTRADEDATE")
                     oi_idx = cols.index("PREVOPENPOSITION")
                     if row[asset_idx] == "BR":
-                        contracts.append({
-                            "secid": row[secid_idx],
-                            "last_trade": date.fromisoformat(row[ltd_idx]) if row[ltd_idx] else None,
-                            "oi": int(row[oi_idx]) if row[oi_idx] else 0,
-                        })
+                        contracts.append(
+                            {
+                                "secid": row[secid_idx],
+                                "last_trade": date.fromisoformat(row[ltd_idx]) if row[ltd_idx] else None,
+                                "oi": int(row[oi_idx]) if row[oi_idx] else 0,
+                            }
+                        )
                 except (ValueError, IndexError, TypeError):
                     continue
 
@@ -103,7 +106,7 @@ class MacroCollector:
                     continue
         return None
 
-    async def _fetch_key_rate(self) -> dict | None:
+    async def _fetch_key_rate(self) -> dict[str, Any] | None:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 "https://www.cbr.ru/hd_base/KeyRate",
@@ -113,9 +116,9 @@ class MacroCollector:
         from lxml import html
 
         tree = html.fromstring(resp.text)
-        rows = tree.xpath("//table[@class='data']//tr")
+        rows = cast(list[Any], tree.xpath("//table[@class='data']//tr"))
         for row in rows[1:]:
-            cells = row.xpath(".//td")
+            cells = cast(list[Any], row.xpath(".//td"))
             if len(cells) >= 2:
                 val = cells[1].text_content().strip().replace(",", ".")
                 try:
@@ -129,7 +132,7 @@ class MacroCollector:
                     continue
         return None
 
-    async def _fetch_usd_rate(self) -> dict | None:
+    async def _fetch_usd_rate(self) -> dict[str, Any] | None:
         from src.collectors.cbr import CBRCollector
 
         cbr = CBRCollector()
@@ -144,7 +147,7 @@ class MacroCollector:
             }
         return None
 
-    async def _fetch_imoex(self) -> dict | None:
+    async def _fetch_imoex(self) -> dict[str, Any] | None:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 "https://iss.moex.com/iss/engines/stock/markets/index/securities/IMOEX.json",
@@ -171,7 +174,7 @@ class MacroCollector:
                     continue
         return None
 
-    async def _fetch_cpi(self) -> dict | None:
+    async def _fetch_cpi(self) -> dict[str, Any] | None:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 "https://www.cbr.ru/hd_base/infl",
@@ -181,9 +184,9 @@ class MacroCollector:
         from lxml import html
 
         tree = html.fromstring(resp.text)
-        rows = tree.xpath("//table[@class='data']//tr")
+        rows = cast(list[Any], tree.xpath("//table[@class='data']//tr"))
         for row in rows[1:]:
-            cells = row.xpath(".//td")
+            cells = cast(list[Any], row.xpath(".//td"))
             if len(cells) >= 2:
                 val = cells[1].text_content().strip().replace(",", ".")
                 try:
@@ -197,16 +200,16 @@ class MacroCollector:
                     continue
         return None
 
-    async def _fetch_ofz_yield(self) -> dict | None:
+    async def _fetch_ofz_yield(self) -> dict[str, Any] | None:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get("https://www.cbr.ru/hd_base/zcyc_params")
             resp.raise_for_status()
         from lxml import html
 
         tree = html.fromstring(resp.text)
-        rows = tree.xpath("//table[contains(@class, 'data')]//tr")
+        rows = cast(list[Any], tree.xpath("//table[contains(@class, 'data')]//tr"))
         for row in rows[1:]:
-            cells = row.xpath(".//td")
+            cells = cast(list[Any], row.xpath(".//td"))
             if len(cells) >= 13:
                 yield_10y = cells[9].text_content().strip().replace(",", ".")
                 try:
@@ -220,12 +223,12 @@ class MacroCollector:
                     continue
         return None
 
-    async def _fetch_m2(self) -> dict | None:
+    async def _fetch_m2(self) -> dict[str, Any] | None:
         logger.warning("M2 data source (CBR XML API) no longer available — skipped")
         return None
 
     @staticmethod
-    def latest_values(db) -> dict:
+    def latest_values(db: Any) -> dict[str, Any]:
         from src.db.models import MacroIndicator
 
         today = date.today()
@@ -242,7 +245,7 @@ class MacroCollector:
         return result
 
     @staticmethod
-    async def latest_values_async(db) -> dict:
+    async def latest_values_async(db: Any) -> dict[str, Any]:
         from sqlalchemy import select
 
         from src.db.models import MacroIndicator

@@ -1,6 +1,6 @@
 import logging
 from datetime import date, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -15,8 +15,8 @@ class FundamentalAnalyzer:
         self,
         prices: pd.DataFrame,
         dividends: pd.DataFrame,
-        metrics: Optional[dict] = None,
-    ) -> dict:
+        metrics: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         anomalies = []
         signals = []
         risk_score = 0.0
@@ -160,7 +160,7 @@ class FundamentalAnalyzer:
             "fundamental_metrics": metrics_snapshot,
         }
 
-    def analyze_report(self, report: dict) -> list[str]:
+    def analyze_report(self, report: dict[str, Any]) -> list[str]:
         """Анализ финансовой отчётности (МСФО/РСБУ) — возвращает список фактов для LLM."""
         facts = []
         period = report.get("period_type", "")

@@ -44,7 +44,6 @@ def audit_log_order(entry: dict[str, object]) -> None:
 def save_order(order: "OrderRecord") -> int:
     db = get_session()
     try:
-
         o = OrderModel(
             ticker=order.ticker,
             direction=order.direction,
@@ -60,19 +59,21 @@ def save_order(order: "OrderRecord") -> int:
         db.commit()
         logger.info("Order saved to DB: %s %s %d @ %.2f", order.direction, order.ticker, order.quantity, order.price)
 
-        audit_log_order({
-            "event": "order_saved",
-            "id": o.id,
-            "ticker": order.ticker,
-            "direction": order.direction,
-            "quantity": order.quantity,
-            "price": order.price,
-            "status": order.status,
-            "mode": order.mode.value if hasattr(order.mode, "value") else str(order.mode),
-            "reason": order.reason,
-        })
+        audit_log_order(
+            {
+                "event": "order_saved",
+                "id": o.id,
+                "ticker": order.ticker,
+                "direction": order.direction,
+                "quantity": order.quantity,
+                "price": order.price,
+                "status": order.status,
+                "mode": order.mode.value if hasattr(order.mode, "value") else str(order.mode),
+                "reason": order.reason,
+            }
+        )
 
-        return o.id
+        return int(o.id)
     except Exception as e:
         db.rollback()
         logger.error("Failed to save order: %s", e)
@@ -109,19 +110,21 @@ def log_trade(
         db.commit()
         logger.info("Trade logged: %s %d %s @ %.2f (P&L=%.2f)", direction, quantity, ticker, price, pnl)
 
-        audit_log_order({
-            "event": "trade_logged",
-            "id": t.id,
-            "order_id": order_id,
-            "ticker": ticker,
-            "direction": direction,
-            "quantity": quantity,
-            "price": price,
-            "commission": commission,
-            "slippage": slippage,
-            "pnl": pnl,
-            "reason": reason,
-        })
+        audit_log_order(
+            {
+                "event": "trade_logged",
+                "id": t.id,
+                "order_id": order_id,
+                "ticker": ticker,
+                "direction": direction,
+                "quantity": quantity,
+                "price": price,
+                "commission": commission,
+                "slippage": slippage,
+                "pnl": pnl,
+                "reason": reason,
+            }
+        )
     except Exception as e:
         db.rollback()
         logger.error("Failed to log trade: %s", e)
@@ -183,7 +186,7 @@ def update_order_status(order_id: int, status: str, **kwargs: object) -> None:
     try:
         o = db.query(OrderModel).filter_by(id=order_id).first()
         if o:
-            o.status = status
+            o.status = status  # type: ignore[assignment]
             for k, v in kwargs.items():
                 if hasattr(o, k):
                     setattr(o, k, v)

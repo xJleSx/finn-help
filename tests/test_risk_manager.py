@@ -183,9 +183,7 @@ class TestComputePositionSize:
         assert result["method"] == "kelly"
 
     def test_with_stop_loss(self):
-        result = compute_position_size(
-            capital=100_000, price=250.0, stop_loss_pct=-5.0
-        )
+        result = compute_position_size(capital=100_000, price=250.0, stop_loss_pct=-5.0)
         assert result["shares"] > 0
 
     def test_zero_risk_per_trade(self):

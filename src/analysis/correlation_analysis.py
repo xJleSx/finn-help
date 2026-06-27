@@ -1,5 +1,7 @@
 import logging
 
+from typing import cast
+
 import pandas as pd
 
 from src.db.connection import get_session
@@ -54,7 +56,7 @@ def correlation_table(tickers: list[str] | None = None) -> str:
         high_pairs = []
         for i, t1 in enumerate(ticker_list):
             for t2 in ticker_list[i + 1 :]:
-                val = corr.loc[t1, t2]
+                val = cast(float, corr.loc[t1, t2])
                 if abs(val) > 0.8:
                     high_pairs.append(f"  🔴 {t1} ↔ {t2}: {val:.2f}")
                 elif abs(val) > 0.6:

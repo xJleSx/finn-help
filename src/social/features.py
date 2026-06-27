@@ -70,11 +70,7 @@ def _cache_features(ticker: str, features: dict[str, Any]) -> None:
     db = get_session()
     try:
         today = date.today()
-        existing = (
-            db.query(FeatureCache)
-            .filter_by(ticker=ticker, feature_type="social_sentiment", date=today)
-            .first()
-        )
+        existing = db.query(FeatureCache).filter_by(ticker=ticker, feature_type="social_sentiment", date=today).first()
         if existing:
             existing.value_json = features  # type: ignore[assignment]
         else:

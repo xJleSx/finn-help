@@ -1,6 +1,6 @@
 import logging
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional, Self
 
 from src.collectors.moex import MOEXCollector
 
@@ -15,7 +15,7 @@ class FundamentalDataCollector:
     и пока возвращаются как None.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._moex: Optional[MOEXCollector] = None
 
     async def _get_moex(self) -> MOEXCollector:
@@ -24,16 +24,15 @@ class FundamentalDataCollector:
             await self._moex.__aenter__()
         return self._moex
 
-    async def fetch(self, ticker: str, last_price: Optional[float] = None) -> dict:
+    async def fetch(self, ticker: str, last_price: Optional[float] = None) -> dict[str, Any]:
         moex = await self._get_moex()
         info = await moex.get_security_info(ticker)
 
         shares = info.get("shares_outstanding")
-        market_cap = None
+        market_cap: Optional[float] = None
         if shares is not None and last_price is not None and last_price > 0:
             face_value = info.get("face_value") or 1
-            market_cap = (Decimal(str(last_price)) / Decimal(str(face_value))) * Decimal(str(shares))
-            market_cap = float(market_cap)
+            market_cap = float((Decimal(str(last_price)) / Decimal(str(face_value))) * Decimal(str(shares)))
 
         return {
             "market_cap": market_cap,
@@ -55,13 +54,13 @@ class FundamentalDataCollector:
             },
         }
 
-    async def close(self):
+    async def close(self) -> None:
         if self._moex:
             await self._moex.__aexit__(None, None, None)
             self._moex = None
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, *args: Any) -> None:
         await self.close()

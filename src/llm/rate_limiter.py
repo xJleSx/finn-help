@@ -37,7 +37,7 @@ class GroqRetryHandler:
                 error_str = str(e).lower()
                 is_rate_limit = "429" in error_str or "rate_limit" in error_str or "too many" in error_str
                 if attempt < self._max_retries and is_rate_limit:
-                    delay = self._base_delay * (2 ** attempt) + (hash(str(time.time())) % 100) / 100.0
+                    delay = self._base_delay * (2**attempt) + (hash(str(time.time())) % 100) / 100.0
                     logger.warning(
                         "Groq rate limited (attempt %d/%d), retrying in %.1fs",
                         attempt + 1,
@@ -46,7 +46,7 @@ class GroqRetryHandler:
                     )
                     await asyncio.sleep(delay)
                 elif attempt < self._max_retries:
-                    delay = self._base_delay * (1.5 ** attempt)
+                    delay = self._base_delay * (1.5**attempt)
                     await asyncio.sleep(delay)
                 else:
                     raise

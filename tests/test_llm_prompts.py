@@ -1,7 +1,5 @@
 import json
 
-import pytest
-
 
 class TestBuildUserMessage:
     def test_build_user_message_includes_signal_json(self):

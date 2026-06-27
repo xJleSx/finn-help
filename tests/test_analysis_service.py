@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from src.analysis.service import AnalysisService
-from src.db.models import Dividend, Indicator, Instrument, Price, Signal
+from src.db.models import Indicator, MarketEvent, Price
 
 
 def _chain(iterable, fallback):
@@ -17,6 +17,7 @@ def _chain(iterable, fallback):
         yield item
     while True:
         yield fallback
+
 
 # ── Real data builders ──────────────────────────────────────────────
 
@@ -29,14 +30,16 @@ def _real_price_df(n: int = 150, start_date: date | None = None) -> pd.DataFrame
     opens = closes + rng.normal(0, 0.5, n)
     highs = np.maximum(closes, opens) + abs(rng.normal(0, 0.5, n))
     lows = np.minimum(closes, opens) - abs(rng.normal(0, 0.5, n))
-    return pd.DataFrame({
-        "date": [start_date + timedelta(days=i) for i in range(n)],
-        "open": opens,
-        "high": highs,
-        "low": lows,
-        "close": closes,
-        "volume": np.random.default_rng(8).poisson(5_000_000, n),
-    })
+    return pd.DataFrame(
+        {
+            "date": [start_date + timedelta(days=i) for i in range(n)],
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": np.random.default_rng(8).poisson(5_000_000, n),
+        }
+    )
 
 
 def _real_indicator_df(n: int = 150, start_date: date | None = None) -> pd.DataFrame:
@@ -85,7 +88,23 @@ class TestPriceDf:
 
 class TestIndicatorDf:
     def test_converts_indicator_objects(self, service):
-        rows = [MagicMock(date=date(2024, 1, 1), rsi=55.0, macd_line=0.5, macd_signal=0.3, macd_hist=0.2, sma_20=101.0, sma_50=100.0, sma_200=99.0, bb_upper=105.0, bb_lower=95.0, bb_mid=100.0, volume_sma_20=1_000_000.0, atr=2.0)]
+        rows = [
+            MagicMock(
+                date=date(2024, 1, 1),
+                rsi=55.0,
+                macd_line=0.5,
+                macd_signal=0.3,
+                macd_hist=0.2,
+                sma_20=101.0,
+                sma_50=100.0,
+                sma_200=99.0,
+                bb_upper=105.0,
+                bb_lower=95.0,
+                bb_mid=100.0,
+                volume_sma_20=1_000_000.0,
+                atr=2.0,
+            )
+        ]
         df = service._indicator_df(rows)
         assert df["rsi"].iloc[0] == 55.0
 
@@ -111,10 +130,24 @@ class TestComputeMl:
         df = _real_price_df(100)
         ind_df = _real_indicator_df(100)
         mock_prophet = MagicMock()
-        mock_prophet.predict.return_value = {"target_price": 105.0, "current_price": 100.0, "price_change_pct": 5.0, "confidence": 0.7}
+        mock_prophet.predict.return_value = {
+            "target_price": 105.0,
+            "current_price": 100.0,
+            "price_change_pct": 5.0,
+            "confidence": 0.7,
+        }
         mock_ensemble = MagicMock()
-        mock_ensemble.predict.return_value = {"confidence": 0.6, "xgb_action": "BUY", "lgb_action": "BUY", "cat_action": "HOLD", "model_votes": {"xgb": "BUY", "lgb": "BUY", "cat": "HOLD"}}
-        with patch.object(service, "_get_prophet", return_value=mock_prophet), patch.object(service, "_get_ensemble", return_value=mock_ensemble):
+        mock_ensemble.predict.return_value = {
+            "confidence": 0.6,
+            "xgb_action": "BUY",
+            "lgb_action": "BUY",
+            "cat_action": "HOLD",
+            "model_votes": {"xgb": "BUY", "lgb": "BUY", "cat": "HOLD"},
+        }
+        with (
+            patch.object(service, "_get_prophet", return_value=mock_prophet),
+            patch.object(service, "_get_ensemble", return_value=mock_ensemble),
+        ):
             result = service._compute_ml(df, ind_df, "TEST")
         assert result["ml_confidence"] == max(0.7, 0.6)
         assert result["xgb_action"] == "BUY"
@@ -206,7 +239,9 @@ class TestAnalyzeSingle:
         with (
             patch.object(service, "_load_geo", AsyncMock(return_value={"score": 0.0})),
             patch.object(service, "_load_macro", AsyncMock(return_value={})),
-            patch.object(service, "_load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})),
+            patch.object(
+                service, "_load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})
+            ),
             patch.object(service, "_compute_ml", return_value=None),
         ):
             result = await service.analyze_single(db, inst, "TEST", with_ml=False)
@@ -220,11 +255,19 @@ class TestAnalyzeSingle:
     async def test_ml_confidence_reflected_in_result(self, service, db):
         self._setup_db_for_analyze(db)
         inst = MagicMock(id=1)
-        ml_result = {"target_price": 110.0, "signal_score": 0.5, "ml_confidence": 0.7, "xgb_action": "BUY", "ensemble": {}}
+        ml_result = {
+            "target_price": 110.0,
+            "signal_score": 0.5,
+            "ml_confidence": 0.7,
+            "xgb_action": "BUY",
+            "ensemble": {},
+        }
         with (
             patch.object(service, "_load_geo", AsyncMock(return_value={"score": 0.0})),
             patch.object(service, "_load_macro", AsyncMock(return_value={})),
-            patch.object(service, "_load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})),
+            patch.object(
+                service, "_load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})
+            ),
             patch.object(service, "_compute_ml", return_value=ml_result),
         ):
             result = await service.analyze_single(db, inst, "TEST", with_ml=True)
@@ -259,14 +302,20 @@ class TestAnalyzeAll:
         db = self._async_db([MagicMock(id=1, ticker="SBER"), MagicMock(id=2, ticker="GAZP")])
         mock_single = AsyncMock(return_value={"action": "BUY", "confidence": 0.8, "ticker": "SBER"})
         mock_save = AsyncMock()
-        with patch.object(service, "analyze_single", mock_single), patch.object(service.fusion, "save_signal", mock_save):
+        with (
+            patch.object(service, "analyze_single", mock_single),
+            patch.object(service.fusion, "save_signal", mock_save),
+        ):
             results = await service.analyze_all(db, with_ml=False)
         assert len(results) == 2
 
     @pytest.mark.asyncio
     async def test_filters_by_updated_ids(self, service):
         db = self._async_db([MagicMock(id=1, ticker="SBER")])
-        with patch.object(service, "analyze_single", AsyncMock(return_value={"action": "BUY"})), patch.object(service.fusion, "save_signal", AsyncMock()):
+        with (
+            patch.object(service, "analyze_single", AsyncMock(return_value={"action": "BUY"})),
+            patch.object(service.fusion, "save_signal", AsyncMock()),
+        ):
             results = await service.analyze_all(db, updated_ids={1}, with_ml=False)
         assert len(results) == 1
 
@@ -283,7 +332,10 @@ class TestAnalyzeAll:
     @pytest.mark.asyncio
     async def test_skips_instruments_with_value_error(self, service):
         db = self._async_db([MagicMock(id=1, ticker="SBER"), MagicMock(id=2, ticker="GAZP")])
-        with patch.object(service, "analyze_single", AsyncMock(side_effect=[ValueError("no data"), {"action": "BUY"}])), patch.object(service.fusion, "save_signal", AsyncMock()):
+        with (
+            patch.object(service, "analyze_single", AsyncMock(side_effect=[ValueError("no data"), {"action": "BUY"}])),
+            patch.object(service.fusion, "save_signal", AsyncMock()),
+        ):
             results = await service.analyze_all(db, with_ml=False)
         assert len(results) == 1
 
@@ -312,7 +364,14 @@ class TestAnalyzeAllSync:
         db.query.return_value.filter.return_value.first.return_value = None
 
         with (
-            patch.object(service, "_analyze_single_sync", side_effect=[{"action": "BUY", "confidence": 0.8, "ticker": "SBER"}, {"action": "SELL", "confidence": 0.6, "ticker": "GAZP"}]),
+            patch.object(
+                service,
+                "_analyze_single_sync",
+                side_effect=[
+                    {"action": "BUY", "confidence": 0.8, "ticker": "SBER"},
+                    {"action": "SELL", "confidence": 0.6, "ticker": "GAZP"},
+                ],
+            ),
             patch.object(service.fusion, "save_signal_sync", MagicMock()),
         ):
             results = service.analyze_all_sync(db)
@@ -342,7 +401,9 @@ class TestAnalyzeAllSync:
         cached.fused_json = "not a dict"
         db.query.return_value.filter.return_value.first.return_value = cached
         with (
-            patch.object(service, "_analyze_single_sync", return_value={"action": "HOLD", "confidence": 0.5, "ticker": "SBER"}),
+            patch.object(
+                service, "_analyze_single_sync", return_value={"action": "HOLD", "confidence": 0.5, "ticker": "SBER"}
+            ),
             patch.object(service.fusion, "save_signal_sync", MagicMock()),
         ):
             results = service.analyze_all_sync(db)
@@ -375,7 +436,9 @@ class TestTrainModels:
         db = MagicMock()
         db.execute.return_value.scalars.return_value.all.return_value = instruments
         price_mock = MagicMock()
-        price_mock.filter_by.return_value.order_by.return_value.all.return_value = [MagicMock() for _ in range(price_count)]
+        price_mock.filter_by.return_value.order_by.return_value.all.return_value = [
+            MagicMock() for _ in range(price_count)
+        ]
         ind_mock = MagicMock()
         ind_mock.filter_by.return_value.order_by.return_value.all.return_value = [MagicMock() for _ in range(ind_count)]
 
@@ -384,9 +447,14 @@ class TestTrainModels:
                 return price_mock
             if model is Indicator:
                 return ind_mock
+            if model is MarketEvent:
+                m = MagicMock()
+                m.order_by.return_value.all.return_value = []
+                return m
             m = MagicMock()
             m.filter_by.return_value.order_by.return_value.all.return_value = []
             return m
+
         db.query.side_effect = query_side
         return db
 

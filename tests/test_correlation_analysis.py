@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.analysis.correlation_analysis import correlation_table
 
 
@@ -24,7 +22,9 @@ class TestCorrelationTable:
             inst1.id, inst2.id = 1, 2
             inst1.ticker, inst2.ticker = "SBER", "GAZP"
             db.query.return_value.filter.return_value.all.return_value = [inst1, inst2]
-            db.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = [MagicMock() for _ in range(10)]
+            db.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = [
+                MagicMock() for _ in range(10)
+            ]
 
             mock_gs.return_value = db
             result = correlation_table(["SBER", "GAZP"])
@@ -39,7 +39,9 @@ class TestCorrelationTable:
             inst1.id, inst2.id = 1, 2
             inst1.ticker, inst2.ticker = "SBER", "LKOH"
             db.query.return_value.filter.return_value.all.return_value = [inst1, inst2]
-            db.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = [MagicMock() for _ in range(10)]
+            db.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = [
+                MagicMock() for _ in range(10)
+            ]
 
             result = correlation_table()
             assert isinstance(result, str)

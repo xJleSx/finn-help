@@ -24,10 +24,7 @@ YAHOO_HEADERS = {
 
 def _fetch_yahoo(symbol: str, period1: int, period2: int) -> pd.DataFrame:
     """Fetch daily OHLC data from Yahoo Finance."""
-    url = (
-        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        f"?period1={period1}&period2={period2}&interval=1d"
-    )
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={period1}&period2={period2}&interval=1d"
     r = requests.get(url, headers=YAHOO_HEADERS, timeout=30)
     data = r.json()
     result = data["chart"]["result"][0]
@@ -77,14 +74,16 @@ def imoex_to_events(df: pd.DataFrame, min_move: float = 1.5) -> list[dict[str, A
             continue
         direction = "вырос" if ret > 0 else "упал"
         sev = round(min(abs(ret) / 10, 0.95), 2)
-        events.append({
-            "date": row["date"],
-            "event_type": "market_index",
-            "title": f"Индекс IMOEX {direction} на {abs(ret):.1f}% до {row['close']:.0f}",
-            "severity": sev,
-            "market_impact_pct": round(ret, 1),
-            "source": "imoex",
-        })
+        events.append(
+            {
+                "date": row["date"],
+                "event_type": "market_index",
+                "title": f"Индекс IMOEX {direction} на {abs(ret):.1f}% до {row['close']:.0f}",
+                "severity": sev,
+                "market_impact_pct": round(ret, 1),
+                "source": "imoex",
+            }
+        )
     return events
 
 
@@ -97,14 +96,16 @@ def brent_to_events(df: pd.DataFrame, min_move: float = 2.0) -> list[dict[str, A
             continue
         direction = "выросла" if ret > 0 else "упала"
         sev = round(min(abs(ret) / 15, 0.95), 2)
-        events.append({
-            "date": row["date"],
-            "event_type": "oil_shock",
-            "title": f"Нефть Brent {direction} на {abs(ret):.1f}% до ${row['close']:.1f}",
-            "severity": sev,
-            "market_impact_pct": round(-0.3 * ret, 1),
-            "source": "brent",
-        })
+        events.append(
+            {
+                "date": row["date"],
+                "event_type": "oil_shock",
+                "title": f"Нефть Brent {direction} на {abs(ret):.1f}% до ${row['close']:.1f}",
+                "severity": sev,
+                "market_impact_pct": round(-0.3 * ret, 1),
+                "source": "brent",
+            }
+        )
     return events
 
 
@@ -117,14 +118,16 @@ def usdrub_to_events(df: pd.DataFrame, min_move: float = 1.5) -> list[dict[str, 
             continue
         direction = "укрепился" if ret < 0 else "ослабел"
         sev = round(min(abs(ret) / 8, 0.95), 2)
-        events.append({
-            "date": row["date"],
-            "event_type": "currency",
-            "title": f"Рубль {direction} на {abs(ret):.1f}% до {row['close']:.1f} за USD",
-            "severity": sev,
-            "market_impact_pct": round(-ret if ret > 0 else abs(ret) * 0.5, 1),
-            "source": "usdrub",
-        })
+        events.append(
+            {
+                "date": row["date"],
+                "event_type": "currency",
+                "title": f"Рубль {direction} на {abs(ret):.1f}% до {row['close']:.1f} за USD",
+                "severity": sev,
+                "market_impact_pct": round(-ret if ret > 0 else abs(ret) * 0.5, 1),
+                "source": "usdrub",
+            }
+        )
     return events
 
 
@@ -142,15 +145,17 @@ def generate_from_news(db_session: Session) -> list[dict[str, Any]]:
             continue
         sentiment = article.sentiment_score or 0
         impact = round(sentiment * 5 + 0.5, 1)
-        events.append({
-            "date": d,
-            "event_type": "news_event",
-            "title": article.title[:500],
-            "severity": round(min(abs(sentiment) * 0.5 + 0.1, 0.95), 2),
-            "market_impact_pct": impact,
-            "source": "news_extracted",
-            "source_news_id": article.id,
-        })
+        events.append(
+            {
+                "date": d,
+                "event_type": "news_event",
+                "title": article.title[:500],
+                "severity": round(min(abs(sentiment) * 0.5 + 0.1, 0.95), 2),
+                "market_impact_pct": impact,
+                "source": "news_extracted",
+                "source_news_id": article.id,
+            }
+        )
     return events
 
 
@@ -164,14 +169,16 @@ def generate_from_dividends(db_session: Session) -> list[dict[str, Any]]:
         if not div.date:
             continue
         ticker = div.instrument.ticker if div.instrument else str(div.instrument_id)
-        events.append({
-            "date": div.date,
-            "event_type": "dividend",
-            "title": f"Дивиденды {ticker}: {div.amount:.2f} {div.currency or 'RUB'}",
-            "severity": 0.3,
-            "market_impact_pct": 1.0,
-            "source": "dividend",
-        })
+        events.append(
+            {
+                "date": div.date,
+                "event_type": "dividend",
+                "title": f"Дивиденды {ticker}: {div.amount:.2f} {div.currency or 'RUB'}",
+                "severity": 0.3,
+                "market_impact_pct": 1.0,
+                "source": "dividend",
+            }
+        )
     return events
 
 
@@ -180,11 +187,7 @@ def generate_from_indicators(db_session: Session) -> list[dict[str, Any]]:
     from src.db.models import Indicator
 
     events: list[dict[str, Any]] = []
-    indicators = (
-        db_session.query(Indicator)
-        .filter(Indicator.rsi.isnot(None))
-        .all()
-    )
+    indicators = db_session.query(Indicator).filter(Indicator.rsi.isnot(None)).all()
     for ind in indicators:
         if ind.rsi is None:
             continue
@@ -193,27 +196,31 @@ def generate_from_indicators(db_session: Session) -> list[dict[str, Any]]:
         if ind.rsi > 75:
             sev = min(float(ind.rsi - 70) / 30, 0.9)
             imp = -float(ind.rsi - 70) / 10
-            events.append({
-                "date": d,
-                "event_type": "technical",
-                "title": f"{ticker}: RSI={ind.rsi:.0f} — перекупленность",
-                "severity": round(sev, 2),
-                "market_impact_pct": round(imp, 1),
-                "source": "indicator_rsi",
-                "indicators_before_json": {"rsi": ind.rsi},
-            })
+            events.append(
+                {
+                    "date": d,
+                    "event_type": "technical",
+                    "title": f"{ticker}: RSI={ind.rsi:.0f} — перекупленность",
+                    "severity": round(sev, 2),
+                    "market_impact_pct": round(imp, 1),
+                    "source": "indicator_rsi",
+                    "indicators_before_json": {"rsi": ind.rsi},
+                }
+            )
         elif ind.rsi < 25:
             sev = min(float(30 - ind.rsi) / 30, 0.9)
             imp = float(30 - ind.rsi) / 10
-            events.append({
-                "date": d,
-                "event_type": "technical",
-                "title": f"{ticker}: RSI={ind.rsi:.0f} — перепроданность",
-                "severity": round(sev, 2),
-                "market_impact_pct": round(imp, 1),
-                "source": "indicator_rsi",
-                "indicators_before_json": {"rsi": ind.rsi},
-            })
+            events.append(
+                {
+                    "date": d,
+                    "event_type": "technical",
+                    "title": f"{ticker}: RSI={ind.rsi:.0f} — перепроданность",
+                    "severity": round(sev, 2),
+                    "market_impact_pct": round(imp, 1),
+                    "source": "indicator_rsi",
+                    "indicators_before_json": {"rsi": ind.rsi},
+                }
+            )
     return events
 
 
@@ -242,14 +249,16 @@ def generate_from_price_moves(db_session: Session) -> list[dict[str, Any]]:
                 continue
             direction = "выросли" if ret > 0 else "упали"
             sev = round(min(abs(ret) / 12, 0.8), 2)
-            events.append({
-                "date": row["date"].date() if hasattr(row["date"], "date") else row["date"],
-                "event_type": "stock_move",
-                "title": f"Акции {ticker} {direction} на {abs(ret):.1f}% до {row['close']:.0f}",
-                "severity": sev,
-                "market_impact_pct": round(ret, 1),
-                "source": "price_movement",
-            })
+            events.append(
+                {
+                    "date": row["date"].date() if hasattr(row["date"], "date") else row["date"],
+                    "event_type": "stock_move",
+                    "title": f"Акции {ticker} {direction} на {abs(ret):.1f}% до {row['close']:.0f}",
+                    "severity": sev,
+                    "market_impact_pct": round(ret, 1),
+                    "source": "price_movement",
+                }
+            )
     return events
 
 
@@ -344,14 +353,16 @@ def generate_cbr_rate_events() -> list[dict[str, Any]]:
             impact = 2.0
         sev = round(min(abs(impact) / 6 + 0.2, 0.95), 2)
         label = entry["action"]
-        events.append({
-            "date": entry["date"],
-            "event_type": "rate_decision",
-            "title": f"Ключевая ставка ЦБ {label} до {entry['rate']}%",
-            "severity": sev,
-            "market_impact_pct": impact,
-            "source": "cbr_rate",
-        })
+        events.append(
+            {
+                "date": entry["date"],
+                "event_type": "rate_decision",
+                "title": f"Ключевая ставка ЦБ {label} до {entry['rate']}%",
+                "severity": sev,
+                "market_impact_pct": impact,
+                "source": "cbr_rate",
+            }
+        )
     return events
 
 
@@ -397,14 +408,16 @@ def generate_sanctions_events() -> list[dict[str, Any]]:
     for entry in SANCTIONS_EVENTS:
         sev = 0.8 if "историческое" in entry["title"] or "полная" in entry["title"].lower() else 0.6
         impact = -5.0 if "смягчение" not in entry["title"].lower() else 4.0
-        events.append({
-            "date": entry["date"],
-            "event_type": "sanctions",
-            "title": entry["title"],
-            "severity": sev,
-            "market_impact_pct": impact,
-            "source": "sanctions_timeline",
-        })
+        events.append(
+            {
+                "date": entry["date"],
+                "event_type": "sanctions",
+                "title": entry["title"],
+                "severity": sev,
+                "market_impact_pct": impact,
+                "source": "sanctions_timeline",
+            }
+        )
     return events
 
 
@@ -416,14 +429,56 @@ def generate_sanctions_events() -> list[dict[str, Any]]:
 FED_RATE_DECISIONS: list[dict[str, Any]] = [
     # 2010-2014: ZIRP (0-0.25%), no rate changes but key QE announcements
     {"date": date(2010, 11, 3), "action": "QE2 объявлен", "rate_before": 0.25, "rate_after": 0.25, "impact": 2.0},
-    {"date": date(2011, 9, 21), "action": "Operation Twist объявлен", "rate_before": 0.25, "rate_after": 0.25, "impact": 1.5},
-    {"date": date(2012, 9, 13), "action": "QE3 объявлен — безлимитный", "rate_before": 0.25, "rate_after": 0.25, "impact": 3.0},
-    {"date": date(2012, 12, 12), "action": "QE3 расширен — замена Twist", "rate_before": 0.25, "rate_after": 0.25, "impact": 1.5},
-    {"date": date(2013, 6, 19), "action": "Taper Tantrum — сигнал о сворачивании QE", "rate_before": 0.25, "rate_after": 0.25, "impact": -4.0},
-    {"date": date(2013, 12, 18), "action": "Начало tapering — сокращение QE на $10 млрд", "rate_before": 0.25, "rate_after": 0.25, "impact": 1.0},
-    {"date": date(2014, 10, 29), "action": "QE3 завершён — конец покупок активов", "rate_before": 0.25, "rate_after": 0.25, "impact": 1.5},
+    {
+        "date": date(2011, 9, 21),
+        "action": "Operation Twist объявлен",
+        "rate_before": 0.25,
+        "rate_after": 0.25,
+        "impact": 1.5,
+    },
+    {
+        "date": date(2012, 9, 13),
+        "action": "QE3 объявлен — безлимитный",
+        "rate_before": 0.25,
+        "rate_after": 0.25,
+        "impact": 3.0,
+    },
+    {
+        "date": date(2012, 12, 12),
+        "action": "QE3 расширен — замена Twist",
+        "rate_before": 0.25,
+        "rate_after": 0.25,
+        "impact": 1.5,
+    },
+    {
+        "date": date(2013, 6, 19),
+        "action": "Taper Tantrum — сигнал о сворачивании QE",
+        "rate_before": 0.25,
+        "rate_after": 0.25,
+        "impact": -4.0,
+    },
+    {
+        "date": date(2013, 12, 18),
+        "action": "Начало tapering — сокращение QE на $10 млрд",
+        "rate_before": 0.25,
+        "rate_after": 0.25,
+        "impact": 1.0,
+    },
+    {
+        "date": date(2014, 10, 29),
+        "action": "QE3 завершён — конец покупок активов",
+        "rate_before": 0.25,
+        "rate_after": 0.25,
+        "impact": 1.5,
+    },
     # 2015: First hike
-    {"date": date(2015, 12, 16), "action": "Первое повышение ставки за 9 лет", "rate_before": 0.25, "rate_after": 0.50, "impact": -1.5},
+    {
+        "date": date(2015, 12, 16),
+        "action": "Первое повышение ставки за 9 лет",
+        "rate_before": 0.25,
+        "rate_after": 0.50,
+        "impact": -1.5,
+    },
     # 2016: One hike
     {"date": date(2016, 12, 14), "action": "Повышение ставки", "rate_before": 0.50, "rate_after": 0.75, "impact": -1.0},
     # 2017: 3 hikes
@@ -434,50 +489,242 @@ FED_RATE_DECISIONS: list[dict[str, Any]] = [
     {"date": date(2018, 3, 21), "action": "Повышение ставки", "rate_before": 1.50, "rate_after": 1.75, "impact": -0.5},
     {"date": date(2018, 6, 13), "action": "Повышение ставки", "rate_before": 1.75, "rate_after": 2.00, "impact": -0.5},
     {"date": date(2018, 9, 26), "action": "Повышение ставки", "rate_before": 2.00, "rate_after": 2.25, "impact": -0.5},
-    {"date": date(2018, 12, 19), "action": "Повышение ставки — последнее в цикле", "rate_before": 2.25, "rate_after": 2.50, "impact": -1.0},
+    {
+        "date": date(2018, 12, 19),
+        "action": "Повышение ставки — последнее в цикле",
+        "rate_before": 2.25,
+        "rate_after": 2.50,
+        "impact": -1.0,
+    },
     # 2019: 3 cuts
-    {"date": date(2019, 7, 31), "action": "Первое снижение ставки — mid-cycle adjustment", "rate_before": 2.50, "rate_after": 2.25, "impact": 2.0},
+    {
+        "date": date(2019, 7, 31),
+        "action": "Первое снижение ставки — mid-cycle adjustment",
+        "rate_before": 2.50,
+        "rate_after": 2.25,
+        "impact": 2.0,
+    },
     {"date": date(2019, 9, 18), "action": "Снижение ставки", "rate_before": 2.25, "rate_after": 2.00, "impact": 1.0},
-    {"date": date(2019, 10, 30), "action": "Третье снижение ставки в 2019", "rate_before": 2.00, "rate_after": 1.75, "impact": 1.0},
+    {
+        "date": date(2019, 10, 30),
+        "action": "Третье снижение ставки в 2019",
+        "rate_before": 2.00,
+        "rate_after": 1.75,
+        "impact": 1.0,
+    },
     # 2020: Emergency cuts
-    {"date": date(2020, 3, 3), "action": "Экстренное снижение ставки на 0.5%", "rate_before": 1.75, "rate_after": 1.25, "impact": -3.0},
-    {"date": date(2020, 3, 15), "action": "Экстренное снижение ставки до 0% + QE4", "rate_before": 1.25, "rate_after": 0.25, "impact": 5.0},
+    {
+        "date": date(2020, 3, 3),
+        "action": "Экстренное снижение ставки на 0.5%",
+        "rate_before": 1.75,
+        "rate_after": 1.25,
+        "impact": -3.0,
+    },
+    {
+        "date": date(2020, 3, 15),
+        "action": "Экстренное снижение ставки до 0% + QE4",
+        "rate_before": 1.25,
+        "rate_after": 0.25,
+        "impact": 5.0,
+    },
     # 2022: 7 hikes
-    {"date": date(2022, 3, 16), "action": "Первое повышение за 4 года — 25bp", "rate_before": 0.25, "rate_after": 0.50, "impact": -1.0},
-    {"date": date(2022, 5, 4), "action": "Повышение на 50bp — крупнейшее за 22 года", "rate_before": 0.50, "rate_after": 1.00, "impact": -2.0},
-    {"date": date(2022, 6, 15), "action": "Повышение на 75bp — крупнейшее с 1994", "rate_before": 1.00, "rate_after": 1.75, "impact": -3.0},
+    {
+        "date": date(2022, 3, 16),
+        "action": "Первое повышение за 4 года — 25bp",
+        "rate_before": 0.25,
+        "rate_after": 0.50,
+        "impact": -1.0,
+    },
+    {
+        "date": date(2022, 5, 4),
+        "action": "Повышение на 50bp — крупнейшее за 22 года",
+        "rate_before": 0.50,
+        "rate_after": 1.00,
+        "impact": -2.0,
+    },
+    {
+        "date": date(2022, 6, 15),
+        "action": "Повышение на 75bp — крупнейшее с 1994",
+        "rate_before": 1.00,
+        "rate_after": 1.75,
+        "impact": -3.0,
+    },
     {"date": date(2022, 7, 27), "action": "Повышение на 75bp", "rate_before": 1.75, "rate_after": 2.50, "impact": -1.5},
-    {"date": date(2022, 9, 21), "action": "Повышение на 75bp — жёсткий сигнал", "rate_before": 2.50, "rate_after": 3.25, "impact": -2.5},
+    {
+        "date": date(2022, 9, 21),
+        "action": "Повышение на 75bp — жёсткий сигнал",
+        "rate_before": 2.50,
+        "rate_after": 3.25,
+        "impact": -2.5,
+    },
     {"date": date(2022, 11, 2), "action": "Повышение на 75bp", "rate_before": 3.25, "rate_after": 4.00, "impact": -1.5},
-    {"date": date(2022, 12, 14), "action": "Повышение на 50bp", "rate_before": 4.00, "rate_after": 4.50, "impact": -1.0},
+    {
+        "date": date(2022, 12, 14),
+        "action": "Повышение на 50bp",
+        "rate_before": 4.00,
+        "rate_after": 4.50,
+        "impact": -1.0,
+    },
     # 2023: 4 hikes
     {"date": date(2023, 2, 1), "action": "Повышение на 25bp", "rate_before": 4.50, "rate_after": 4.75, "impact": -0.5},
-    {"date": date(2023, 3, 22), "action": "Повышение на 25bp — банковский кризис", "rate_before": 4.75, "rate_after": 5.00, "impact": -1.5},
+    {
+        "date": date(2023, 3, 22),
+        "action": "Повышение на 25bp — банковский кризис",
+        "rate_before": 4.75,
+        "rate_after": 5.00,
+        "impact": -1.5,
+    },
     {"date": date(2023, 5, 3), "action": "Повышение на 25bp", "rate_before": 5.00, "rate_after": 5.25, "impact": -0.5},
-    {"date": date(2023, 7, 26), "action": "Повышение на 25bp — пик ставки", "rate_before": 5.25, "rate_after": 5.50, "impact": -0.5},
+    {
+        "date": date(2023, 7, 26),
+        "action": "Повышение на 25bp — пик ставки",
+        "rate_before": 5.25,
+        "rate_after": 5.50,
+        "impact": -0.5,
+    },
     # 2024: No changes
-    {"date": date(2024, 1, 31), "action": "Ставка сохранена 5.50%", "rate_before": 5.50, "rate_after": 5.50, "impact": 0.0},
-    {"date": date(2024, 3, 20), "action": "Ставка сохранена 5.50%", "rate_before": 5.50, "rate_after": 5.50, "impact": 0.0},
-    {"date": date(2024, 5, 1), "action": "Ставка сохранена 5.50% — инфляция высокая", "rate_before": 5.50, "rate_after": 5.50, "impact": -0.5},
-    {"date": date(2024, 6, 12), "action": "Ставка сохранена 5.50%", "rate_before": 5.50, "rate_after": 5.50, "impact": 0.0},
-    {"date": date(2024, 7, 31), "action": "Ставка сохранена 5.50%", "rate_before": 5.50, "rate_after": 5.50, "impact": 0.0},
-    {"date": date(2024, 9, 18), "action": "Первое снижение ставки — 50bp", "rate_before": 5.50, "rate_after": 5.00, "impact": 3.0},
-    {"date": date(2024, 11, 7), "action": "Снижение ставки на 25bp", "rate_before": 5.00, "rate_after": 4.75, "impact": 1.5},
-    {"date": date(2024, 12, 18), "action": "Снижение ставки на 25bp", "rate_before": 4.75, "rate_after": 4.50, "impact": 1.0},
+    {
+        "date": date(2024, 1, 31),
+        "action": "Ставка сохранена 5.50%",
+        "rate_before": 5.50,
+        "rate_after": 5.50,
+        "impact": 0.0,
+    },
+    {
+        "date": date(2024, 3, 20),
+        "action": "Ставка сохранена 5.50%",
+        "rate_before": 5.50,
+        "rate_after": 5.50,
+        "impact": 0.0,
+    },
+    {
+        "date": date(2024, 5, 1),
+        "action": "Ставка сохранена 5.50% — инфляция высокая",
+        "rate_before": 5.50,
+        "rate_after": 5.50,
+        "impact": -0.5,
+    },
+    {
+        "date": date(2024, 6, 12),
+        "action": "Ставка сохранена 5.50%",
+        "rate_before": 5.50,
+        "rate_after": 5.50,
+        "impact": 0.0,
+    },
+    {
+        "date": date(2024, 7, 31),
+        "action": "Ставка сохранена 5.50%",
+        "rate_before": 5.50,
+        "rate_after": 5.50,
+        "impact": 0.0,
+    },
+    {
+        "date": date(2024, 9, 18),
+        "action": "Первое снижение ставки — 50bp",
+        "rate_before": 5.50,
+        "rate_after": 5.00,
+        "impact": 3.0,
+    },
+    {
+        "date": date(2024, 11, 7),
+        "action": "Снижение ставки на 25bp",
+        "rate_before": 5.00,
+        "rate_after": 4.75,
+        "impact": 1.5,
+    },
+    {
+        "date": date(2024, 12, 18),
+        "action": "Снижение ставки на 25bp",
+        "rate_before": 4.75,
+        "rate_after": 4.50,
+        "impact": 1.0,
+    },
     # 2025: Cuts continue
-    {"date": date(2025, 1, 29), "action": "Снижение ставки на 25bp — торговые войны", "rate_before": 4.50, "rate_after": 4.25, "impact": 0.5},
-    {"date": date(2025, 3, 19), "action": "Снижение ставки на 25bp", "rate_before": 4.25, "rate_after": 4.00, "impact": 1.0},
-    {"date": date(2025, 5, 7), "action": "Снижение ставки на 50bp — рецессия", "rate_before": 4.00, "rate_after": 3.50, "impact": 2.5},
-    {"date": date(2025, 6, 18), "action": "Снижение ставки на 25bp", "rate_before": 3.50, "rate_after": 3.25, "impact": 1.0},
-    {"date": date(2025, 7, 30), "action": "Снижение ставки на 25bp", "rate_before": 3.25, "rate_after": 3.00, "impact": 0.5},
-    {"date": date(2025, 9, 17), "action": "Ставка сохранена 3.00%", "rate_before": 3.00, "rate_after": 3.00, "impact": 0.0},
-    {"date": date(2025, 11, 5), "action": "Снижение ставки на 25bp", "rate_before": 3.00, "rate_after": 2.75, "impact": 1.0},
-    {"date": date(2025, 12, 17), "action": "Снижение ставки на 25bp", "rate_before": 2.75, "rate_after": 2.50, "impact": 0.5},
+    {
+        "date": date(2025, 1, 29),
+        "action": "Снижение ставки на 25bp — торговые войны",
+        "rate_before": 4.50,
+        "rate_after": 4.25,
+        "impact": 0.5,
+    },
+    {
+        "date": date(2025, 3, 19),
+        "action": "Снижение ставки на 25bp",
+        "rate_before": 4.25,
+        "rate_after": 4.00,
+        "impact": 1.0,
+    },
+    {
+        "date": date(2025, 5, 7),
+        "action": "Снижение ставки на 50bp — рецессия",
+        "rate_before": 4.00,
+        "rate_after": 3.50,
+        "impact": 2.5,
+    },
+    {
+        "date": date(2025, 6, 18),
+        "action": "Снижение ставки на 25bp",
+        "rate_before": 3.50,
+        "rate_after": 3.25,
+        "impact": 1.0,
+    },
+    {
+        "date": date(2025, 7, 30),
+        "action": "Снижение ставки на 25bp",
+        "rate_before": 3.25,
+        "rate_after": 3.00,
+        "impact": 0.5,
+    },
+    {
+        "date": date(2025, 9, 17),
+        "action": "Ставка сохранена 3.00%",
+        "rate_before": 3.00,
+        "rate_after": 3.00,
+        "impact": 0.0,
+    },
+    {
+        "date": date(2025, 11, 5),
+        "action": "Снижение ставки на 25bp",
+        "rate_before": 3.00,
+        "rate_after": 2.75,
+        "impact": 1.0,
+    },
+    {
+        "date": date(2025, 12, 17),
+        "action": "Снижение ставки на 25bp",
+        "rate_before": 2.75,
+        "rate_after": 2.50,
+        "impact": 0.5,
+    },
     # 2026: More cuts
-    {"date": date(2026, 1, 28), "action": "Ставка сохранена 2.50%", "rate_before": 2.50, "rate_after": 2.50, "impact": 0.0},
-    {"date": date(2026, 3, 18), "action": "Снижение ставки на 25bp", "rate_before": 2.50, "rate_after": 2.25, "impact": 0.5},
-    {"date": date(2026, 5, 6), "action": "Ставка сохранена 2.25%", "rate_before": 2.25, "rate_after": 2.25, "impact": 0.0},
-    {"date": date(2026, 6, 17), "action": "Снижение ставки на 25bp — сигнал о паузе", "rate_before": 2.25, "rate_after": 2.00, "impact": 1.5},
+    {
+        "date": date(2026, 1, 28),
+        "action": "Ставка сохранена 2.50%",
+        "rate_before": 2.50,
+        "rate_after": 2.50,
+        "impact": 0.0,
+    },
+    {
+        "date": date(2026, 3, 18),
+        "action": "Снижение ставки на 25bp",
+        "rate_before": 2.50,
+        "rate_after": 2.25,
+        "impact": 0.5,
+    },
+    {
+        "date": date(2026, 5, 6),
+        "action": "Ставка сохранена 2.25%",
+        "rate_before": 2.25,
+        "rate_after": 2.25,
+        "impact": 0.0,
+    },
+    {
+        "date": date(2026, 6, 17),
+        "action": "Снижение ставки на 25bp — сигнал о паузе",
+        "rate_before": 2.25,
+        "rate_after": 2.00,
+        "impact": 1.5,
+    },
 ]
 
 # Russia CPI monthly data (real, from Rosstat/CBR)
@@ -572,7 +819,11 @@ OPEC_MEETINGS: list[dict[str, Any]] = [
     {"date": date(2019, 7, 2), "title": "ОПЕК+ продлил сокращение на 9 месяцев", "action": "extend"},
     {"date": date(2019, 12, 6), "title": "ОПЕК+ углубил сокращение на 500 тыс б/с", "action": "deepen_cut"},
     {"date": date(2020, 3, 6), "title": "Развал сделки ОПЕК+ — нефть рухнула", "action": "collapse"},
-    {"date": date(2020, 4, 12), "title": "ОПЕК+ договорился о рекордном сокращении 9.7 млн б/с", "action": "historic_cut"},
+    {
+        "date": date(2020, 4, 12),
+        "title": "ОПЕК+ договорился о рекордном сокращении 9.7 млн б/с",
+        "action": "historic_cut",
+    },
     {"date": date(2020, 6, 6), "title": "ОПЕК+ продлил сокращение на июль", "action": "extend"},
     {"date": date(2020, 12, 3), "title": "ОПЕК+ договорился о постепенном наращивании", "action": "taper"},
     {"date": date(2021, 1, 5), "title": "ОПЕК+ договорился о росте добычи на 500 тыс б/с", "action": "taper"},
@@ -580,7 +831,11 @@ OPEC_MEETINGS: list[dict[str, Any]] = [
     {"date": date(2022, 6, 2), "title": "ОПЕК+ ускорил рост добычи", "action": "increase"},
     {"date": date(2022, 10, 5), "title": "ОПЕК+ сократил добычу на 2 млн б/с", "action": "cut"},
     {"date": date(2023, 4, 2), "title": "ОПЕК+ неожиданно сократил добычу на 1.6 млн б/с", "action": "surprise_cut"},
-    {"date": date(2023, 6, 4), "title": "ОПЕК+ продлил сокращения — Саудовская Аравия добровольно сократила", "action": "deepen_cut"},
+    {
+        "date": date(2023, 6, 4),
+        "title": "ОПЕК+ продлил сокращения — Саудовская Аравия добровольно сократила",
+        "action": "deepen_cut",
+    },
     {"date": date(2024, 6, 2), "title": "ОПЕК+ продлил сокращения до 2025", "action": "extend"},
     {"date": date(2024, 12, 5), "title": "ОПЕК+ отложил наращивание на 3 месяца", "action": "delay"},
     {"date": date(2025, 4, 5), "title": "ОПЕК+ ускорил наращивание добычи — давление США", "action": "increase"},
@@ -596,14 +851,18 @@ def generate_fed_rate_events() -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for entry in FED_RATE_DECISIONS:
         sev = round(min(abs(entry["impact"]) / 6 + 0.2, 0.95), 2)
-        events.append({
-            "date": entry["date"],
-            "event_type": "global_crisis" if "экстрен" in entry["action"] or "рецесси" in entry["action"] else "rate_decision",
-            "title": f"FOMC: {entry['action']} (ставка {entry['rate_before']:.2f}% → {entry['rate_after']:.2f}%)",
-            "severity": sev,
-            "market_impact_pct": entry["impact"],
-            "source": "fed_rate",
-        })
+        events.append(
+            {
+                "date": entry["date"],
+                "event_type": "global_crisis"
+                if "экстрен" in entry["action"] or "рецесси" in entry["action"]
+                else "rate_decision",
+                "title": f"FOMC: {entry['action']} (ставка {entry['rate_before']:.2f}% → {entry['rate_after']:.2f}%)",
+                "severity": sev,
+                "market_impact_pct": entry["impact"],
+                "source": "fed_rate",
+            }
+        )
     return events
 
 
@@ -618,16 +877,18 @@ def generate_russia_cpi_events() -> list[dict[str, Any]]:
         title = f"Инфляция в РФ {direction} до {cpi:.1f}%"
         if entry.get("gdpprev"):
             title += f" (ВВП {entry['gdpprev']:+.1f}%)"
-        events.append({
-            "date": entry["date"],
-            "event_type": "macro_data",
-            "title": title,
-            "severity": sev,
-            "market_impact_pct": impact,
-            "source": "russia_macro",
-            "indicators_before_json": {"cpi": cpi},
-            "indicators_after_json": {"cpi": cpi},
-        })
+        events.append(
+            {
+                "date": entry["date"],
+                "event_type": "macro_data",
+                "title": title,
+                "severity": sev,
+                "market_impact_pct": impact,
+                "source": "russia_macro",
+                "indicators_before_json": {"cpi": cpi},
+                "indicators_after_json": {"cpi": cpi},
+            }
+        )
     return events
 
 
@@ -635,29 +896,51 @@ def generate_opec_events() -> list[dict[str, Any]]:
     """Create events from OPEC+ meeting dates."""
     events: list[dict[str, Any]] = []
     impact_map = {
-        "cut": 3.0, "deepen_cut": 4.0, "historic_cut": 6.0, "surprise_cut": 5.0,
-        "extend": 1.5, "maintain": 0.5, "increase": -1.5, "taper": -0.5,
-        "disagreement": -3.0, "no_cut": -5.0, "failed": -4.0, "collapse": -8.0,
-        "delay": 1.0, "framework": 2.0,
+        "cut": 3.0,
+        "deepen_cut": 4.0,
+        "historic_cut": 6.0,
+        "surprise_cut": 5.0,
+        "extend": 1.5,
+        "maintain": 0.5,
+        "increase": -1.5,
+        "taper": -0.5,
+        "disagreement": -3.0,
+        "no_cut": -5.0,
+        "failed": -4.0,
+        "collapse": -8.0,
+        "delay": 1.0,
+        "framework": 2.0,
     }
     sev_map = {
-        "cut": 0.5, "deepen_cut": 0.6, "historic_cut": 0.8, "surprise_cut": 0.7,
-        "extend": 0.3, "maintain": 0.15, "increase": 0.3, "taper": 0.2,
-        "disagreement": 0.5, "no_cut": 0.7, "failed": 0.6, "collapse": 0.95,
-        "delay": 0.25, "framework": 0.35,
+        "cut": 0.5,
+        "deepen_cut": 0.6,
+        "historic_cut": 0.8,
+        "surprise_cut": 0.7,
+        "extend": 0.3,
+        "maintain": 0.15,
+        "increase": 0.3,
+        "taper": 0.2,
+        "disagreement": 0.5,
+        "no_cut": 0.7,
+        "failed": 0.6,
+        "collapse": 0.95,
+        "delay": 0.25,
+        "framework": 0.35,
     }
     for entry in OPEC_MEETINGS:
         imp = impact_map.get(entry["action"], 0.0)
         sev = sev_map.get(entry["action"], 0.3)
-        events.append({
-            "date": entry["date"],
-            "event_type": "oil_shock",
-            "title": f"ОПЕК+: {entry['title']}",
-            "severity": sev,
-            "market_impact_pct": imp,
-            "sector_impacts_json": {"oil_gas": round(imp * 2, 1)},
-            "source": "opec",
-        })
+        events.append(
+            {
+                "date": entry["date"],
+                "event_type": "oil_shock",
+                "title": f"ОПЕК+: {entry['title']}",
+                "severity": sev,
+                "market_impact_pct": imp,
+                "sector_impacts_json": {"oil_gas": round(imp * 2, 1)},
+                "source": "opec",
+            }
+        )
     return events
 
 
@@ -709,6 +992,7 @@ def seed() -> int:
 
         # 1. Real historical events from REAL_EVENTS list
         from scripts.real_events_data import REAL_EVENTS
+
         logger.info("Добавляем исторические события (%d)...", len(REAL_EVENTS))
         for data in REAL_EVENTS:
             _add(session, data)

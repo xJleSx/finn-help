@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -7,19 +8,19 @@ from src.db.models import Price
 logger = logging.getLogger(__name__)
 
 
-def item_risk(item: dict, db: Session, capital: float = 100_000) -> dict:
+def item_risk(item: dict[str, Any], db: Session, capital: float = 100_000) -> dict[str, Any]:
     prices = db.query(Price).filter_by(instrument_id=item["id"]).order_by(Price.date.desc()).limit(60).all()
     if len(prices) < 10:
         return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
 
-    close_vals = [p.close for p in prices if p.close]
+    close_vals = [float(p.close) for p in prices if p.close]
     if len(close_vals) < 10:
         return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
 
     return _compute_risk_from_closes(close_vals, item, capital)
 
 
-def _compute_risk_from_closes(close_vals: list[float], item: dict, capital: float) -> dict:
+def _compute_risk_from_closes(close_vals: list[float], item: dict[str, Any], capital: float) -> dict[str, Any]:
     from src.trading.risk.manager import (
         compute_concentration_limit,
         compute_position_size,

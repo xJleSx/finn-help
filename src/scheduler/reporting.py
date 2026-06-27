@@ -1,5 +1,6 @@
 import logging
 from datetime import date, datetime, timezone
+from typing import Any
 
 from sqlalchemy import func
 
@@ -38,7 +39,7 @@ async def take_snapshot(period: str) -> None:
                 .first()
             )
             if p:
-                prev[inst.id] = p
+                prev[int(inst.id)] = p
 
         now_utc = datetime.now(timezone.utc)
 
@@ -55,7 +56,7 @@ async def take_snapshot(period: str) -> None:
             try:
                 from src.social.sentiment.aggregator import aggregator
 
-                all_tickers = [inst.ticker for inst in instruments if inst.ticker]
+                all_tickers = [str(inst.ticker) for inst in instruments if inst.ticker]
                 all_social = aggregator.get_all_ticker_sentiments(all_tickers)
                 social_with_data = [s for s in all_social.values() if s["count"] > 0]
                 if social_with_data:
@@ -100,7 +101,7 @@ async def take_snapshot(period: str) -> None:
                 signal_score = fj.get("weighted_score")
                 signal_confidence = fj.get("confidence")
 
-            prev_snap = prev.get(inst.id)
+            prev_snap = prev.get(int(inst.id))
             delta_price_pct: float | None = None
             delta_score: float | None = None
             delta_rsi: float | None = None
@@ -164,7 +165,7 @@ async def generate_daily_report() -> DailyReport | None:
         total_sell = 0
         total_hold = 0
         scores: list[float] = []
-        portfolio_rows: list[dict] = []
+        portfolio_rows: list[dict[str, Any]] = []
 
         portfolio_tickers = set()
         for p in db.query(PortModel).all():

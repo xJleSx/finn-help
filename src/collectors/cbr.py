@@ -1,6 +1,6 @@
 import logging
 from datetime import date
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class CBRCollector:
     BASE = settings.cbr_url
 
-    async def get_rates(self, date_req: Optional[str] = None) -> list[dict]:
+    async def get_rates(self, date_req: Optional[str] = None) -> list[dict[str, Any]]:
         if date_req is None:
             date_req = date.today().strftime("%d/%m/%Y")
 

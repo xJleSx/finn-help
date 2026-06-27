@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import date, timedelta
+from typing import Any
 
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,14 +48,14 @@ class PortfolioAllocator:
         },
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.profile = "balanced"
 
-    def set_profile(self, profile: str):
+    def set_profile(self, profile: str) -> None:
         if profile in self.PROFILES:
             self.profile = profile
 
-    def _load_profile_from_db(self):
+    def _load_profile_from_db(self) -> None:
         try:
             from src.db.models import UserSetting
 
@@ -65,10 +66,10 @@ class PortfolioAllocator:
         except Exception as e:
             logger.warning("Failed to load risk profile from DB: %s", e)
 
-    def _weights(self) -> dict:
+    def _weights(self) -> dict[str, Any]:
         return self.PROFILES.get(self.profile, self.PROFILES["balanced"])
 
-    def _allocate_from_data(self, capital: float, existing: list[dict], instruments_data: list[dict], db) -> dict:
+    def _allocate_from_data(self, capital: float, existing: list[dict[str, Any]], instruments_data: list[dict[str, Any]], db: Any) -> dict[str, Any]:
         plan = {}
         total_allocated = 0.0
         sector_allocation: dict[str, float] = {}
@@ -151,7 +152,7 @@ class PortfolioAllocator:
             "sector_allocation": sector_allocation,
         }
 
-    def allocate(self, capital: float, db=None) -> dict:
+    def allocate(self, capital: float, db: Any = None) -> dict[str, Any]:
         should_close = db is None
         if db is None:
             db = get_session()
@@ -163,7 +164,7 @@ class PortfolioAllocator:
             if should_close:
                 db.close()
 
-    def _get_current_portfolio(self, db) -> list[dict]:
+    def _get_current_portfolio(self, db: Any) -> list[dict[str, Any]]:
         from src.db.models import Portfolio as PortModel
 
         positions = db.query(PortModel).all()
@@ -183,7 +184,7 @@ class PortfolioAllocator:
             )
         return result
 
-    def _load_instruments(self, db) -> list[dict]:
+    def _load_instruments(self, db: Any) -> list[dict[str, Any]]:
         instruments = db.query(Instrument).all()
         result = []
         for inst in instruments:
@@ -203,7 +204,13 @@ class PortfolioAllocator:
             if divs and last_price and last_price > 0:
                 div_yield = sum(d.amount for d in divs) / last_price * 100
                 if div_yield > 25:
-                    logger.warning("Suspicious div yield %.1f%% for %s (divs=%s, price=%s), capping at 25%%", div_yield, inst.ticker, [d.amount for d in divs], last_price)
+                    logger.warning(
+                        "Suspicious div yield %.1f%% for %s (divs=%s, price=%s), capping at 25%%",
+                        div_yield,
+                        inst.ticker,
+                        [d.amount for d in divs],
+                        last_price,
+                    )
                     div_yield = 25.0
 
             result.append(
@@ -221,7 +228,7 @@ class PortfolioAllocator:
             )
         return result
 
-    def _filter_candidates_by_category(self, instruments: list[dict], category: str) -> list[dict]:
+    def _filter_candidates_by_category(self, instruments: list[dict[str, Any]], category: str) -> list[dict[str, Any]]:
         if category == "etf":
             return [i for i in instruments if i["type"] == "etf" and i["last_price"]]
         if category == "dividend":
@@ -234,17 +241,17 @@ class PortfolioAllocator:
 
     def _score_candidates_core(
         self,
-        candidates: list[dict],
+        candidates: list[dict[str, Any]],
         category: str,
         budget: float,
         existing_tickers: set[str],
         existing_tickers_list: list[str],
-        risk_fn,
-        penalty_fn,
-        dividend_fn,
-        volume_fn,
-        momentum_fn,
-    ) -> list[dict]:
+        risk_fn: Any,
+        penalty_fn: Any,
+        dividend_fn: Any,
+        volume_fn: Any,
+        momentum_fn: Any,
+    ) -> list[dict[str, Any]]:
         for c in candidates:
             score = 0.0
             reason_parts = []
@@ -320,12 +327,12 @@ class PortfolioAllocator:
 
     def _score_candidates(
         self,
-        instruments: list[dict],
+        instruments: list[dict[str, Any]],
         category: str,
         budget: float,
-        existing: list[dict],
-        db,
-    ) -> list[dict]:
+        existing: list[dict[str, Any]],
+        db: Any,
+    ) -> list[dict[str, Any]]:
         existing_tickers = set(e["ticker"] for e in existing)
         existing_tickers_list = list(existing_tickers)
         candidates = self._filter_candidates_by_category(instruments, category)
@@ -347,15 +354,9 @@ class PortfolioAllocator:
             momentum_fn=lambda c: self._momentum_score(c, db),
         )
 
-    def _upcoming_dividend_score(self, inst: dict, db) -> dict:
+    def _upcoming_dividend_score(self, inst: dict[str, Any], db: Any) -> dict[str, Any]:
         try:
-            divs = (
-                db.query(Dividend)
-                .filter_by(instrument_id=inst["id"])
-                .order_by(Dividend.date.desc())
-                .limit(2)
-                .all()
-            )
+            divs = db.query(Dividend).filter_by(instrument_id=inst["id"]).order_by(Dividend.date.desc()).limit(2).all()
             if not divs:
                 return {"bonus": 0.0, "reason": ""}
 
@@ -370,7 +371,13 @@ class PortfolioAllocator:
             if 0 < upcoming_in <= 90:
                 est_yield = div.amount / inst["last_price"] * 100 if inst.get("last_price") else 0
                 if est_yield > 25:
-                    logger.warning("Suspicious div yield %.1f%% for %s (amount=%.4f, price=%s)", est_yield, inst.get("ticker"), div.amount, inst.get("last_price"))
+                    logger.warning(
+                        "Suspicious div yield %.1f%% for %s (amount=%.4f, price=%s)",
+                        est_yield,
+                        inst.get("ticker"),
+                        div.amount,
+                        inst.get("last_price"),
+                    )
                 return {"bonus": 2.0, "reason": f"ожидаются дивиденды ~{div.amount:.0f} ₽/акц ({est_yield:.1f}%)"}
             if days_since <= 90:
                 return {"bonus": 0.5, "reason": "недавние дивиденды"}
@@ -379,7 +386,7 @@ class PortfolioAllocator:
             logger.warning("Dividend score failed for %s: %s", inst.get("ticker", "?"), e)
             return {"bonus": 0.0, "reason": ""}
 
-    def _volume_score(self, inst: dict, db) -> float:
+    def _volume_score(self, inst: dict[str, Any], db: Any) -> float:
         try:
             prices = db.query(Price).filter_by(instrument_id=inst["id"]).order_by(Price.date.desc()).limit(20).all()
             if not prices:
@@ -394,15 +401,9 @@ class PortfolioAllocator:
             logger.warning("Failed to get liquidity score", exc_info=True)
             return 0.0
 
-    def _momentum_score(self, inst: dict, db) -> dict:
+    def _momentum_score(self, inst: dict[str, Any], db: Any) -> dict[str, Any]:
         try:
-            prices = (
-                db.query(Price)
-                .filter_by(instrument_id=inst["id"])
-                .order_by(Price.date.desc())
-                .limit(21)
-                .all()
-            )
+            prices = db.query(Price).filter_by(instrument_id=inst["id"]).order_by(Price.date.desc()).limit(21).all()
             if not prices or len(prices) < 5:
                 return {"bonus": 0.0, "reason": ""}
 
@@ -438,7 +439,7 @@ class PortfolioAllocator:
             logger.warning("Momentum score failed for %s: %s", inst.get("ticker", "?"), e)
             return {"bonus": 0.0, "reason": ""}
 
-    def _calc_projected_yield(self, plan: dict, total: float) -> float:
+    def _calc_projected_yield(self, plan: dict[str, Any], total: float) -> float:
         monthly = 0.0
         for cat, data in plan.items():
             for item in data.get("items", []):
@@ -446,7 +447,7 @@ class PortfolioAllocator:
                 monthly += ann / 12
         return monthly
 
-    def _downtrend_excluded(self, ticker: str, db) -> bool:
+    def _downtrend_excluded(self, ticker: str, db: Any) -> bool:
         try:
             inst = db.query(Instrument).filter_by(ticker=ticker).first()
             if not inst:
@@ -469,7 +470,7 @@ class PortfolioAllocator:
         except Exception:
             return False
 
-    def recommend(self, capital: float = 0, db=None, exclude: set | None = None) -> list[dict]:
+    def recommend(self, capital: float = 0, db: Any = None, exclude: set[str] | None = None) -> list[dict[str, Any]]:
         self._load_profile_from_db()
         should_close = db is None
         if db is None:
@@ -504,7 +505,7 @@ class PortfolioAllocator:
             if should_close:
                 db.close()
 
-    async def allocate_async(self, capital: float, db: AsyncSession | None = None) -> dict:
+    async def allocate_async(self, capital: float, db: AsyncSession | None = None) -> dict[str, Any]:
         if db is not None:
             logger.warning("allocate_async: AsyncSession ignored, using sync session via run_in_executor")
         loop = asyncio.get_running_loop()

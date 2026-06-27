@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -69,7 +70,9 @@ class TechnicalAnalyzer:
         df["atr"] = tr.rolling(window=period).mean()
         return df
 
-    def _add_momentum_scores(self, df: pd.DataFrame, score: float, max_score: float, reasons: list) -> tuple[float, float]:
+    def _add_momentum_scores(
+        self, df: pd.DataFrame, score: float, max_score: float, reasons: list[str]
+    ) -> tuple[float, float]:
         latest = df.iloc[-1]
         close = latest.get("close")
 
@@ -111,7 +114,7 @@ class TechnicalAnalyzer:
 
         return score, max_score
 
-    def generate_signal(self, df: pd.DataFrame) -> dict:
+    def generate_signal(self, df: pd.DataFrame) -> dict[str, Any]:
         if df.empty or len(df) < 50:
             return {"action": "NEUTRAL", "confidence": 0.0, "reasons": ["недостаточно данных"]}
 

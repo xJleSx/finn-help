@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.analysis.whatif import _find_correlated, whatif_macro, whatif_scenario
 
 
@@ -87,7 +85,9 @@ class TestFindCorrelated:
         inst = MagicMock()
         inst.id = 1
         db.query.return_value.filter_by.return_value.first.return_value = inst
-        db.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = [MagicMock() for _ in range(10)]
+        db.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = [
+            MagicMock() for _ in range(10)
+        ]
         assert _find_correlated(db, "SBER") == []
 
     def test_returns_related_tickers(self):
@@ -107,7 +107,8 @@ class TestFindCorrelated:
             p.close = 110.0 + i * 0.5
             other_prices.append(p)
         db.query.return_value.filter_by.return_value.order_by.return_value.all.side_effect = [
-            ticker_prices, other_prices
+            ticker_prices,
+            other_prices,
         ]
         other = MagicMock()
         other.id = 2

@@ -34,23 +34,23 @@ class TBankClient:
         self._raw_client: Optional[AsyncClient] = None
 
     def _target(self) -> str:
-        return INVEST_GRPC_API_SANDBOX if self._use_sandbox else INVEST_GRPC_API
+        return str(INVEST_GRPC_API_SANDBOX if self._use_sandbox else INVEST_GRPC_API)
 
     async def __aenter__(self) -> "TBankClient":
         self._raw_client = AsyncClient(self._token, target=self._target())
-        self._client = await self._raw_client.__aenter__()  # type: ignore[assignment]
+        self._client = await self._raw_client.__aenter__()
         return self
 
     async def __aexit__(self, *args: object) -> None:
         if self._raw_client:
-            await self._raw_client.__aexit__(*args)  # type: ignore[no-untyped-call]
+            await self._raw_client.__aexit__(*args)
             self._client = None
             self._raw_client = None
 
     async def get_accounts(self) -> list[dict[str, object]]:
         if not self._client:
             raise RuntimeError("Client not initialized. Use 'async with'")
-        resp = await self._client.users.get_accounts()  # type: ignore[attr-defined]
+        resp = await self._client.users.get_accounts()
         return [
             {
                 "id": a.id,
@@ -65,7 +65,7 @@ class TBankClient:
     async def get_portfolio(self, account_id: str) -> list[dict[str, object]]:
         if not self._client:
             raise RuntimeError("Client not initialized")
-        resp = await self._client.operations.get_portfolio(account_id=account_id)  # type: ignore[attr-defined]
+        resp = await self._client.operations.get_portfolio(account_id=account_id)
         allowed_types = {
             InstrumentType.INSTRUMENT_TYPE_SHARE,
             InstrumentType.INSTRUMENT_TYPE_BOND,
@@ -92,7 +92,7 @@ class TBankClient:
     async def get_account_balance(self, account_id: str) -> float:
         if not self._client:
             raise RuntimeError("Client not initialized")
-        resp = await self._client.operations.get_portfolio(account_id=account_id)  # type: ignore[attr-defined]
+        resp = await self._client.operations.get_portfolio(account_id=account_id)
         total = 0.0
         for p in resp.positions:
             if p.instrument_type == "currency":
@@ -116,7 +116,7 @@ class TBankClient:
         }
         ci = interval_map.get(interval, CandleInterval.CANDLE_INTERVAL_HOUR)
         now = datetime.now(timezone.utc)
-        resp = await self._client.market_data.get_candles(  # type: ignore[attr-defined]
+        resp = await self._client.market_data.get_candles(
             figi=figi,
             from_=now - timedelta(days=days),
             to=now,
@@ -151,7 +151,7 @@ class TBankClient:
         if price is not None:
             price_quotation = self._to_quotation(price)
 
-        resp = await self._client.orders.post_order(  # type: ignore[attr-defined]
+        resp = await self._client.orders.post_order(
             figi=figi,
             quantity=quantity,
             direction=direction_enum,
@@ -180,21 +180,21 @@ class TBankClient:
         req.amount.units = int(amount)
         req.amount.nano = int(round((amount - int(amount)) * 1e9))
         req.amount.currency = currency
-        resp = await self._client.sandbox.stub.SandboxPayIn(  # type: ignore[attr-defined]
-            request=req, metadata=self._client.sandbox.metadata  # type: ignore[attr-defined]
+        resp = await self._client.sandbox.stub.SandboxPayIn(
+            request=req, metadata=self._client.sandbox.metadata
         )
         return {"units": resp.balance.units, "nano": resp.balance.nano, "currency": resp.balance.currency}
 
     async def cancel_order(self, account_id: str, order_id: str) -> bool:
         if not self._client:
             raise RuntimeError("Client not initialized")
-        resp = await self._client.orders.cancel_order(account_id=account_id, order_id=order_id)  # type: ignore[attr-defined]
+        resp = await self._client.orders.cancel_order(account_id=account_id, order_id=order_id)
         return resp.time is not None
 
     async def get_orderbook(self, figi: str, depth: int = 10) -> Optional[dict[str, object]]:
         if not self._client:
             raise RuntimeError("Client not initialized")
-        resp = await self._client.market_data.get_order_book(figi=figi, depth=depth)  # type: ignore[attr-defined]
+        resp = await self._client.market_data.get_order_book(figi=figi, depth=depth)
         return {
             "figi": resp.figi,
             "bids": [{"price": self._money(b.price), "quantity": b.quantity} for b in resp.bids],
@@ -211,7 +211,7 @@ class TBankClient:
             "currency": InstrumentType.INSTRUMENT_TYPE_CURRENCY,
         }
         it = type_map.get(instrument_type, InstrumentType.INSTRUMENT_TYPE_SHARE)
-        resp = await self._client.instruments.shares() if it == InstrumentType.INSTRUMENT_TYPE_SHARE else await self._client.instruments.instruments(instrument_type=it)  # type: ignore[attr-defined]
+        resp = await self._client.instruments.shares() if it == InstrumentType.INSTRUMENT_TYPE_SHARE else await self._client.instruments.instruments(instrument_type=it)
         return [
             {
                 "figi": s.figi,

@@ -17,8 +17,26 @@ class TestPortfolioCSV:
 
     def test_generate_with_positions(self):
         positions = [
-            {"ticker": "SBER", "name": "Сбер", "quantity": 100, "avg_price": 250, "current_price": 280, "value": 28000, "allocation_pct": 50.0, "profit_pct": 12.0},
-            {"ticker": "GAZP", "name": "Газпром", "quantity": 50, "avg_price": 150, "current_price": 170, "value": 8500, "allocation_pct": 30.0, "profit_pct": 13.3},
+            {
+                "ticker": "SBER",
+                "name": "Сбер",
+                "quantity": 100,
+                "avg_price": 250,
+                "current_price": 280,
+                "value": 28000,
+                "allocation_pct": 50.0,
+                "profit_pct": 12.0,
+            },
+            {
+                "ticker": "GAZP",
+                "name": "Газпром",
+                "quantity": 50,
+                "avg_price": 150,
+                "current_price": 170,
+                "value": 8500,
+                "allocation_pct": 30.0,
+                "profit_pct": 13.3,
+            },
         ]
         result = generate_portfolio_csv(positions)
         assert "SBER" in result
@@ -34,7 +52,13 @@ class TestSignalsCSV:
 
     def test_generate_with_signals(self):
         signals = [
-            {"ticker": "SBER", "action": "BUY", "confidence": 0.85, "weighted_score": 0.7, "reasons": ["RSI oversold", "MACD crossover"]},
+            {
+                "ticker": "SBER",
+                "action": "BUY",
+                "confidence": 0.85,
+                "weighted_score": 0.7,
+                "reasons": ["RSI oversold", "MACD crossover"],
+            },
         ]
         result = generate_signals_csv(signals)
         assert "SBER" in result
@@ -44,7 +68,13 @@ class TestSignalsCSV:
 
 class TestAnalysisCSV:
     def test_generate(self):
-        signal = {"action": "BUY", "confidence": 0.9, "weighted_score": 0.75, "max_portfolio_pct": 15, "reasons": ["Strong trend", "Volume spike"]}
+        signal = {
+            "action": "BUY",
+            "confidence": 0.9,
+            "weighted_score": 0.75,
+            "max_portfolio_pct": 15,
+            "reasons": ["Strong trend", "Volume spike"],
+        }
         prices = [{"date": "2024-01-01", "close": 250.0}, {"date": "2024-01-02", "close": 255.0}]
         result = generate_analysis_csv("SBER", signal, prices)
         assert "SBER" in result

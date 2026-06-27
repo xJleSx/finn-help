@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from src.db.connection import get_session
 from src.db.models import Order as OrderModel
@@ -9,20 +9,24 @@ logger = logging.getLogger(__name__)
 
 class PositionTracker:
     def __init__(self) -> None:
-        self._positions: dict[str, dict[str, object]] = {}
+        self._positions: dict[str, dict[str, Any]] = {}
         self._restore_from_db()
 
     def _restore_from_db(self) -> None:
         db = get_session()
         try:
-            filled = db.query(OrderModel).filter(
-                OrderModel.status.in_(["filled", "partial"]),
-                OrderModel.direction == "BUY",
-            ).all()
+            filled = (
+                db.query(OrderModel)
+                .filter(
+                    OrderModel.status.in_(["filled", "partial"]),
+                    OrderModel.direction == "BUY",
+                )
+                .all()
+            )
             for o in filled:
-                self._positions[o.ticker] = {
-                    "shares": o.quantity or 0,
-                    "avg_price": o.price or 0.0,
+                self._positions[str(o.ticker)] = {
+                    "shares": int(o.quantity or 0),
+                    "avg_price": float(o.price or 0.0),
                     "sl": o.stop_loss,
                     "tp": o.take_profit,
                 }
@@ -36,11 +40,12 @@ class PositionTracker:
             self._positions[ticker] = {"shares": 0, "avg_price": 0.0, "sl": None, "tp": None}
         pos = self._positions[ticker]
         if direction == "BUY":
-            total_cost = pos["avg_price"] * pos["shares"] + price * quantity
-            pos["shares"] += quantity
-            pos["avg_price"] = total_cost / pos["shares"] if pos["shares"] > 0 else 0
+            total_cost = float(pos["avg_price"]) * int(pos["shares"]) + price * quantity
+            pos["shares"] = int(pos["shares"]) + quantity
+            shares = int(pos["shares"])
+            pos["avg_price"] = total_cost / shares if shares > 0 else 0
         elif direction == "SELL":
-            pos["shares"] = max(0, pos["shares"] - quantity)
+            pos["shares"] = max(0, int(pos["shares"]) - quantity)
             if pos["shares"] == 0:
                 pos["avg_price"] = 0.0
                 self._positions.pop(ticker, None)
@@ -48,9 +53,9 @@ class PositionTracker:
     def set_sl_tp(self, ticker: str, sl_pct: Optional[float] = None, tp_pct: Optional[float] = None) -> None:
         if ticker in self._positions:
             if sl_pct is not None:
-                self._positions[ticker]["sl"] = self._positions[ticker]["avg_price"] * (1 - abs(sl_pct))
+                self._positions[ticker]["sl"] = float(self._positions[ticker]["avg_price"]) * (1 - abs(sl_pct))
             if tp_pct is not None:
-                self._positions[ticker]["tp"] = self._positions[ticker]["avg_price"] * (1 + abs(tp_pct))
+                self._positions[ticker]["tp"] = float(self._positions[ticker]["avg_price"]) * (1 + abs(tp_pct))
             self._persist_sl_tp(ticker)
 
     def _persist_sl_tp(self, ticker: str) -> None:
@@ -59,13 +64,17 @@ class PositionTracker:
             return
         db = get_session()
         try:
-            orders = db.query(OrderModel).filter(
-                OrderModel.ticker == ticker,
-                OrderModel.status.in_(["filled", "partial"]),
-            ).all()
+            orders = (
+                db.query(OrderModel)
+                .filter(
+                    OrderModel.ticker == ticker,
+                    OrderModel.status.in_(["filled", "partial"]),
+                )
+                .all()
+            )
             for o in orders:
-                o.stop_loss = pos.get("sl")
-                o.take_profit = pos.get("tp")
+                o.stop_loss = pos.get("sl")  # type: ignore[assignment]
+                o.take_profit = pos.get("tp")  # type: ignore[assignment]
             db.commit()
         except Exception:
             db.rollback()
@@ -80,11 +89,11 @@ class PositionTracker:
         sl = pos.get("sl")
         tp = pos.get("tp")
 
-        if sl and current_price <= sl:
-            logger.warning("STOP-LOSS TRIGGERED %s at %.2f (SL=%.2f)", ticker, current_price, sl)
+        if sl is not None and current_price <= float(sl):
+            logger.warning("STOP-LOSS TRIGGERED %s at %.2f (SL=%.2f)", ticker, current_price, float(sl))
             return "stop_loss"
-        if tp and current_price >= tp:
-            logger.info("TAKE-PROFIT TRIGGERED %s at %.2f (TP=%.2f)", ticker, current_price, tp)
+        if tp is not None and current_price >= float(tp):
+            logger.info("TAKE-PROFIT TRIGGERED %s at %.2f (TP=%.2f)", ticker, current_price, float(tp))
             return "take_profit"
         return None
 
@@ -102,7 +111,7 @@ class PositionTracker:
         await _execute_order(
             ticker=ticker,
             direction="SELL",
-            quantity=pos["shares"],
+            quantity=int(pos["shares"]),
             price=current_price,
             reason=f"{trigger} at {current_price:.2f}",
         )

@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.analysis.feature_store import (
-    _MemoryCache,
     _mem_key,
+    _MemoryCache,
     cached_or_compute,
     clear_memory_cache,
     clear_stale,

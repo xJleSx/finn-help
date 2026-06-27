@@ -51,9 +51,7 @@ class SocialAggregator:
         finally:
             db.close()
 
-    def get_all_ticker_sentiments(
-        self, tickers: list[str], days: int = 7
-    ) -> dict[str, dict[str, Any]]:
+    def get_all_ticker_sentiments(self, tickers: list[str], days: int = 7) -> dict[str, dict[str, Any]]:
         if not tickers:
             return {}
         db = get_session()
@@ -85,9 +83,7 @@ class SocialAggregator:
         db = get_session()
         try:
             cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-            rows: list[SentimentSignal] = (
-                db.query(SentimentSignal).filter(SentimentSignal.created_at >= cutoff).all()
-            )
+            rows: list[SentimentSignal] = db.query(SentimentSignal).filter(SentimentSignal.created_at >= cutoff).all()
             if not rows:
                 return []
 
@@ -111,11 +107,13 @@ class SocialAggregator:
                     avg_s = sum(s * w for s, w in zip(scores_list, w_list)) / total_w
                 else:
                     avg_s = mean(scores_list) if scores_list else 0.0
-                overview.append({
-                    "ticker": None if ticker == "__market__" else ticker,
-                    "avg_score": round(max(-1.0, min(1.0, avg_s)), 4),
-                    "volume": len(scores_list),
-                })
+                overview.append(
+                    {
+                        "ticker": None if ticker == "__market__" else ticker,
+                        "avg_score": round(max(-1.0, min(1.0, avg_s)), 4),
+                        "volume": len(scores_list),
+                    }
+                )
             return overview
         finally:
             db.close()

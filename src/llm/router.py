@@ -99,10 +99,11 @@ class LLMRouter:
             pass
         return "balanced"
 
-    def _market_context_block(self, db=None) -> str:
+    def _market_context_block(self, db: Any = None) -> str:
         try:
             if db is None:
                 from src.db.connection import get_session
+
                 db = get_session()
                 should_close = True
             else:
@@ -119,9 +120,12 @@ class LLMRouter:
                         parts.append(f"{k}={v}")
                 lines.append(f"Макро: {', '.join(parts)}")
 
-            from src.db.models import Instrument, Price, Signal as SignalModel
             from datetime import date
+
             from sqlalchemy import func
+
+            from src.db.models import Instrument, Price
+            from src.db.models import Signal as SignalModel
 
             today_signals = (
                 db.query(SignalModel)
@@ -138,7 +142,13 @@ class LLMRouter:
                     top.append(f"{ticker}: {s.action} ({s.confidence:.0%})")
                 lines.append(f"Топ-сигналы сегодня: {'; '.join(top)}")
 
-            bmk = db.query(Price).join(Instrument).filter(Instrument.ticker == "IMOEX").order_by(Price.date.desc()).first()
+            bmk = (
+                db.query(Price)
+                .join(Instrument)
+                .filter(Instrument.ticker == "IMOEX")
+                .order_by(Price.date.desc())
+                .first()
+            )
             if bmk:
                 lines.append(f"IMOEX: {bmk.close:.0f}")
 
@@ -162,6 +172,14 @@ class LLMRouter:
 
         db = get_session()
         try:
+            # Auto-detect ticker in question if no ticker_context provided
+            if not ticker_context:
+                found_ticker = self._detect_ticker(db, question)
+                if found_ticker:
+                    from src.analysis.service import analysis_service
+
+                    ticker_context = analysis_service.load_ticker_context(db, found_ticker)
+
             market_ctx = self._market_context_block(db)
         finally:
             db.close()
@@ -181,6 +199,21 @@ class LLMRouter:
                 logger.warning(f"Groq question failed: {e}, trying local...")
 
         return await self._ollama_question(system_prompt, user_prompt)
+
+    @staticmethod
+    def _detect_ticker(db: Any, text: str) -> str | None:
+        """Extract likely MOEX ticker from question text."""
+        from src.db.models import Instrument
+
+        candidates = re.findall(r"\b[A-Z]{4,5}\b", text.upper())
+        # Filter against known instruments in DB
+        known = set()
+        for row in db.query(Instrument.ticker).all():
+            known.add(row[0].upper() if row[0] else "")
+        for c in candidates:
+            if c in known:
+                return cast(str, c)
+        return None
 
     async def _groq_question(self, system: str, user: str) -> str:
         from groq import AsyncGroq
@@ -314,7 +347,7 @@ class LLMRouter:
             logger.debug("LLM report output not valid JSON, using fallback: %.100s", raw)
             return self._fallback_report(signal)
 
-    def _render_report(self, parsed: dict) -> str:
+    def _render_report(self, parsed: dict[str, Any]) -> str:
         lines: list[str] = []
         company_profile = parsed.get("company_profile", "")
         financial_highlights = parsed.get("financial_highlights", [])
@@ -389,8 +422,10 @@ class LLMRouter:
         if portfolio_advice or action:
             if action:
                 action_labels = {
-                    "BUY": "К покупке", "SELL": "К продаже",
-                    "HOLD": "Держать", "CAUTIOUS_BUY": "Осторожная покупка",
+                    "BUY": "К покупке",
+                    "SELL": "К продаже",
+                    "HOLD": "Держать",
+                    "CAUTIOUS_BUY": "Осторожная покупка",
                     "WATCH": "Наблюдение",
                 }
                 label = action_labels.get(action, action)
@@ -426,7 +461,7 @@ class LLMRouter:
             logger.debug("LLM output not valid JSON, using as-is: %.100s", raw)
             return self._validate_text(raw, signal)
 
-    def _render_json(self, parsed: dict) -> str:
+    def _render_json(self, parsed: dict[str, Any]) -> str:
         summary = parsed.get("summary", "")
         key_facts = parsed.get("key_facts", [])
         risks = parsed.get("risks", [])
@@ -517,7 +552,8 @@ class LLMRouter:
             text += f"• {r}\n"
         text += f"\n💡 Рекомендуемая доля в портфеле: до {max_pct}%"
 
-        ml = signal.get("components", {}).get("ml", {}) if isinstance(signal.get("components"), dict) else {}
+        components = signal.get("components", {})
+        ml = components.get("ml", {}) if isinstance(components, dict) else {}
         if ml and isinstance(ml, dict):
             ml_change = ml.get("change_pct")
             ml_tp = ml.get("target_price")

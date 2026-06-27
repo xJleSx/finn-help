@@ -1,5 +1,6 @@
 import logging
 import re
+from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -18,43 +19,74 @@ ACTION_EMOJI = {
 }
 
 RUSSIAN_NAMES: dict[str, str] = {
-    "сбер": "SBER", "сбера": "SBER", "сбербанк": "SBER",
-    "газпром": "GAZP", "газпрома": "GAZP",
-    "лукойл": "LKOH", "лукойла": "LKOH",
+    "сбер": "SBER",
+    "сбера": "SBER",
+    "сбербанк": "SBER",
+    "газпром": "GAZP",
+    "газпрома": "GAZP",
+    "лукойл": "LKOH",
+    "лукойла": "LKOH",
     "втб": "VTBR",
-    "яндекс": "YNDX", "yandex": "YNDX",
+    "яндекс": "YNDX",
+    "yandex": "YNDX",
     "нлмк": "NLMK",
-    "магнит": "MGNT", "магнита": "MGNT",
+    "магнит": "MGNT",
+    "магнита": "MGNT",
     "мтс": "MTSS",
-    "татнефть": "TATN", "татнефти": "TATN",
+    "татнефть": "TATN",
+    "татнефти": "TATN",
     "ростелеком": "RTKM",
     "фосагро": "PHOR",
-    "афк система": "AFKS", "система": "AFKS",
+    "афк система": "AFKS",
+    "система": "AFKS",
     "аэрофлот": "AFLT",
-    "роснефть": "ROSN", "роснефти": "ROSN",
-    "норникель": "GMKN", "норильский никель": "GMKN",
+    "роснефть": "ROSN",
+    "роснефти": "ROSN",
+    "норникель": "GMKN",
+    "норильский никель": "GMKN",
     "полюс": "PLZL",
     "алроса": "ALRS",
     "северсталь": "CHMF",
     "магнитогорский": "MAGN",
     "интер рао": "IRAO",
     "ozon": "OZON",
-    "тинькофф": "TCSG", "ткс": "TCSG", "tcsg": "TCSG",
+    "тинькофф": "TCSG",
+    "ткс": "TCSG",
+    "tcsg": "TCSG",
     "озон": "OZON",
-    "московская биржа": "MOEX", "биржа": "MOEX", "moex": "MOEX",
+    "московская биржа": "MOEX",
+    "биржа": "MOEX",
+    "moex": "MOEX",
     "распадская": "RASP",
     "транснефть": "TRNFP",
-    "преф сбер": "SBERP", "преф татнефть": "TATNP", "преф": "SNGSP",
-    "самараэнерго": "SMLT", "юнипро": "UPRO",
-    "всм": "VSMO", "всмпо": "VSMO",
-    "полиметалл": "POLY", "русал": "RUAL",
-    "пик": "PIKK", "пикк": "PIKK", "лср": "LSRG", "лсрг": "LSRG",
-    "мосэнерго": "MSNG", "фск": "FEES", "федеральная сетевая": "FEES",
-    "русгидро": "HYDR", "гидро": "HYDR",
-    "башнефть": "BANE", "преф башнефть": "BANEP",
-    "селенга": "SELG", "трубная": "TRNR",
-    "five": "FIVE", "пятерочка": "FIVE", "x5": "FIVE", "икс5": "FIVE",
-    "fix": "FIX", "фикс": "FIX",
+    "преф сбер": "SBERP",
+    "преф татнефть": "TATNP",
+    "преф": "SNGSP",
+    "самараэнерго": "SMLT",
+    "юнипро": "UPRO",
+    "всм": "VSMO",
+    "всмпо": "VSMO",
+    "полиметалл": "POLY",
+    "русал": "RUAL",
+    "пик": "PIKK",
+    "пикк": "PIKK",
+    "лср": "LSRG",
+    "лсрг": "LSRG",
+    "мосэнерго": "MSNG",
+    "фск": "FEES",
+    "федеральная сетевая": "FEES",
+    "русгидро": "HYDR",
+    "гидро": "HYDR",
+    "башнефть": "BANE",
+    "преф башнефть": "BANEP",
+    "селенга": "SELG",
+    "трубная": "TRNR",
+    "five": "FIVE",
+    "пятерочка": "FIVE",
+    "x5": "FIVE",
+    "икс5": "FIVE",
+    "fix": "FIX",
+    "фикс": "FIX",
 }
 
 
@@ -91,9 +123,7 @@ def build_analyze_keyboard(ticker: str) -> InlineKeyboardMarkup:
 
 
 def build_top_keyboard() -> InlineKeyboardMarkup:
-    keyboard = [
-        [InlineKeyboardButton("\U0001f4b0 Распределить 100 000 ₽", callback_data="action:portfolio")]
-    ]
+    keyboard = [[InlineKeyboardButton("\U0001f4b0 Распределить 100 000 ₽", callback_data="action:portfolio")]]
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -126,11 +156,26 @@ def _find_excluded_tickers(text: str) -> set[str]:
     text_lower = text.lower()
     exclude: set[str] = set()
     exclude_keywords = [
-        "без ", "кроме ", "недоступ", "не учитывай", "исключ",
-        "убери ", "не рассматривай", "без учета", "без участия",
-        "нет ", "нету ", "отсутств", "не им", "пока нет",
-        "ещё нет", "нет в наличии", "не интересу", "не нужно",
-        "не хочу", "не рассматрива",
+        "без ",
+        "кроме ",
+        "недоступ",
+        "не учитывай",
+        "исключ",
+        "убери ",
+        "не рассматривай",
+        "без учета",
+        "без участия",
+        "нет ",
+        "нету ",
+        "отсутств",
+        "не им",
+        "пока нет",
+        "ещё нет",
+        "нет в наличии",
+        "не интересу",
+        "не нужно",
+        "не хочу",
+        "не рассматрива",
     ]
     has_exclusion = any(k in text_lower for k in exclude_keywords)
     if not has_exclusion:
@@ -140,7 +185,18 @@ def _find_excluded_tickers(text: str) -> set[str]:
         t_lower = ticker.lower()
         if any(
             re.search(rf"\b{kw}\s*{re.escape(t_lower)}\b", text_lower)
-            for kw in ["без", "кроме", "нет", "нету", "недоступ", "исключ", "убери", "отсутств", "не интересу", "не нужно"]
+            for kw in [
+                "без",
+                "кроме",
+                "нет",
+                "нету",
+                "недоступ",
+                "исключ",
+                "убери",
+                "отсутств",
+                "не интересу",
+                "не нужно",
+            ]
         ):
             exclude.add(ticker)
         elif any(
@@ -234,7 +290,7 @@ def _simplify_reasons(reasons: list[str]) -> str:
     return "\n".join("• " + s for s in simple[:4])
 
 
-def _format_allocation_plan(picks: list[dict], capital: float) -> str:
+def _format_allocation_plan(picks: list[dict[str, Any]], capital: float) -> str:
     candidates = []
     for p in picks:
         score = p.get("score", 0)
@@ -251,7 +307,7 @@ def _format_allocation_plan(picks: list[dict], capital: float) -> str:
         max_positions = 2
     elif capital < 5000:
         max_positions = 4
-    used: list[dict] = []
+    used: list[dict[str, Any]] = []
     for p in candidates:
         if len(used) >= max_positions:
             break
@@ -309,7 +365,7 @@ def _chunk_text(text: str, max_len: int) -> list[str]:
     return [text[i : i + max_len] for i in range(0, len(text), max_len)]
 
 
-def get_portfolio_positions(db) -> list[dict]:
+def get_portfolio_positions(db: Any) -> list[dict[str, Any]]:
     positions = db.query(PortModel).all()
     rows = []
     for p in positions:
@@ -322,16 +378,20 @@ def get_portfolio_positions(db) -> list[dict]:
             n = inst.nominal or 1000
             last_price = last_price * n / 100
         current_value = float(last_price * p.quantity) if last_price and p.quantity else 0
-        profit_pct = round(((last_price / p.avg_price) - 1) * 100, 2) if last_price and p.avg_price and p.avg_price > 0 else 0
-        rows.append({
-            "ticker": inst.ticker if inst else "?",
-            "name": inst.full_name if inst else "",
-            "sector": inst.sector or "Прочее",
-            "quantity": float(p.quantity),
-            "avg_price": float(p.avg_price) if p.avg_price else 0,
-            "current_price": float(last_price) if last_price else 0,
-            "value": current_value,
-            "allocation_pct": 0,
-            "profit_pct": profit_pct,
-        })
+        profit_pct = (
+            round(((last_price / p.avg_price) - 1) * 100, 2) if last_price and p.avg_price and p.avg_price > 0 else 0
+        )
+        rows.append(
+            {
+                "ticker": inst.ticker if inst else "?",
+                "name": inst.full_name if inst else "",
+                "sector": inst.sector or "Прочее",
+                "quantity": float(p.quantity),
+                "avg_price": float(p.avg_price) if p.avg_price else 0,
+                "current_price": float(last_price) if last_price else 0,
+                "value": current_value,
+                "allocation_pct": 0,
+                "profit_pct": profit_pct,
+            }
+        )
     return rows
