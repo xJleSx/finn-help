@@ -366,7 +366,8 @@ class TestCheckNews:
         mock_db = MagicMock()
         inst = MagicMock(id=1)
         mock_db.query.return_value.filter_by.return_value.first.return_value = inst
-        mock_db.query.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+        mock_db.query.return_value.join.return_value.filter.return_value\
+            .order_by.return_value.limit.return_value.all.return_value = []
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             ok, reason = await loop._check_news("SBER")
@@ -383,7 +384,8 @@ class TestCheckNews:
             MagicMock(sentiment_weighted=0.3, sentiment_score=0.2),
         ]
         mock_db.query.return_value.filter_by.return_value.first.return_value = inst
-        mock_db.query.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = news
+        mock_db.query.return_value.join.return_value.filter.return_value\
+            .order_by.return_value.limit.return_value.all.return_value = news
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             ok, reason = await loop._check_news("SBER")
@@ -399,7 +401,8 @@ class TestCheckNews:
             MagicMock(sentiment_weighted=-0.6, sentiment_score=-0.5),
         ]
         mock_db.query.return_value.filter_by.return_value.first.return_value = inst
-        mock_db.query.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = news
+        mock_db.query.return_value.join.return_value.filter.return_value\
+            .order_by.return_value.limit.return_value.all.return_value = news
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             ok, reason = await loop._check_news("SBER")
@@ -497,7 +500,6 @@ class TestCheckDailyPnl:
 
         price_row1 = (250.0,)
         mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = price_row1
-        price_row2 = None
         mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.side_effect = [price_row1, None]
 
         with (
@@ -902,7 +904,7 @@ class TestRunExecutionLoop:
         with (
             patch("src.trading.execution.loop.market_hours_check", return_value=True),
             patch("src.trading.execution.loop._check_daily_pnl") as mock_pnl,
-            patch("src.trading.execution.loop.async_is_kill_switch_active", return_value=False),
+            patch("src.trading.execution.loop.async_is_kill_switch_active"),
             patch("src.trading.execution.loop._process_signals") as mock_signals,
             patch("src.trading.execution.loop._check_stop_losses") as mock_sl,
             patch("src.trading.execution.loop._rebalance_portfolio") as mock_rebalance,
@@ -971,7 +973,7 @@ class TestRunExecutionLoop:
             patch("src.trading.execution.loop._check_daily_pnl") as mock_pnl,
             patch("src.trading.execution.loop._process_signals") as mock_signals,
             patch("src.trading.execution.loop.asyncio.sleep", side_effect=fake_sleep),
-            patch("src.trading.execution.loop.settings") as mock_settings,
+            patch("src.trading.execution.loop.settings"),
             patch("src.trading.execution.loop._load_daily_counters"),
             patch("src.trading.execution.loop._load_risk_params"),
             patch("src.trading.execution.loop.async_start_day"),
@@ -1029,9 +1031,9 @@ class TestRunExecutionLoop:
         with (
             patch("src.trading.execution.loop.market_hours_check", return_value=True),
             patch("src.trading.execution.loop._check_daily_pnl") as mock_pnl,
-            patch("src.trading.execution.loop.async_is_kill_switch_active") as mock_ks,
-            patch("src.trading.execution.loop._process_signals") as mock_signals,
-            patch("src.trading.execution.loop._check_stop_losses") as mock_sl,
+            patch("src.trading.execution.loop.async_is_kill_switch_active"),
+            patch("src.trading.execution.loop._process_signals"),
+            patch("src.trading.execution.loop._check_stop_losses"),
             patch("src.trading.execution.loop.asyncio.sleep", side_effect=fake_sleep),
             patch("src.trading.execution.loop.datetime") as mock_dt,
             patch("src.trading.execution.loop.settings") as mock_settings,
@@ -1051,7 +1053,7 @@ class TestRunExecutionLoop:
             mock_reset.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_loop_exception_does_not_crash(self):
+    async def test_market_hours_exception_handling(self):
         import src.trading.execution.loop as loop
 
         async def fake_sleep(_):

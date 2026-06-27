@@ -26,3 +26,9 @@
 - `.env` — API keys (Groq, Tinkoff)
 - Python 3.13+
 - Node.js 22+
+
+## Rules for AI assistant
+- Commit messages: plain ASCII, no long dashes (--), no arrows (→, <-), no emoji
+- No AI-generated comments, signatures, or markers in code
+- No AI tags in commit messages or PR descriptions
+- Keep code clean of tool-specific artifacts

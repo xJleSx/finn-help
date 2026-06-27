@@ -42,7 +42,7 @@ class TestModelRegistry:
 
     def test_load_specific_version(self):
         v1 = save_model({"v": 1}, "ver_model", metrics={"acc": 0.8})
-        v2 = save_model({"v": 2}, "ver_model", metrics={"acc": 0.9})
+        save_model({"v": 2}, "ver_model", metrics={"acc": 0.9})
 
         loaded_v1 = load_model("ver_model", version=v1)
         assert loaded_v1["v"] == 1

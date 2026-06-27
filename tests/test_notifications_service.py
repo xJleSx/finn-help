@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.db.models import Dividend, GeoRiskScore, Portfolio, Subscription
-from src.db.connection import get_session
 from src.db.models import Signal as SignalModel
 from src.notifications import (
     DailySummaryNotification,
