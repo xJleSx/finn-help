@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
     jwt_secret: str = ""
+    jwt_expire_minutes: int = 15
+    password_min_length: int = 6
     tinkoff_token: str = ""
     tinkoff_sandbox: bool = True
     database_url: str = "postgresql://finn:finn@localhost:5432/finn"
@@ -49,6 +51,17 @@ class Settings(BaseSettings):
 
     moex_iss_url: str = "https://iss.moex.com/iss"
     cbr_url: str = "https://www.cbr.ru/scripts/XML_daily.asp"
+
+    ml_n_estimators: int = 50
+    ml_max_depth: int = 3
+    ml_learning_rate: float = 0.1
+    ml_lookahead: int = 5
+    ml_threshold: float = 0.03
+    ml_action_threshold: float = 0.55
+    ml_min_train_rows: int = 30
+    ml_min_predict_rows: int = 60
+    ml_oos_acc_min: float = 0.52
+    ml_gap_size: int = 20
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator, Optional
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -155,10 +155,17 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
 
 
 class RegisterBody(BaseModel):
-    username: str
+    username: str = Field(min_length=3, pattern=r"^[a-zA-Z0-9_]+$")
     password: str
     email: Optional[str] = None
     risk_profile: str = "balanced"
+
+    @field_validator("password")
+    @classmethod
+    def password_min_length(cls, v: str) -> str:
+        if len(v) < settings.password_min_length:
+            raise ValueError(f"Password must be at least {settings.password_min_length} characters")
+        return v
 
 
 @app.post("/api/auth/register", response_model=AuthTokenResponse)

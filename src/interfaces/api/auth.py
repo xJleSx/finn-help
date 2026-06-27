@@ -19,7 +19,6 @@ if not settings.jwt_secret:
     raise ValueError("JWT_SECRET is not set. Set it in .env or environment variables.")
 SECRET_KEY = settings.jwt_secret
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 15
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
@@ -33,7 +32,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_token(user_id: int, username: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
     return jwt.encode(
         {"sub": str(user_id), "username": username, "exp": expire},
         SECRET_KEY,
@@ -68,7 +67,7 @@ async def get_current_user(
         result = await db.execute(select(User).where(User.id == user_id, User.is_active))
         user = result.scalar_one_or_none()
         return user
-    except Exception:
+    except (JWTError, ValueError, TypeError):
         return None
 
 
