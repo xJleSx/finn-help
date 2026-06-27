@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -5,19 +6,39 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import cloudpickle  # type: ignore[import-untyped]
+
 logger = logging.getLogger(__name__)
 
-MODEL_DIR = Path(__file__).resolve().parents[2] / "data" / "models"
+_MODEL_DIR_ENV_OVERRIDE = None
+
+
+def _get_model_dir() -> Path:
+    if _MODEL_DIR_ENV_OVERRIDE:
+        return Path(_MODEL_DIR_ENV_OVERRIDE)
+    return Path(__file__).resolve().parents[2] / "data" / "models"
+
+
+MODEL_DIR = _get_model_dir()
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 REGISTRY_FILE = MODEL_DIR / "registry.json"
 
 
+def set_model_dir(path: str | Path) -> None:
+    global MODEL_DIR, REGISTRY_FILE, _MODEL_DIR_ENV_OVERRIDE  # noqa: PLW0603
+    _MODEL_DIR_ENV_OVERRIDE = str(path)
+    MODEL_DIR = Path(path)
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    REGISTRY_FILE = MODEL_DIR / "registry.json"
+
+
 def _load_registry() -> dict[str, Any]:
     if REGISTRY_FILE.exists():
         try:
-            return json.loads(REGISTRY_FILE.read_text())  # type: ignore[no-any-return]
-        except Exception:
+            return json.loads(REGISTRY_FILE.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load registry: %s", e)
             return {}
     return {}
 
@@ -31,8 +52,6 @@ def save_model(
     metrics: Optional[dict[str, Any]] = None,
     params: Optional[dict[str, Any]] = None,
 ) -> str:
-    import cloudpickle  # type: ignore[import-untyped]
-
     version = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     model_path = MODEL_DIR / f"{name}__{version}.pkl"
     meta = {
@@ -61,9 +80,16 @@ def save_model(
     return version
 
 
-def load_model(name: str, version: Optional[str] = None) -> Any:
-    import cloudpickle
+async def save_model_async(
+    model: Any, name: str,
+    metrics: Optional[dict[str, Any]] = None,
+    params: Optional[dict[str, Any]] = None,
+) -> str:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, save_model, model, name, metrics, params)
 
+
+def load_model(name: str, version: Optional[str] = None) -> Any:
     registry = _load_registry()
     if name not in registry:
         raise ValueError(f"Model '{name}' not found in registry")
@@ -92,6 +118,11 @@ def load_model(name: str, version: Optional[str] = None) -> Any:
 
     logger.info("Model %s version %s loaded (hash verified)", name, version)
     return model
+
+
+async def load_model_async(name: str, version: Optional[str] = None) -> Any:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, load_model, name, version)
 
 
 def list_models() -> list[dict[str, Any]]:
