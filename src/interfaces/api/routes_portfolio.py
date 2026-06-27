@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["portfolio"])
 
 
+class AllocateBody(BaseModel):
+    capital: float = 50000.0
+
+
 @router.get("/api/portfolio")
 async def get_portfolio(
     db: AsyncSession = Depends(get_db),
@@ -86,17 +90,17 @@ async def add_portfolio_position(
 
 @router.post("/api/portfolio/allocate")
 async def allocate_portfolio(
-    capital: float = 50000.0,
+    body: AllocateBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_user),
 ) -> Any:
     from src.portfolio.allocator import allocator
 
     try:
-        result = await allocator.allocate_async(capital, db=db)
+        result = await allocator.allocate_async(body.capital, db=db)
         return result
     except Exception as e:
-        logger.exception("Allocation failed for capital=%s", capital)
+        logger.exception("Allocation failed for capital=%s", body.capital)
         raise HTTPException(500, f"Allocation failed: {e}")
 
 
