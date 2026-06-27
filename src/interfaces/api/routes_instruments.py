@@ -13,6 +13,15 @@ from src.analysis.ml.price_targets import to_dict as trade_plan_to_dict
 from src.analysis.service import analysis_service
 from src.db.models import Indicator, Instrument, Price, Signal, User
 from src.interfaces.api.auth import get_current_user, get_db
+from src.interfaces.api.schemas import (
+    AdviceResponse,
+    AskResponse,
+    IndicatorData,
+    InstrumentDetail,
+    InstrumentListItem,
+    PriceData,
+    TradePlanResponse,
+)
 from src.llm.router import llm
 
 logger = logging.getLogger(__name__)
@@ -24,7 +33,7 @@ class AskBody(BaseModel):
     ticker_context: str = ""
 
 
-@router.get("/api/instruments")
+@router.get("/api/instruments", response_model=list[InstrumentListItem])
 async def list_instruments(
     type_filter: Optional[str] = Query(None, alias="type"),
     db: AsyncSession = Depends(get_db),
@@ -56,7 +65,7 @@ async def list_instruments(
     return output
 
 
-@router.get("/api/instruments/{ticker}")
+@router.get("/api/instruments/{ticker}", response_model=InstrumentDetail)
 async def get_instrument(ticker: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
     inst = result.scalar_one_or_none()
@@ -74,7 +83,7 @@ async def get_instrument(ticker: str, db: AsyncSession = Depends(get_db)) -> dic
     }
 
 
-@router.get("/api/instruments/{ticker}/prices")
+@router.get("/api/instruments/{ticker}/prices", response_model=list[PriceData])
 async def get_prices(
     ticker: str,
     days: int = Query(365, le=365 * 5),
@@ -103,7 +112,7 @@ async def get_prices(
     ]
 
 
-@router.get("/api/instruments/{ticker}/indicators")
+@router.get("/api/instruments/{ticker}/indicators", response_model=list[IndicatorData])
 async def get_indicators(
     ticker: str,
     days: int = Query(90),
@@ -173,7 +182,7 @@ async def get_signal(ticker: str, db: AsyncSession = Depends(get_db)) -> Any:
     return fused
 
 
-@router.get("/api/instruments/{ticker}/trade-plan")
+@router.get("/api/instruments/{ticker}/trade-plan", response_model=TradePlanResponse)
 async def get_trade_plan(
     ticker: str,
     profile: str = Query("balanced"),
@@ -231,7 +240,7 @@ async def get_trade_plan(
     }
 
 
-@router.get("/api/instruments/{ticker}/advice")
+@router.get("/api/instruments/{ticker}/advice", response_model=AdviceResponse)
 async def get_advice(
     ticker: str,
     db: AsyncSession = Depends(get_db),
@@ -242,7 +251,7 @@ async def get_advice(
     return {"signal": fused, "advice": advice, "user_id": user.id if user else None}
 
 
-@router.post("/api/ask")
+@router.post("/api/ask", response_model=AskResponse)
 async def ask_question(
     body: AskBody,
     db: AsyncSession = Depends(get_db),

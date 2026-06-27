@@ -27,6 +27,7 @@ from src.interfaces.api.auth import (
 from src.interfaces.api.routes_instruments import router as instruments_router
 from src.interfaces.api.routes_market import router as market_router
 from src.interfaces.api.routes_portfolio import router as portfolio_router
+from src.interfaces.api.schemas import AuthTokenResponse, HealthResponse, UserResponse
 from src.scheduler.service import run_forever
 from src.scheduler.service import stop as stop_scheduler
 
@@ -85,7 +86,7 @@ app.include_router(portfolio_router)
 app.include_router(market_router)
 
 
-@app.get("/api/health")
+@app.get("/api/health", response_model=HealthResponse)
 async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     healthy = True
     checks: dict[str, str] = {}
@@ -160,7 +161,7 @@ class RegisterBody(BaseModel):
     risk_profile: str = "balanced"
 
 
-@app.post("/api/auth/register")
+@app.post("/api/auth/register", response_model=AuthTokenResponse)
 @limiter.limit("5/minute")
 async def register(request: Request, body: RegisterBody, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(
@@ -186,7 +187,7 @@ class LoginBody(BaseModel):
     password: str
 
 
-@app.post("/api/auth/login")
+@app.post("/api/auth/login", response_model=AuthTokenResponse)
 @limiter.limit("10/minute")
 async def login(request: Request, body: LoginBody, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(select(User).where(User.username == body.username))
@@ -197,7 +198,7 @@ async def login(request: Request, body: LoginBody, db: AsyncSession = Depends(ge
     return {"access_token": token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
 
 
-@app.get("/api/auth/me")
+@app.get("/api/auth/me", response_model=UserResponse)
 async def get_me(user: User = Depends(require_user)) -> dict[str, Any]:
     return {
         "id": int(user.id),
