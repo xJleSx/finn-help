@@ -66,6 +66,45 @@ class TestXGBoostModel:
             assert -1.0 <= result["signal_score"] <= 1.0
             assert "probability" in result
 
+    def test_train_returns_bool(self, model):
+        df = _make_df(200)
+        result = model.train(df)
+        assert isinstance(result, bool)
+
+    def test_train_too_few_rows_returns_false(self, model):
+        df = _make_df(10)
+        result = model.train(df)
+        assert result is False
+
+    def test_score_returns_float(self, model):
+        df = _make_df(200)
+        model.train(df)
+        score = model.score(df)
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
+
+    def test_score_no_model_returns_zero(self, model):
+        df = _make_df(200)
+        score = model.score(df)
+        assert score == 0.0
+
+    def test_fit_creates_model(self, model):
+        rng = np.random.default_rng(42)
+        x = rng.normal(0, 1, (100, 5))
+        y = (rng.normal(0, 1, 100) > 0).astype(int)
+        model.fit(x, y)
+        assert model._model is not None
+
+    def test_save_without_model_raises(self, model):
+        import pytest
+        with pytest.raises(ValueError, match="No trained model"):
+            model.save()
+
+    def test_load_nonexistent_raises(self, model):
+        import pytest
+        with pytest.raises((ValueError, FileNotFoundError)):
+            model.load(version="nonexistent")
+
 
 class TestLightGBMModel:
     @pytest.fixture
@@ -85,6 +124,25 @@ class TestLightGBMModel:
         df = _make_df(5)
         result = model.predict(df)
         assert result["action"] == "NEUTRAL"
+
+    def test_train_returns_bool(self, model):
+        df = _make_df(200)
+        result = model.train(df)
+        assert isinstance(result, bool)
+
+    def test_score_returns_float(self, model):
+        df = _make_df(200)
+        model.train(df)
+        score = model.score(df)
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
+
+    def test_fit_creates_model(self, model):
+        rng = np.random.default_rng(42)
+        x = rng.normal(0, 1, (100, 5))
+        y = (rng.normal(0, 1, 100) > 0).astype(int)
+        model.fit(x, y)
+        assert model._model is not None
 
 
 class TestCatBoostModel:
@@ -106,6 +164,11 @@ class TestCatBoostModel:
         df = _make_df(5)
         result = model.predict(df)
         assert result["action"] == "NEUTRAL"
+
+    def test_train_returns_bool(self, model):
+        df = _make_df(200)
+        result = model.train(df)
+        assert isinstance(result, bool)
 
 
 class TestEnsemble:
@@ -137,6 +200,20 @@ class TestEnsemble:
             result = ensemble.predict(df)
             assert isinstance(result["confidence"], float)
             assert result["confidence"] >= 0.0
+
+    def test_train_all_returns_dict(self, ensemble):
+        df = _make_df(200)
+        result = ensemble.train_all(df)
+        assert isinstance(result, dict)
+        for name in ("xgb", "lgb"):
+            assert name in result
+            assert isinstance(result[name], bool)
+
+    def test_ensemble_xgb_action_by_name(self, ensemble):
+        df = _make_df(200)
+        result = ensemble.predict(df)
+        assert "xgb_action" in result
+        assert result["xgb_action"] in ("BUY", "SELL", "HOLD", "NEUTRAL")
 
 
 class TestWalkForward:

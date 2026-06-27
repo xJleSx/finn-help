@@ -86,24 +86,28 @@ class EnsemblePredictor:
         return [1.0 / max(len(weights), 1)] * len(weights)
 
     def predict(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> dict[str, Any]:
-        models = [("xgb", self.xgb), ("lgb", self.lgb), ("cat", self.cat)]
-        results = []
-        oos_list = []
+        model_names = ["xgb", "lgb", "cat"]
+        models = [(name, getattr(self, name)) for name in model_names]
+        named_results: dict[str, dict[str, Any]] = {}
+        named_oos: dict[str, dict[str, Any]] = {}
 
         for name, model in models:
             if model is None:
-                oos_list.append({"oos_accuracy": 0.5, "folds_completed": 0})
+                named_oos[name] = {"oos_accuracy": 0.5, "folds_completed": 0}
                 continue
             try:
                 pred = model.predict(df, anomaly_mask=anomaly_mask)
                 oos = self._walk_forward_validate(df, model)
-                oos_list.append(oos)
+                named_oos[name] = oos
                 if pred.get("action") != "NEUTRAL":
                     pred["oos"] = oos
-                    results.append(pred)
+                    named_results[name] = pred
             except Exception as e:
-                logger.warning(f"Ensemble {name} failed: {e}")
-                oos_list.append({"oos_accuracy": 0.5, "folds_completed": 0})
+                logger.warning("Ensemble %s failed: %s", name, e)
+                named_oos[name] = {"oos_accuracy": 0.5, "folds_completed": 0}
+
+        results = list(named_results.values())
+        oos_list = [named_oos.get(n, {"oos_accuracy": 0.5, "folds_completed": 0}) for n in model_names]
 
         if not results:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0, "uncertainty": 1.0}
@@ -161,9 +165,9 @@ class EnsemblePredictor:
             "probability": round(avg_prob, 3),
             "uncertainty": round(uncertainty, 3),
             "model_votes": {"buy": buy_votes, "sell": sell_votes, "total": len(results)},
-            "xgb_action": results[0]["action"] if len(results) > 0 else "NEUTRAL",
-            "lgb_action": results[1]["action"] if len(results) > 1 else "NEUTRAL",
-            "cat_action": results[2]["action"] if len(results) > 2 else "NEUTRAL",
+            "xgb_action": named_results.get("xgb", {}).get("action", "NEUTRAL"),
+            "lgb_action": named_results.get("lgb", {}).get("action", "NEUTRAL"),
+            "cat_action": named_results.get("cat", {}).get("action", "NEUTRAL"),
             "walk_forward": oos_agg,
             "weights": [round(w, 3) for w in weights[: len(results)]],
         }

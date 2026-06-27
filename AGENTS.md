@@ -32,3 +32,68 @@
 - No AI-generated comments, signatures, or markers in code
 - No AI tags in commit messages or PR descriptions
 - Keep code clean of tool-specific artifacts
+
+---
+
+## Master Plan: 6 Phases
+
+### Phase 0 — Чистка и базовая настройка (DONE)
+- .gitignore (Python, IDE, OS)
+- Мёртвый код: удалить неиспользуемые файлы, импорты, переменные
+- 6 падающих тестов — починить
+- mypy strict 847→0
+- CI base: ruff, security, coverage, Postgres service
+- config: .env.example, pyproject.toml
+- Пустые __init__.py удалены
+- Мусор из git-трекинга убран
+
+### Phase 1 — Архитектура и рефакторинг (PARTIAL)
+**Done:**
+- Pydantic response-модели: schemas.py + response_model= на всех JSON-роутах
+- allocator.allocate_async → native async (убран run_in_executor)
+- item_risk_async в risk.py (используется allocator)
+
+**Todo / Blocked:**
+- service.py: sync/async рефакторинг (~1081 строка, 10 sync/async пар, ~5 внешних вызывающих). Sync-методы нужны CLI/telegram/llm/scheduler. Отложен — требует отдельного планирования.
+- Gateway/Repository слой: выделить из service.py和数据-access в отдельный слой
+- Enum для type safety: instrument types, signal types, roles, risk profiles
+- Устранить дубликаты _analyze_core, _compute_ml, _build_trade_plan (sync и async версии)
+
+### Phase 2 — ML и модели (IN PROGRESS)
+**Исследование завершено. Ключевые проблемы:**
+- ~250 строк дубликатов в каждом из 3 классификаторов (XGBoost/LightGBM/CatBoost) — ~80% идентичного кода
+- price_targets.py — нулевое тестовое покрытие (entry zone, stop-loss, take-profit)
+- Гиперпараметры хардкодом (n_estimators=50, max_depth=3, lr=0.1) в каждом классе
+- ensemble.predict() вызывает walk-forward validate на каждый запрос (9 рефитов!)
+- Позиционный доступ results[0]/[1]/[2] ломается если catboost не импортирован
+- Тесты отсутствуют: train(), save(), load(), score(), fit(), anomaly_mask
+
+**План:**
+1. BaseMLClassifier — выделить общий базовый класс, убрать дубликаты
+2. Гиперпараметры вынести в src/config
+3. ensemble.py: кеш OOS, починить позиционный доступ
+4. price_targets.py: тесты для всей торговой логики
+5. Тесты train/save/load/score/fit + anomaly_mask для всех классификаторов
+6. model_registry.py: async, убрать хардкод пути data/models/
+
+### Phase 3 — Безопасность
+- JWT: улучшить (refresh token, expiration, blacklist)
+- Input validation: Pydantic на всех входах
+- Secrets management: убрать хардкод ключей, vault/env
+- Rate limiting: review и донастройка
+- SQL injection: parameterized queries (проверить)
+- CORS: review настроек
+
+### Phase 4 — Тестирование и CI
+- Интеграционные тесты: БД, API end-to-end
+- Coverage: поднять с 40% до целевого уровня
+- CI pipeline: parallel jobs, cache, artifacts
+- Property-based testing (hypothesis) для core-логики
+- Load/stress тесты для API
+
+### Phase 5 — Документация и мониторинг
+- API docs: OpenAPI улучшения, примеры
+- Logging: структурированный (JSON), уровни, ротация
+- Метрики: Prometheus + Grafana
+- Health checks: расширить /api/health
+- Monitoring: алерты, дашборды

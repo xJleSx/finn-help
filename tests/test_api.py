@@ -65,6 +65,12 @@ class TestHealth:
         body = resp.json()
         assert body["status"] == "ok"
 
+    def test_health_has_components(self, mock_client, mock_db):
+        resp = mock_client.get("/api/health")
+        body = resp.json()
+        assert "components" in body
+        assert isinstance(body["components"], dict)
+
 
 class TestInstruments:
     def test_instruments_list(self, mock_client, mock_db):
@@ -108,3 +114,18 @@ class TestAllocate:
         mock_db.execute.return_value.scalars.return_value.all.return_value = []
         resp = mock_client.post("/api/portfolio/allocate", json={"capital": 50000})
         assert resp.status_code == 200
+
+
+class TestAuthValidation:
+    def test_register_short_password_rejected(self, mock_client):
+        resp = mock_client.post("/api/auth/register", json={"username": "newuser", "password": "ab"})
+        assert resp.status_code == 422
+
+    def test_register_invalid_username_rejected(self, mock_client):
+        resp = mock_client.post("/api/auth/register", json={"username": "ab", "password": "validpass123"})
+        assert resp.status_code == 422
+
+    def test_login_invalid_credentials(self, mock_client, mock_db):
+        mock_db.execute.return_value.scalar_one_or_none.return_value = None
+        resp = mock_client.post("/api/auth/login", json={"username": "nonexistent", "password": "pass123"})
+        assert resp.status_code == 401

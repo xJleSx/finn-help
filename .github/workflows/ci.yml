@@ -22,7 +22,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Ruff check
-        run: uv run ruff check src/
+        run: uv run ruff check src/ tests/
 
   test:
     runs-on: ubuntu-latest
@@ -54,6 +54,11 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --group dev
+
+      - name: uv cache
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Wait for Postgres
         run: |
@@ -90,6 +95,11 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --group dev
+
+      - name: uv cache
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: pip-audit
         run: uv run pip-audit --ignore-vuln PYSEC-2025-1 --ignore-vuln PYSEC-2026-2
