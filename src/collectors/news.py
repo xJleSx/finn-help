@@ -53,6 +53,13 @@ class NewsCollector:
                 if exists:
                     continue
                 detail = item.get("sentiment_detail", {})
+                score = item.get("sentiment_score", 0.0)
+                if score >= 0.3:
+                    sentiment_label = "positive"
+                elif score <= -0.3:
+                    sentiment_label = "negative"
+                else:
+                    sentiment_label = "neutral"
                 n = News(
                     url=item["url"],
                     title=item["title"],
@@ -60,10 +67,13 @@ class NewsCollector:
                     source_type=item["source_type"],
                     source_name=item["source_name"],
                     published_at=item.get("published_at"),
-                    sentiment_score=item.get("sentiment_score"),
+                    sentiment_score=score,
                     sentiment_weighted=item.get("sentiment_weighted"),
                     sentiment_bert_score=detail.get("bert_score"),
                     source_weight=detail.get("source_weight"),
+                    sentiment=sentiment_label,
+                    is_relevant=True,
+                    source_count=1,
                 )
                 db.add(n)
                 db.flush()
