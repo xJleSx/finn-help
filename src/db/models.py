@@ -153,8 +153,38 @@ class News(Base):
     source_name = Column(String(100))
     published_at = Column(DateTime)
     created_at = Column(DateTime, default=func.now())
+    
+    # Phase 1: Categorization & Deduplication
+    category = Column(String(50), default="UNCLASSIFIED", index=True)
+    subcategory = Column(String(100), index=True)
+    sentiment = Column(String(20))
+    impact_score = Column(Float, default=0.0)
+    event_id = Column(Integer, ForeignKey("news_events.id"), index=True)
+    is_relevant = Column(Boolean, default=True, index=True)
+    embedding = Column(JSON)  # Vector embedding for deduplication
+    source_count = Column(Integer, default=1)  # Number of sources reporting same event
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     instruments = relationship("NewsInstrument", back_populates="news")
+    event = relationship("NewsEvent", back_populates="articles")
+
+
+class NewsEvent(Base):
+    __tablename__ = "news_events"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String(512), nullable=False)
+    summary = Column(Text)
+    category = Column(String(50), nullable=False, index=True)
+    subcategory = Column(String(100), index=True)
+    impact_score = Column(Float, default=0.0)
+    sentiment = Column(String(20))
+    article_count = Column(Integer, default=1)
+    published_at = Column(DateTime)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    articles = relationship("News", back_populates="event")
 
 
 class NewsInstrument(Base):

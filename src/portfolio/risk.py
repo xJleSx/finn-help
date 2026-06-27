@@ -1,6 +1,8 @@
 import logging
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from src.db.models import Price
@@ -18,6 +20,22 @@ def item_risk(item: dict[str, Any], db: Session, capital: float = 100_000) -> di
         return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
 
     return _compute_risk_from_closes(close_vals, item, capital)
+
+
+async def item_risk_async(item: dict[str, Any], db: AsyncSession, capital: float = 100_000) -> dict[str, Any]:
+    result = await db.execute(
+        select(Price).where(Price.instrument_id == item["id"]).order_by(Price.date.desc()).limit(60)
+    )
+    prices = result.scalars().all()
+    if len(prices) < 10:
+        return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
+
+    close_vals = [float(p.close) for p in prices if p.close]
+    if len(close_vals) < 10:
+        return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
+
+    return _compute_risk_from_closes(close_vals, item, capital)
+
 
 
 def _compute_risk_from_closes(close_vals: list[float], item: dict[str, Any], capital: float) -> dict[str, Any]:

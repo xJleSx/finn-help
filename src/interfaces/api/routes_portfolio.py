@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import Instrument, Price, Signal, User
 from src.interfaces.api.auth import get_current_user, get_db, require_user
+from src.interfaces.api.schemas import AllocationResponse, PortfolioAddResponse, PortfolioPosition
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["portfolio"])
@@ -18,7 +19,7 @@ class AllocateBody(BaseModel):
     capital: float = 50000.0
 
 
-@router.get("/api/portfolio")
+@router.get("/api/portfolio", response_model=list[PortfolioPosition])
 async def get_portfolio(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_user),
@@ -60,7 +61,7 @@ class AddPositionBody(BaseModel):
     avg_price: Optional[float] = None
 
 
-@router.post("/api/portfolio/add")
+@router.post("/api/portfolio/add", response_model=PortfolioAddResponse)
 async def add_portfolio_position(
     body: AddPositionBody,
     db: AsyncSession = Depends(get_db),
@@ -88,7 +89,7 @@ async def add_portfolio_position(
     return {"status": "ok"}
 
 
-@router.post("/api/portfolio/allocate")
+@router.post("/api/portfolio/allocate", response_model=AllocationResponse)
 async def allocate_portfolio(
     body: AllocateBody,
     db: AsyncSession = Depends(get_db),

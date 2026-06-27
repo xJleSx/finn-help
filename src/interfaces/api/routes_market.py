@@ -13,6 +13,13 @@ from sse_starlette.sse import EventSourceResponse
 from src.db.connection import get_session
 from src.db.models import GeoRiskScore, Indicator, Instrument, News, Price, Signal
 from src.interfaces.api.auth import get_db
+from src.interfaces.api.schemas import (
+    DivergenceAlert,
+    GeoRiskItem,
+    NewsItem,
+    PriceTargetAlert,
+    RebalanceAlert,
+)
 from src.notifications.service import NotificationService
 
 notification_service = NotificationService()
@@ -21,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["market"])
 
 
-@router.get("/api/news")
+@router.get("/api/news", response_model=list[NewsItem])
 async def get_news(limit: int = Query(20, le=100), db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
     result = await db.execute(select(News).order_by(News.published_at.desc()).limit(limit))
     news_list = result.scalars().all()
@@ -38,7 +45,7 @@ async def get_news(limit: int = Query(20, le=100), db: AsyncSession = Depends(ge
     ]
 
 
-@router.get("/api/geo-risk")
+@router.get("/api/geo-risk", response_model=list[GeoRiskItem])
 async def get_geo_risk(days: int = Query(30), db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
     cutoff = date.today() - timedelta(days=days)
     result = await db.execute(select(GeoRiskScore).where(GeoRiskScore.date >= cutoff).order_by(GeoRiskScore.date))
@@ -81,7 +88,7 @@ async def get_sector_volatility(days: int = Query(30, le=365), db: AsyncSession 
     return await sector_analyzer.compute_sector_volatility_async(db, days=days)
 
 
-@router.get("/api/alerts/price-targets")
+@router.get("/api/alerts/price-targets", response_model=list[PriceTargetAlert])
 async def get_price_target_alerts() -> list[dict[str, Any]]:
     alerts = []
     for a in notification_service.check_price_targets():
@@ -97,7 +104,7 @@ async def get_price_target_alerts() -> list[dict[str, Any]]:
     return alerts
 
 
-@router.get("/api/alerts/divergence/{ticker}")
+@router.get("/api/alerts/divergence/{ticker}", response_model=list[DivergenceAlert])
 async def get_divergence_alerts(ticker: str, db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
     result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
     inst = result.scalar_one_or_none()
@@ -125,7 +132,7 @@ async def get_divergence_alerts(ticker: str, db: AsyncSession = Depends(get_db))
     ]
 
 
-@router.get("/api/alerts/rebalance")
+@router.get("/api/alerts/rebalance", response_model=list[RebalanceAlert])
 async def get_rebalance_alerts(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
     alerts = await notification_service.check_rebalance_async()
     return [
