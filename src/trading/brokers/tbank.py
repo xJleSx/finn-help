@@ -145,7 +145,11 @@ class TBankClient:
     ) -> dict[str, object]:
         if not self._client:
             raise RuntimeError("Client not initialized")
-        direction_enum = OrderDirection.ORDER_DIRECTION_BUY if direction.upper() == "BUY" else OrderDirection.ORDER_DIRECTION_SELL
+        direction_enum = (
+            OrderDirection.ORDER_DIRECTION_BUY
+            if direction.upper() == "BUY"
+            else OrderDirection.ORDER_DIRECTION_SELL
+        )
         type_enum = OrderType.ORDER_TYPE_MARKET if order_type == "market" else OrderType.ORDER_TYPE_LIMIT
         price_quotation = None
         if price is not None:
@@ -211,7 +215,11 @@ class TBankClient:
             "currency": InstrumentType.INSTRUMENT_TYPE_CURRENCY,
         }
         it = type_map.get(instrument_type, InstrumentType.INSTRUMENT_TYPE_SHARE)
-        resp = await self._client.instruments.shares() if it == InstrumentType.INSTRUMENT_TYPE_SHARE else await self._client.instruments.instruments(instrument_type=it)
+        resp = (
+            await self._client.instruments.shares()
+            if it == InstrumentType.INSTRUMENT_TYPE_SHARE
+            else await self._client.instruments.instruments(instrument_type=it)
+        )
         return [
             {
                 "figi": s.figi,

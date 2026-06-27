@@ -1021,7 +1021,9 @@ async def _save_position(update: Update, ticker: str, qty: float, avg_price: flo
             existing.quantity += qty  # type: ignore[assignment]
             if existing.avg_price and avg_price:
                 total_qty = existing.quantity
-                existing.avg_price = float((float(existing.avg_price) * (total_qty - qty) + avg_price * qty) / total_qty)  # type: ignore[assignment]
+                existing.avg_price = float(
+                    (float(existing.avg_price) * (total_qty - qty) + avg_price * qty) / total_qty
+                )  # type: ignore[assignment]
             db.commit()
             await update.effective_message.reply_text(
                 f"✅ {ticker}: добавлено {qty} шт. (всего {existing.quantity:.1f} шт.)"
@@ -1283,7 +1285,9 @@ async def _ns_get_daily_summary(ns: NotificationService) -> Any:
     return await asyncio.to_thread(ns.get_daily_summary)
 
 
-async def _ns_save_notification(ns: NotificationService, uid: int, notify_type: str, text: str, title: str = "") -> None:
+async def _ns_save_notification(
+    ns: NotificationService, uid: int, notify_type: str, text: str, title: str = ""
+) -> None:
     await asyncio.to_thread(ns.save_notification, uid, notify_type, text, title)
 
 

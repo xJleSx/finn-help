@@ -69,7 +69,10 @@ class PortfolioAllocator:
     def _weights(self) -> dict[str, Any]:
         return self.PROFILES.get(self.profile, self.PROFILES["balanced"])
 
-    def _allocate_from_data(self, capital: float, existing: list[dict[str, Any]], instruments_data: list[dict[str, Any]], db: Any) -> dict[str, Any]:
+    def _allocate_from_data(
+        self, capital: float, existing: list[dict[str, Any]],
+        instruments_data: list[dict[str, Any]], db: Any,
+    ) -> dict[str, Any]:
         plan = {}
         total_allocated = 0.0
         sector_allocation: dict[str, float] = {}

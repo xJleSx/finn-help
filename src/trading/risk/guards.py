@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Optional, cast
+from typing import Optional
 
 from src.config import personal
 

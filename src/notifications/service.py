@@ -199,8 +199,6 @@ class NotificationService:
                     .order_by(SignalModel.date.desc())
                     .first()
                 )
-                prev_action = prev_same.action if prev_same else None
-
                 inst = db.query(Instrument).filter_by(id=s.instrument_id).first()
                 if not inst:
                     continue
@@ -238,8 +236,6 @@ class NotificationService:
                 .order_by(GeoRiskScore.date.desc())
                 .first()
             )
-            prev_score = prev.score if prev else None
-
             return GeoRiskNotification(
                 score=float(today_score.score),
                 level=_geo_level(float(today_score.score)),
@@ -290,7 +286,6 @@ class NotificationService:
             sell = sum(1 for s in signals if s.action == "SELL")
 
             geo = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
-            geo_risk = geo.score if geo else 0.0
 
             top = (
                 db.query(SignalModel)

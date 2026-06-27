@@ -4,7 +4,7 @@ import sys
 from datetime import date, timedelta
 from typing import Any, Optional
 
-import pandas as pd  
+import pandas as pd
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -46,7 +46,7 @@ def update(ticker: Optional[str] = typer.Argument(None, help="Тикер (нап
     """Обновить данные с MOEX"""
 
     async def _run() -> None:
-        async with MOEXCollector() as moex:  
+        async with MOEXCollector() as moex:
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -612,7 +612,7 @@ def scan(ticker: str = typer.Argument(..., help="Тикер для массов�
     """Найти и добавить все тикеры, содержащие строку (например: SBER, GAZP, VTBR)"""
 
     async def _run() -> None:
-        async with MOEXCollector() as moex:  
+        async with MOEXCollector() as moex:
             with console.status("Поиск инструментов..."):
                 stocks = await moex.get_stocks()
                 etfs = await moex.get_etfs()
@@ -712,7 +712,7 @@ def full_cycle() -> None:
     import asyncio
 
     async def _update() -> None:
-        async with MOEXCollector() as moex:  
+        async with MOEXCollector() as moex:
             tickers: list[str] = personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP", "YNDX", "TATN"])  # type: ignore[assignment]
             for t in tickers:
                 await moex.get_history(t)

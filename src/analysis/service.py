@@ -1,7 +1,7 @@
 import logging
-from datetime import date
 from collections.abc import Sequence
-from typing import Any, Literal, Optional, cast
+from datetime import date
+from typing import Any, Literal, cast
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -555,7 +555,9 @@ class AnalysisService:
             }
         return news_sentiment
 
-    def _build_trade_plan(self, df: pd.DataFrame, ind_df: pd.DataFrame, tech_signal: dict[str, Any]) -> dict[str, Any] | None:
+    def _build_trade_plan(
+        self, df: pd.DataFrame, ind_df: pd.DataFrame, tech_signal: dict[str, Any]
+    ) -> dict[str, Any] | None:
         if df.empty or len(df) < 20 or ind_df.empty:
             return None
         latest = df.iloc[-1]
@@ -623,7 +625,9 @@ class AnalysisService:
             fused["bond_offering"] = bond_offering
         return fused
 
-    async def analyze_single(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> dict[str, Any]:
+    async def analyze_single(
+        self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True
+    ) -> dict[str, Any]:
         price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
         prices = price_result.scalars().all()
         if len(prices) < 50:
@@ -822,7 +826,9 @@ class AnalysisService:
             "debt_equity": row.debt_equity,
         }
 
-    def analyze_all_sync(self, db: Any, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict[str, Any]]:
+    def analyze_all_sync(
+        self, db: Any, updated_ids: set[int] | None = None, with_ml: bool = True
+    ) -> list[dict[str, Any]]:
         instruments = db.query(Instrument)
         if updated_ids is not None:
             instruments = instruments.filter(Instrument.id.in_(updated_ids))

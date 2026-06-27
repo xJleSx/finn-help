@@ -65,7 +65,7 @@ class ProphetPredictor:
 
     def _fit(self, df: pd.DataFrame) -> Any:
         try:
-            from prophet import Prophet  
+            from prophet import Prophet
         except ImportError:
             logger.warning("prophet not installed, using linear trend fallback")
             import numpy as np
