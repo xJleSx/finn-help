@@ -904,7 +904,7 @@ class TestRunExecutionLoop:
         with (
             patch("src.trading.execution.loop.market_hours_check", return_value=True),
             patch("src.trading.execution.loop._check_daily_pnl") as mock_pnl,
-            patch("src.trading.execution.loop.async_is_kill_switch_active"),
+            patch("src.trading.execution.loop.async_is_kill_switch_active", return_value=False),
             patch("src.trading.execution.loop._process_signals") as mock_signals,
             patch("src.trading.execution.loop._check_stop_losses") as mock_sl,
             patch("src.trading.execution.loop._rebalance_portfolio") as mock_rebalance,
@@ -926,9 +926,6 @@ class TestRunExecutionLoop:
             mock_signals.assert_called_once()
             mock_sl.assert_called_once()
             mock_rebalance.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_one_iteration_with_trading_disabled(self):
         import src.trading.execution.loop as loop
 
         async def fake_sleep(_):
