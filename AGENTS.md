@@ -147,7 +147,7 @@
 **Статус этапа 1:**
 - News Impact Prediction Model: DONE (XGBoost Regressor, 3 horizons, 24 features, SQLite in-memory tests)
 - Anomaly Detection: DONE (Volume/Sentiment Isolation Forest + Source/Topic frequency + PyTorch Autoencoder, unified detector)
-- Intelligent Alert System: PENDING
+- Intelligent Alert System: DONE (AlertEngine: priority scoring + dedup + smart timing + portfolio relevance + anomaly/impact integration)
 
 **Наивысший ROI:**
 1. News Impact Prediction Model
