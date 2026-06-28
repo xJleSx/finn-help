@@ -141,13 +141,13 @@
 | Этап | Срок | Содержание |
 |------|------|-----------|
 | 1 | 2-3 мес | News Impact Prediction + Anomaly Detection + Intelligent Alerts |
-| 2 | 2-3 мес | Social Media + Alternative Data + Scenario Analysis |
+| 2 (in progress) | 2-3 мес | Scenario Analysis + Social Media + Alternative Data |
 | 3 | 2-3 мес | Broker Integration + Self-Learning + Attribution |
 
-**Статус этапа 1:**
-- News Impact Prediction Model: DONE (XGBoost Regressor, 3 horizons, 24 features, SQLite in-memory tests)
-- Anomaly Detection: DONE (Volume/Sentiment Isolation Forest + Source/Topic frequency + PyTorch Autoencoder, unified detector)
-- Intelligent Alert System: DONE (AlertEngine: priority scoring + dedup + smart timing + portfolio relevance + anomaly/impact integration)
+**Статус этапов:**
+- Этап 1: DONE (News Impact + Anomaly + Alerts)
+- Этап 2: Scenario Analysis DONE — Monte Carlo, historical bootstrap, crash/macro/sector/custom shocks, max drawdown, portfolio-level VaR/CVaR
+- Этап 2: Social Media + Alternative Data — PENDING
 
 **Наивысший ROI:**
 1. News Impact Prediction Model
