@@ -352,6 +352,137 @@ class TestNewsClassifier:
         assert "subsubcategory" in result
 
 
+class TestEWMARiskCalculator:
+    def test_empty_scores(self):
+        from src.data.sector_impact_engine import EWMARiskCalculator
+        c = EWMARiskCalculator()
+        assert c.calculate([]) == 0.0
+
+    def test_single_score(self):
+        from src.data.sector_impact_engine import EWMARiskCalculator
+        c = EWMARiskCalculator()
+        assert c.calculate([5.0]) == 5.0
+
+    def test_ewma_trend(self):
+        from src.data.sector_impact_engine import EWMARiskCalculator
+        c = EWMARiskCalculator(alpha=0.5)
+        increasing = [1.0, 2.0, 3.0, 4.0, 5.0]
+        decreasing = [5.0, 4.0, 3.0, 2.0, 1.0]
+        assert c.calculate(increasing) > c.calculate(decreasing)
+
+    def test_momentum_positive(self):
+        from src.data.sector_impact_engine import EWMARiskCalculator
+        c = EWMARiskCalculator()
+        scores = [1.0, 1.0, 1.0, 5.0, 6.0, 7.0]
+        assert c.momentum(scores) > 0
+
+    def test_momentum_negative(self):
+        from src.data.sector_impact_engine import EWMARiskCalculator
+        c = EWMARiskCalculator(momentum_window=3)
+        scores = [7.0, 6.0, 5.0, 1.0, 1.0, 1.0]
+        assert c.momentum(scores) < 0
+
+    def test_momentum_flat(self):
+        from src.data.sector_impact_engine import EWMARiskCalculator
+        c = EWMARiskCalculator()
+        assert c.momentum([3.0]) == 0.0
+
+    def test_confidence(self):
+        from src.data.sector_impact_engine import EWMARiskCalculator
+        c = EWMARiskCalculator()
+        assert c.confidence(0) == 0.0
+        assert c.confidence(20) == 1.0
+        assert 0 < c.confidence(10) < 1.0
+
+    def test_calculate_with_weights(self):
+        from src.data.sector_impact_engine import EWMARiskCalculator
+        c = EWMARiskCalculator()
+        scores = [5.0, 5.0]
+        result = c.calculate(scores, weights=[0.0, 1.0])
+        assert result == 5.0
+
+
+class TestSectorCorrelationTracker:
+    def test_contagion_empty(self):
+        from src.data.sector_impact_engine import SectorCorrelationTracker
+        t = SectorCorrelationTracker()
+        assert t.get_contagion_risk("energy") == []
+
+    def test_contagion_self_excluded(self):
+        from src.data.sector_impact_engine import SectorCorrelationTracker
+        t = SectorCorrelationTracker()
+        t.matrix = {"energy": {"energy": 1.0, "banking": 0.6}}
+        result = t.get_contagion_risk("energy")
+        assert ("banking", 0.6) in result
+        assert not any(s == "energy" for s, _ in result)
+
+
+class TestSectorImpactEngineV2:
+    def test_basic_instantiation(self):
+        from src.data.sector_impact_engine import SectorImpactEngine
+        assert SectorImpactEngine is not None
+
+    def test_get_daily_risk_v2_structure(self, monkeypatch):
+        from src.data.sector_impact_engine import SectorImpactEngine
+        from datetime import datetime
+        engine = SectorImpactEngine(None, None)
+
+        class MockTracker:
+            @staticmethod
+            def load_from_history(db):
+                pass
+            @staticmethod
+            def get_contagion_risk(s):
+                return []
+
+        engine._correlation_tracker = MockTracker()
+
+        def mock_risk(sector, db, date=None):
+            return {
+                "sector": sector,
+                "date": datetime.utcnow().date(),
+                "risk_score": 5.0,
+                "components": {},
+                "article_count": 10,
+                "ewma_score": 5.0,
+                "momentum": 0.5,
+                "confidence": 0.5,
+                "sentiment_multiplier": 1.0,
+                "contagion_sectors": [],
+                "total_impact": 50.0,
+            }
+        monkeypatch.setattr(engine, "calculate_daily_sector_risk", mock_risk)
+
+        def mock_trend(sector, db):
+            return {"trend": "up", "current_risk": 5.0}
+        monkeypatch.setattr(engine, "get_sector_trend", mock_trend)
+
+        result = engine.get_daily_risk_v2("energy", None)
+        assert result["regime"] in ("high", "medium", "low")
+        assert result["trend"] == "up"
+
+    def test_get_risk_heatmap_structure(self, monkeypatch):
+        from src.data.sector_impact_engine import SectorImpactEngine, SectorCorrelationTracker
+        engine = SectorImpactEngine(None, None)
+
+        def mock_calc(sector, db, date=None):
+            return {
+                "sector": sector,
+                "risk_score": 3.0,
+                "momentum": 0.0,
+                "confidence": 0.5,
+                "article_count": 5,
+                "contagion_sectors": [],
+            }
+        monkeypatch.setattr(engine, "calculate_daily_sector_risk", mock_calc)
+        monkeypatch.setattr(SectorCorrelationTracker, "load_from_history", lambda self, db: None)
+
+        result = engine.get_risk_heatmap(None, sectors=["energy", "banking"])
+        assert len(result) == 2
+        assert result[0]["sector"] == "energy"
+        assert result[0]["regime"] in ("high", "medium", "low")
+
+
 class TestSectorMapper:
     def test_basic_instantiation(self):
         from src.data.sector_mapper import SectorMapper
