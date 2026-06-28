@@ -85,3 +85,22 @@ class RebalanceAlert:
     deviation_pct: float
     reason: str
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class AnomalyAlert:
+    news_id: int
+    ticker: str
+    title: str
+    category: str
+    subcategory: str
+    source_name: str
+    priority: str
+    priority_score: float
+    anomaly_score: float
+    predicted_return: float
+    impact_confidence: float
+    in_portfolio: bool
+    reason: str
+    published_at: datetime
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

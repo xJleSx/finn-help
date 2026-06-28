@@ -86,6 +86,18 @@ class Settings(BaseSettings):
     ml_anomaly_min_samples: int = 10
     ml_anomaly_source_min_freq: int = 3
 
+    alert_critical_threshold: float = 0.8
+    alert_high_threshold: float = 0.6
+    alert_medium_threshold: float = 0.4
+    alert_weight_anomaly: float = 0.35
+    alert_weight_impact: float = 0.35
+    alert_weight_portfolio: float = 0.2
+    alert_weight_recency: float = 0.1
+    alert_dedup_hours: int = 24
+    alert_cooldown_minutes: int = 60
+    alert_min_impact_abs: float = 0.005
+    alert_max_alerts_per_run: int = 20
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
