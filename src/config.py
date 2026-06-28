@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     ml_impact_horizons: str = "1,3,5"
     ml_impact_days_back: int = 365
 
+    ml_sentiment_n_estimators: int = 100
+    ml_sentiment_max_depth: int = 4
+    ml_sentiment_learning_rate: float = 0.05
+    ml_sentiment_min_train_samples: int = 30
+    ml_sentiment_horizons: str = "3,7"
+    ml_sentiment_days_back: int = 365
+
     ml_anomaly_volume_contamination: float = 0.1
     ml_anomaly_sentiment_contamination: float = 0.1
     ml_anomaly_autoencoder_contamination: float = 0.1
