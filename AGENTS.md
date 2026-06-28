@@ -97,3 +97,61 @@
 - Метрики: Prometheus + Grafana
 - Health checks: расширить /api/health
 - Monitoring: алерты, дашборды
+
+---
+
+## Продвинутые улучшения (после базовых 8 фаз)
+
+### 1. Предиктивная аналитика и ML
+- News Impact Prediction Model: XGBoost/LightGBM + LSTM/Transformer ensemble — прогноз % изменения цены через 1/5/24 часа от новости (category, sentiment, impact, sources, vol, technicals)
+- Sentiment Evolution Prediction: прогноз изменения тональности на 3-7 дней
+- Anomaly Detection: DONE (Volume/Sentiment Isolation Forest + Source/Topic frequency analysis + PyTorch Autoencoder, unified detector)
+- Causal Inference: causal graphs (DoWhy/CausalML) для оценки реального влияния новостей
+
+### 2. Расширение источников данных
+- Social Media: Telegram-каналы, X/Twitter, Reddit, форумы — раннее обнаружение трендов и retail sentiment
+- Alternative Data: satellite imagery, web traffic, job postings, patents, supply chain
+- Official Sources: ЦБ, Минфин, Росстат, таможня, реестры санкций (реал-тайм парсинг)
+- Earnings Calls: анализ транскриптов + audio (тональность CEO/CFO, Q&A)
+
+### 3. Автоматизация и оптимизация
+- Automated Summarization: LLM + extractive/abstractive саммари по кластерам событий
+- Intelligent Alert System: priority scoring, deduplication, smart timing, персонализация по портфелю
+- Automated Portfolio Rebalancing: авто-сигналы + исполнение ордеров на основе рисков
+- Self-Learning System: feedback loop, авто-retraining, A/B-тестирование, tuning параметров
+
+### 4. Продвинутая аналитика и визуализация
+- News Impact Attribution (Shapley values) — вклад каждой новости в движение цены
+- Scenario Analysis & Stress Testing: моделирование геополитических/макро/секторальных сценариев
+- Interactive Risk Explorer: drill-down, what-if анализ, сравнения
+- Natural Language Query Interface: "Какие новости повлияли на Сбер?" и т.д.
+
+### 5. Интеграции и экосистема
+- Broker API Integration (Тинькофф, БКС, Финам) — прямое исполнение сделок
+- Multi-Market Expansion (KASE, Китай, Турция)
+- Public API (News, Risk, Signals, Analytics) — Freemium/Enterprise
+- Улучшенный Telegram Bot — уведомления, управление портфелем, NL-запросы
+
+### 6-7. Gamification, UX и Research
+- Prediction Market, Portfolio Simulator, Educational Content
+- Academic Mode (экспорт, reproducible experiments)
+- A/B Testing Framework для моделей и весов
+
+### Приоритетная дорожная карта
+| Этап | Срок | Содержание |
+|------|------|-----------|
+| 1 | 2-3 мес | News Impact Prediction + Anomaly Detection + Intelligent Alerts |
+| 2 | 2-3 мес | Social Media + Alternative Data + Scenario Analysis |
+| 3 | 2-3 мес | Broker Integration + Self-Learning + Attribution |
+
+**Статус этапа 1:**
+- News Impact Prediction Model: DONE (XGBoost Regressor, 3 horizons, 24 features, SQLite in-memory tests)
+- Anomaly Detection: DONE (Volume/Sentiment Isolation Forest + Source/Topic frequency + PyTorch Autoencoder, unified detector)
+- Intelligent Alert System: PENDING
+
+**Наивысший ROI:**
+1. News Impact Prediction Model
+2. Intelligent Alert System
+3. Scenario Analysis
+4. Broker API Integration
+5. Social Media Integration
