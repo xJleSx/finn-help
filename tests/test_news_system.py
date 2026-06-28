@@ -155,6 +155,72 @@ class TestNewsFilter:
         result = f.evaluate_article("", "")
         assert not result["is_relevant"]
 
+    def test_scam_keywords_detected(self):
+        from src.data.news_filter import NewsFilter
+        f = NewsFilter()
+        result = f.detect_financial_scam("гарантированный доход", "уникальная возможность 100%")
+        assert result["is_scam"]
+
+    def test_scam_keywords_clean(self):
+        from src.data.news_filter import NewsFilter
+        f = NewsFilter()
+        result = f.detect_financial_scam("Рынки выросли на 2%", "Нефть дорожает")
+        assert not result["is_scam"]
+
+    def test_evaluate_article_scam_flagged(self):
+        from src.data.news_filter import NewsFilter
+        f = NewsFilter()
+        result = f.evaluate_article("Гарантированный доход", "Инвестируй сейчас, никакого риска")
+        assert not result["is_relevant"]
+        assert result["article_type"] == "scam"
+
+    def test_low_quality_source_detected(self):
+        from src.data.news_filter import NewsFilter
+        f = NewsFilter()
+        result = f.detect_low_quality_source("t.me/some_channel")
+        assert result["is_low_quality"]
+        assert result["matched_pattern"] == "t.me"
+
+    def test_low_quality_source_clean(self):
+        from src.data.news_filter import NewsFilter
+        f = NewsFilter()
+        result = f.detect_low_quality_source("https://www.interfax.ru")
+        assert not result["is_low_quality"]
+
+    def test_evaluate_article_low_quality_source(self):
+        from src.data.news_filter import NewsFilter
+        f = NewsFilter()
+        result = f.evaluate_article(
+            "Рынки растут",
+            "Нефть дорожает. Индекс растет.",
+            source_name="t.me/news_channel",
+        )
+        assert not result["is_relevant"]
+        assert result["article_type"] == "low_quality_source"
+
+    def test_keyword_blacklist_expanded_spam(self):
+        from src.data.news_filter import NewsFilter
+        f = NewsFilter()
+        result = f.check_keyword_blacklist("заработок в интернете", "пассивный доход без вложений")
+        assert result["is_spam"]
+
+    def test_evaluate_article_good_with_source(self):
+        from src.data.news_filter import NewsFilter
+        f = NewsFilter()
+        result = f.evaluate_article(
+            "Рынки растут на фоне новостей",
+            "Нефть дорожает. Индекс Мосбиржи обновил максимум. Рубль укрепляется.",
+            source_name="https://www.interfax.ru",
+        )
+        assert result["is_relevant"]
+        assert result["relevance_score"] > 0.5
+
+    def test_relevance_score_includes_scam_penalty(self):
+        from src.data.news_filter import NewsFilter
+        f = NewsFilter()
+        result = f.evaluate_article("Гарантированный доход", "Уникальная возможность, прибыль 100%")
+        assert result["relevance_score"] < 0.3
+
 
 class TestNewsClassifier:
     def test_basic_instantiation(self):

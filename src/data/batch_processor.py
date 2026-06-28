@@ -92,6 +92,7 @@ class NewsBatchProcessor:
                     evaluation = self.filter_engine.evaluate_article(
                         article.title or "",
                         article.summary or "",
+                        article.source_name or "",
                     )
                     article.is_relevant = evaluation["is_relevant"]
 
