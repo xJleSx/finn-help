@@ -265,6 +265,92 @@ class TestNewsClassifier:
         result = c.classify_article("Санкции", "Новые ограничения против банков")
         assert "category" in result
 
+    def test_get_parent_category(self):
+        from src.data.news_classifier import NewsClassifier
+        assert NewsClassifier.get_parent_category("energy") == "SECTOR"
+        assert NewsClassifier.get_parent_category("sanctions") == "GEOPOLITICAL"
+        assert NewsClassifier.get_parent_category("ipo") == "MARKET"
+
+    def test_get_parent_category_unknown(self):
+        from src.data.news_classifier import NewsClassifier
+        assert NewsClassifier.get_parent_category("nonexistent") is None
+
+    def test_get_children(self):
+        from src.data.news_classifier import NewsClassifier
+        children = NewsClassifier.get_children("SECTOR")
+        assert "energy" in children
+        assert "banking" in children
+        assert "technology" in children
+
+    def test_get_subsubcategories(self):
+        from src.data.news_classifier import NewsClassifier
+        subs = NewsClassifier.get_subsubcategories("SECTOR", "energy")
+        assert "oil_gas" in subs
+        assert "renewable" in subs
+
+    def test_get_full_path(self):
+        from src.data.news_classifier import NewsClassifier
+        assert NewsClassifier.get_full_path("SECTOR", "energy", "oil_gas") == "SECTOR/energy/oil_gas"
+        assert NewsClassifier.get_full_path("MACRO", "inflation") == "MACRO/inflation"
+
+    def test_get_all_categories(self):
+        from src.data.news_classifier import NewsClassifier
+        all_cats = NewsClassifier.get_all_categories()
+        assert "MACRO" in all_cats
+        assert "GEOPOLITICAL" in all_cats
+        assert "SECTOR" in all_cats
+        assert "COMPANY" in all_cats
+        assert "MARKET" in all_cats
+        assert "energy" in all_cats["SECTOR"]
+
+    def test_get_description(self):
+        from src.data.news_classifier import NewsClassifier
+        desc = NewsClassifier.get_description("MACRO")
+        assert "macro" in desc.lower()
+
+    def test_hierarchical_fallback_oil(self):
+        from src.data.news_classifier import NewsClassifier
+        c = NewsClassifier()
+        result = c._hierarchical_fallback("цены на нефть выросли")
+        assert result["category"] == "SECTOR"
+        assert result["subcategory"] == "energy"
+
+    def test_hierarchical_fallback_gold(self):
+        from src.data.news_classifier import NewsClassifier
+        c = NewsClassifier()
+        result = c._hierarchical_fallback("gold prices hit新高")
+        assert result["category"] == "SECTOR"
+        assert result["subcategory"] == "metals_mining"
+
+    def test_hierarchical_fallback_rate_hike(self):
+        from src.data.news_classifier import NewsClassifier
+        c = NewsClassifier()
+        result = c._hierarchical_fallback("цб повысил ключевую ставку")
+        assert result["category"] == "MACRO"
+        assert result["subcategory"] == "monetary_policy"
+        assert result["subsubcategory"] == "central_bank_rate"
+
+    def test_hierarchical_fallback_cyber(self):
+        from src.data.news_classifier import NewsClassifier
+        c = NewsClassifier()
+        result = c._hierarchical_fallback("кибератака на банки")
+        assert result["category"] == "GEOPOLITICAL"
+        assert result["subcategory"] == "conflict"
+        assert result["subsubcategory"] == "cyber_attack"
+
+    def test_classify_hierarchical_with_fallback(self):
+        from src.data.news_classifier import NewsClassifier
+        c = NewsClassifier()
+        result = c.classify_hierarchical("Ключевая ставка", "ЦБ повысил ставку")
+        assert "hierarchy_path" in result
+        assert result["hierarchy_path"]
+
+    def test_fallback_subsubcategory_included(self):
+        from src.data.news_classifier import NewsClassifier
+        c = NewsClassifier()
+        result = c._fallback_classification("Кибератака", "Атака на банковскую систему")
+        assert "subsubcategory" in result
+
 
 class TestSectorMapper:
     def test_basic_instantiation(self):
