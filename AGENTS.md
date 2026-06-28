@@ -103,55 +103,39 @@
 ## Продвинутые улучшения (после базовых 8 фаз)
 
 ### 1. Предиктивная аналитика и ML
-- News Impact Prediction Model: XGBoost/LightGBM + LSTM/Transformer ensemble — прогноз % изменения цены через 1/5/24 часа от новости (category, sentiment, impact, sources, vol, technicals)
-- Sentiment Evolution Prediction: прогноз изменения тональности на 3-7 дней
+- News Impact Prediction Model: DONE (XGBoost Regressor, 3 horizons, 24 features)
+- Sentiment Evolution Prediction: PENDING
 - Anomaly Detection: DONE (Volume/Sentiment Isolation Forest + Source/Topic frequency analysis + PyTorch Autoencoder, unified detector)
-- Causal Inference: causal graphs (DoWhy/CausalML) для оценки реального влияния новостей
+- Causal Inference: PENDING
+- News Impact Attribution: DONE (SHAP-based feature importance per news article)
 
 ### 2. Расширение источников данных
-- Social Media: Telegram-каналы, X/Twitter, Reddit, форумы — раннее обнаружение трендов и retail sentiment
-- Alternative Data: satellite imagery, web traffic, job postings, patents, supply chain
-- Official Sources: ЦБ, Минфин, Росстат, таможня, реестры санкций (реал-тайм парсинг)
-- Earnings Calls: анализ транскриптов + audio (тональность CEO/CFO, Q&A)
+- Social Media: DONE (Telegram collector with keyword ticker detection + sentiment)
+- Alternative Data: DONE (CBR rates via XML API + stub framework for Minfin/Rosstat)
+- Official Sources: DONE (CBR XML parser + MacroIndicator model)
+- Earnings Calls: PENDING
 
 ### 3. Автоматизация и оптимизация
-- Automated Summarization: LLM + extractive/abstractive саммари по кластерам событий
-- Intelligent Alert System: priority scoring, deduplication, smart timing, персонализация по портфелю
-- Automated Portfolio Rebalancing: авто-сигналы + исполнение ордеров на основе рисков
-- Self-Learning System: feedback loop, авто-retraining, A/B-тестирование, tuning параметров
+- Automated Summarization: DONE (LLM news cluster summarizer with fallback)
+- Intelligent Alert System: DONE
+- Automated Portfolio Rebalancing: PENDING
+- Self-Learning System: DONE (feedback loop, auto-retrain, A/B model comparison)
 
 ### 4. Продвинутая аналитика и визуализация
-- News Impact Attribution (Shapley values) — вклад каждой новости в движение цены
-- Scenario Analysis & Stress Testing: моделирование геополитических/макро/секторальных сценариев
-- Interactive Risk Explorer: drill-down, what-if анализ, сравнения
-- Natural Language Query Interface: "Какие новости повлияли на Сбер?" и т.д.
+- News Impact Attribution (Shapley values): DONE
+- Scenario Analysis & Stress Testing: DONE
+- Interactive Risk Explorer: PENDING
+- Natural Language Query Interface: PENDING
 
 ### 5. Интеграции и экосистема
-- Broker API Integration (Тинькофф, БКС, Финам) — прямое исполнение сделок
-- Multi-Market Expansion (KASE, Китай, Турция)
-- Public API (News, Risk, Signals, Analytics) — Freemium/Enterprise
-- Улучшенный Telegram Bot — уведомления, управление портфелем, NL-запросы
-
-### 6-7. Gamification, UX и Research
-- Prediction Market, Portfolio Simulator, Educational Content
-- Academic Mode (экспорт, reproducible experiments)
-- A/B Testing Framework для моделей и весов
+- Broker API Integration: DONE (Tinkoff broker client with sandbox/mock — market/limit orders, portfolio sync)
+- Multi-Market Expansion: PENDING
+- Public API: DONE (5 new endpoints: scenario, impact, alerts)
+- Улучшенный Telegram Bot: DONE (AlertNotifier: alerts, digest, scenario results)
 
 ### Приоритетная дорожная карта
-| Этап | Срок | Содержание |
-|------|------|-----------|
-| 1 | 2-3 мес | News Impact Prediction + Anomaly Detection + Intelligent Alerts |
-| 2 (in progress) | 2-3 мес | Scenario Analysis + Social Media + Alternative Data |
-| 3 | 2-3 мес | Broker Integration + Self-Learning + Attribution |
-
-**Статус этапов:**
-- Этап 1: DONE (News Impact + Anomaly + Alerts)
-- Этап 2: Scenario Analysis DONE — Monte Carlo, historical bootstrap, crash/macro/sector/custom shocks, max drawdown, portfolio-level VaR/CVaR
-- Этап 2: Social Media + Alternative Data — PENDING
-
-**Наивысший ROI:**
-1. News Impact Prediction Model
-2. Intelligent Alert System
-3. Scenario Analysis
-4. Broker API Integration
-5. Social Media Integration
+| Этап | Статус |
+|------|--------|
+| 1. News Impact Prediction + Anomaly Detection + Alerts | DONE |
+| 2. Scenario Analysis + Social Media + Alternative Data | DONE |
+| 3. Broker Integration + Self-Learning + Attribution | DONE |

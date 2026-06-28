@@ -24,6 +24,7 @@ from src.interfaces.api.auth import (
     require_user,
     verify_password,
 )
+from src.interfaces.api.routes.analysis import router as analysis_router
 from src.interfaces.api.routes_instruments import router as instruments_router
 from src.interfaces.api.routes_market import router as market_router
 from src.interfaces.api.routes_portfolio import router as portfolio_router
@@ -81,6 +82,7 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
+app.include_router(analysis_router)
 app.include_router(instruments_router)
 app.include_router(portfolio_router)
 app.include_router(market_router)

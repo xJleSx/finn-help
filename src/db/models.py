@@ -707,3 +707,22 @@ class GeopoliticalRiskHistory(Base):
     created_at = Column(DateTime, default=func.now())
 
     __table_args__ = (UniqueConstraint("date", name="uq_geopolitical_risk_date"),)
+
+
+class ModelFeedback(Base):
+    __tablename__ = "model_feedback"
+
+    id = Column(Integer, primary_key=True)
+    ticker = Column(String(20), nullable=False, index=True)
+    model_name = Column(String(50), nullable=False, index=True)
+    predicted_return = Column(Float, nullable=False)
+    actual_return = Column(Float, nullable=False)
+    prediction_date = Column(DateTime, nullable=False)
+    horizon_days = Column(Integer, nullable=False)
+    features_hash = Column(String(64), default="")
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        Index("ix_model_feedback_ticker_name", "ticker", "model_name"),
+        Index("ix_model_feedback_created", "created_at"),
+    )

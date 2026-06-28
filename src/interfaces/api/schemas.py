@@ -187,3 +187,59 @@ class RebalanceAlert(BaseModel):
     target_pct: float
     deviation_pct: float
     reason: str
+
+
+class ScenarioItem(BaseModel):
+    name: str
+    loss_pct: float
+    loss: float
+    total_after: float
+    var_95: float | None = None
+
+
+class MonteCarloItem(BaseModel):
+    var_95: float
+    cvar_95: float
+    var_99: float
+    mean_return: float
+
+
+class ScenarioResponse(BaseModel):
+    total: float
+    positions: list[dict[str, Any]]
+    scenarios: list[ScenarioItem]
+    monte_carlo: MonteCarloItem | None = None
+    bootstrap: MonteCarloItem | None = None
+    sector_breakdown: dict[str, float]
+
+
+class AlertItem(BaseModel):
+    news_id: int
+    ticker: str
+    title: str
+    category: str
+    subcategory: str
+    source_name: str
+    published_at: str
+    priority: str
+    priority_score: float
+    anomaly_score: float
+    predicted_return: float
+    impact_confidence: float
+    in_portfolio: bool
+    reason: str
+
+
+class AlertResponse(BaseModel):
+    alerts: list[AlertItem]
+
+
+class FeatureImportance(BaseModel):
+    feature: str
+    importance: float
+
+
+class ImpactAttributionResponse(BaseModel):
+    news_id: int
+    ticker: str
+    feature_importances: list[FeatureImportance]
