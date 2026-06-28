@@ -5,7 +5,7 @@ to process news articles end-to-end.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func
@@ -126,18 +126,30 @@ class NewsBatchProcessor:
 
             db_session.commit()
 
-            # Step 4: Cluster into events
+            # Step 3.5: Generate embeddings & enhanced clustering
+            try:
+                from src.data.news_clusterer import NewsClusterer
+
+                clusterer = NewsClusterer()
+                cluster_result = clusterer.run_pipeline(db_session, hours_back=48)
+                stats["embedded"] = cluster_result.get("total_articles", 0)
+                stats["events_created"] = cluster_result.get("events_created", 0)
+                stats["clustered"] = cluster_result.get("articles_clustered", 0)
+                logger.info("NewsClusterer pipeline: %s", cluster_result)
+            except Exception as e:
+                logger.error(f"Enhanced clustering error: {e}")
+                stats["errors"].append(f"EnhancedCluster: {e}")
+
+            # Step 4: Cluster into events (legacy)
             try:
                 event_mapping = self.event_detector.cluster_into_events(
                     relevant_articles, db_session
                 )
-                stats["clustered"] = len(event_mapping)
-                stats["events_created"] = len(set(event_mapping.values()))
+                stats["clustered"] = stats.get("clustered", 0) + len(event_mapping)
 
-                # Link articles to events
                 for article_id, event_id in event_mapping.items():
                     article = db_session.query(News).get(article_id)
-                    if article:
+                    if article and article.event_id is None:
                         article.event_id = event_id
 
                 db_session.commit()

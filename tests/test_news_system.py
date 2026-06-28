@@ -373,6 +373,183 @@ class TestNewsSystemFactory:
             factory.get("nonexistent")
 
 
+class TestNewsClusterer:
+    def test_basic_instantiation(self):
+        from src.data.news_clusterer import NewsClusterer
+        c = NewsClusterer()
+        assert c is not None
+        assert c.threshold == 0.85
+        assert c.time_window_days == 3
+
+    def test_cosine_similarity_identical(self):
+        from src.data.news_clusterer import _cosine_similarity
+        sim = _cosine_similarity([1.0, 0.0, 0.0], [1.0, 0.0, 0.0])
+        assert sim == 1.0
+
+    def test_cosine_similarity_orthogonal(self):
+        from src.data.news_clusterer import _cosine_similarity
+        sim = _cosine_similarity([1.0, 0.0], [0.0, 1.0])
+        assert sim == 0.0
+
+    def test_cosine_similarity_empty(self):
+        from src.data.news_clusterer import _cosine_similarity
+        assert _cosine_similarity([], [1.0, 0.0]) == 0.0
+
+    def test_generate_embedding_no_embedder(self, monkeypatch):
+        from src.data.news_clusterer import NewsClusterer
+        c = NewsClusterer()
+        c._embedder = None
+        emb = c.generate_embedding("test", "summary here")
+        assert isinstance(emb, list)
+        assert len(emb) == 768
+
+    def test_generate_embedding_fallback_deterministic(self, monkeypatch):
+        from src.data.news_clusterer import NewsClusterer
+        c = NewsClusterer()
+        c._embedder = None
+        emb1 = c.generate_embedding("same text", "same summary")
+        emb2 = c.generate_embedding("same text", "same summary")
+        assert emb1 == emb2
+
+    def test_cluster_no_articles(self, monkeypatch):
+        from src.data.news_clusterer import NewsClusterer
+        c = NewsClusterer()
+        c._embedder = None
+        result = c.cluster_articles([])
+        assert result == []
+
+    def test_cluster_single_article(self, monkeypatch):
+        from src.data.news_clusterer import NewsClusterer
+        import datetime
+        article = type("Article", (), {
+            "id": 1,
+            "embedding": [0.1] * 768,
+            "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
+            "title": "test",
+            "summary": "",
+            "sentiment": "positive",
+            "category": "ECONOMY",
+            "subcategory": None,
+            "impact_score": 0.5,
+        })
+        c = NewsClusterer()
+        c._embedder = None
+        result = c.cluster_articles([article])
+        assert result == []
+
+    def test_cluster_two_similar(self, monkeypatch):
+        from src.data.news_clusterer import NewsClusterer
+        import datetime, hashlib, numpy as np
+        text = "Russia raises key rate"
+        h = int(hashlib.md5(text.lower().encode()).hexdigest(), 16)
+        np.random.seed(h % (2**32))
+        emb = np.random.randn(768).tolist()
+        a1 = type("Article", (), {
+            "id": 1,
+            "embedding": emb,
+            "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
+            "title": "Russia raises key rate",
+            "summary": "Central bank decision",
+            "sentiment": "negative",
+            "category": "ECONOMY",
+            "subcategory": None,
+            "impact_score": 0.8,
+        })
+        a2 = type("Article", (), {
+            "id": 2,
+            "embedding": emb,
+            "published_at": datetime.datetime(2025, 1, 2, tzinfo=datetime.timezone.utc),
+            "title": "Russia raises key rate",
+            "summary": "Central bank decision",
+            "sentiment": "negative",
+            "category": "ECONOMY",
+            "subcategory": None,
+            "impact_score": 0.7,
+        })
+        c = NewsClusterer()
+        c._embedder = None
+        result = c.cluster_articles([a1, a2])
+        assert len(result) == 1
+        assert len(result[0]) == 2
+
+    def test_cluster_time_window_exceeded(self, monkeypatch):
+        from src.data.news_clusterer import NewsClusterer
+        import datetime, hashlib, numpy as np
+        text = "Some news"
+        h = int(hashlib.md5(text.lower().encode()).hexdigest(), 16)
+        np.random.seed(h % (2**32))
+        emb = np.random.randn(768).tolist()
+        a1 = type("Article", (), {
+            "id": 1,
+            "embedding": emb,
+            "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
+            "title": "",
+            "summary": "",
+            "sentiment": "neutral",
+            "category": "GENERAL",
+            "subcategory": None,
+            "impact_score": 0.0,
+        })
+        a2 = type("Article", (), {
+            "id": 2,
+            "embedding": emb,
+            "published_at": datetime.datetime(2025, 1, 10, tzinfo=datetime.timezone.utc),
+            "title": "",
+            "summary": "",
+            "sentiment": "neutral",
+            "category": "GENERAL",
+            "subcategory": None,
+            "impact_score": 0.0,
+        })
+        c = NewsClusterer(time_window_days=3)
+        c._embedder = None
+        result = c.cluster_articles([a1, a2])
+        assert result == []
+
+    def test_fallback_embedding_deterministic(self):
+        from src.data.news_clusterer import NewsClusterer
+        emb1 = NewsClusterer._fallback_embedding("test text")
+        emb2 = NewsClusterer._fallback_embedding("test text")
+        assert emb1 == emb2
+        assert len(emb1) == 768
+
+    def test_fallback_embedding_different_texts_differ(self):
+        from src.data.news_clusterer import NewsClusterer
+        emb1 = NewsClusterer._fallback_embedding("hello world")
+        emb2 = NewsClusterer._fallback_embedding("goodbye world")
+        assert emb1 != emb2
+
+    def test_get_or_create_event(self):
+        from src.data.news_clusterer import _get_or_create_event
+        import datetime
+        a1 = type("Article", (), {
+            "id": 1,
+            "title": "Main event",
+            "summary": "details",
+            "category": "POLITICS",
+            "subcategory": "conflict",
+            "impact_score": 0.9,
+            "sentiment": "negative",
+            "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
+        })
+        a2 = type("Article", (), {
+            "id": 2,
+            "title": "Follow up",
+            "summary": "more details",
+            "category": "POLITICS",
+            "subcategory": "conflict",
+            "impact_score": 0.7,
+            "sentiment": "positive",
+            "published_at": datetime.datetime(2025, 1, 2, tzinfo=datetime.timezone.utc),
+        })
+        event = _get_or_create_event(None, [a1, a2])
+        assert event.title == "Main event"
+        assert event.category == "POLITICS"
+        assert event.subcategory == "conflict"
+        assert event.impact_score == 0.9
+        assert event.article_count == 2
+
+
 class TestNewsDeduplicator:
     def test_basic_instantiation(self):
         from src.data.news_processor import NewsDeduplicator
