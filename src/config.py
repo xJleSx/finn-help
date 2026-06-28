@@ -63,6 +63,29 @@ class Settings(BaseSettings):
     ml_oos_acc_min: float = 0.52
     ml_gap_size: int = 20
 
+    ml_impact_n_estimators: int = 100
+    ml_impact_max_depth: int = 4
+    ml_impact_learning_rate: float = 0.05
+    ml_impact_min_train_samples: int = 50
+    ml_impact_horizons: str = "1,3,5"
+    ml_impact_days_back: int = 365
+
+    ml_anomaly_volume_contamination: float = 0.1
+    ml_anomaly_sentiment_contamination: float = 0.1
+    ml_anomaly_autoencoder_contamination: float = 0.1
+    ml_anomaly_window_sizes: str = "3,7,14,30"
+    ml_anomaly_days_back: int = 365
+    ml_anomaly_autoencoder_hidden_dim: int = 8
+    ml_anomaly_autoencoder_epochs: int = 50
+    ml_anomaly_autoencoder_lr: float = 0.001
+    ml_anomaly_weight_volume: float = 0.25
+    ml_anomaly_weight_sentiment: float = 0.25
+    ml_anomaly_weight_source: float = 0.2
+    ml_anomaly_weight_topic: float = 0.15
+    ml_anomaly_weight_autoencoder: float = 0.15
+    ml_anomaly_min_samples: int = 10
+    ml_anomaly_source_min_freq: int = 3
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
