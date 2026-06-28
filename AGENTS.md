@@ -104,7 +104,7 @@
 
 ### 1. Предиктивная аналитика и ML
 - News Impact Prediction Model: DONE (XGBoost Regressor, 3 horizons, 24 features)
-- Sentiment Evolution Prediction: PENDING
+- Sentiment Evolution Prediction: DONE (XGBoost predicting 3/7d ahead, 11 features)
 - Anomaly Detection: DONE (Volume/Sentiment Isolation Forest + Source/Topic frequency analysis + PyTorch Autoencoder, unified detector)
 - Causal Inference: PENDING
 - News Impact Attribution: DONE (SHAP-based feature importance per news article)
@@ -118,19 +118,19 @@
 ### 3. Автоматизация и оптимизация
 - Automated Summarization: DONE (LLM news cluster summarizer with fallback)
 - Intelligent Alert System: DONE
-- Automated Portfolio Rebalancing: PENDING
+- Automated Portfolio Rebalancing: DONE (RebalancingEngine: weight targets, sector limits, conviction-based sizing, broker integration)
 - Self-Learning System: DONE (feedback loop, auto-retrain, A/B model comparison)
 
 ### 4. Продвинутая аналитика и визуализация
 - News Impact Attribution (Shapley values): DONE
 - Scenario Analysis & Stress Testing: DONE
-- Interactive Risk Explorer: PENDING
-- Natural Language Query Interface: PENDING
+- Interactive Risk Explorer: DONE (RiskExplorer: portfolio risk summary, ticker deep-dive, sector heatmap, correlation table)
+- Natural Language Query Interface: DONE (NLQueryEngine: intent classification, 6 handlers, LLM routing, template fallback)
 
 ### 5. Интеграции и экосистема
 - Broker API Integration: DONE (Tinkoff broker client with sandbox/mock — market/limit orders, portfolio sync)
-- Multi-Market Expansion: PENDING
-- Public API: DONE (5 new endpoints: scenario, impact, alerts)
+- Multi-Market Expansion: DONE (KASE collector stub with Instrument.exchange column)
+- Public API: DONE (5 new endpoints: scenario, custom shock, impact, alerts)
 - Улучшенный Telegram Bot: DONE (AlertNotifier: alerts, digest, scenario results)
 
 ### Приоритетная дорожная карта
