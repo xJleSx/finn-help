@@ -3,7 +3,7 @@ import logging
 from datetime import date, datetime, timezone
 
 from src.scheduler.reporting import generate_daily_report, take_snapshot
-from src.scheduler.tasks import daily_update
+from src.scheduler.tasks import daily_update, weekly_update
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +96,11 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
                         await take_snapshot("weekly")
                     except Exception as e:
                         logger.error("Weekly snapshot failed: %s", e)
+                    try:
+                        logger.info("Running weekly data update...")
+                        await weekly_update()
+                    except Exception as e:
+                        logger.error("Weekly data update failed: %s", e)
 
             if _is_first_of_month():
                 month_key = date.today().year * 12 + date.today().month

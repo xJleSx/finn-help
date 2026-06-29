@@ -13,7 +13,7 @@ Includes:
 import logging
 import re
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import numpy as np
@@ -138,7 +138,7 @@ class GeopoliticalRiskEngine:
                         severity=template["base_severity"],
                         region=region,
                         snippet=text[:120],
-                        date=article.published_at or datetime.utcnow(),
+                        date=article.published_at or datetime.now(timezone.utc),
                     )
                     events.append(event)
                     break
@@ -148,7 +148,7 @@ class GeopoliticalRiskEngine:
         self, events: list[DetectedEvent], current_date: Optional[datetime] = None
     ) -> dict[str, Any]:
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
 
         category_scores: dict[str, float] = defaultdict(float)
         for event in events:
@@ -167,7 +167,7 @@ class GeopoliticalRiskEngine:
         self, subcategory: str, articles: list[Any], current_date: Optional[datetime] = None
     ) -> dict[str, Any]:
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
 
         relevant = [a for a in articles if a.is_relevant and a.subcategory == subcategory]
 
@@ -243,7 +243,7 @@ class GeopoliticalRiskEngine:
         from src.db.models import GeopoliticalRiskHistory, News
 
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
 
         geo_articles = (
             db_session.query(News)
@@ -363,7 +363,7 @@ class GeopoliticalRiskEngine:
         history = (
             db_session.query(GeopoliticalRiskHistory)
             .filter(
-                GeopoliticalRiskHistory.date >= datetime.utcnow().date() - timedelta(days=days)
+                GeopoliticalRiskHistory.date >= datetime.now(timezone.utc).date() - timedelta(days=days)
             )
             .order_by(GeopoliticalRiskHistory.date)
             .all()
@@ -475,7 +475,7 @@ class GeopoliticalRiskEngine:
     def identify_emerging_threats(self, db_session: Any, sensitivity: float = 0.2) -> list[dict[str, Any]]:
         from src.db.models import GeopoliticalRiskHistory
 
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         yesterday = today - timedelta(days=1)
         week_ago = today - timedelta(days=7)
 
@@ -519,7 +519,7 @@ class GeopoliticalRiskEngine:
         self, sector: str, db_session: Any, current_date: Optional[datetime] = None
     ) -> dict[str, Any]:
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
 
         risk = self.calculate_daily_geopolitical_risk(db_session, current_date)
         subcat_scores = {k: v["risk_score"] for k, v in risk["subcategories"].items()}

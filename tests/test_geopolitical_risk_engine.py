@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,8 +9,8 @@ from src.data.geopolitical_risk_engine import (
     EWMA_ALPHA,
     GEO_RISK_WEIGHTS,
     REGION_KEYWORDS,
-    GeopoliticalRiskEngine,
     DetectedEvent,
+    GeopoliticalRiskEngine,
 )
 
 
@@ -43,28 +43,28 @@ class TestExtractRegion:
 
 class TestEventDetection:
     def test_detect_sanctions_event(self, engine):
-        article = MagicMock(title="Новые санкции против РФ", summary="", published_at=datetime.utcnow())
+        article = MagicMock(title="Новые санкции против РФ", summary="", published_at=datetime.now(timezone.utc))
         events = engine.detect_events([article])
         assert len(events) == 1
         assert events[0].category == "sanctions"
         assert events[0].severity == 7.0  # matches "санкции против" pattern first
 
     def test_detect_conflict(self, engine):
-        article = MagicMock(title="Военный конфликт в регионе", summary="", published_at=datetime.utcnow())
+        article = MagicMock(title="Военный конфликт в регионе", summary="", published_at=datetime.now(timezone.utc))
         events = engine.detect_events([article])
         assert len(events) == 1
         assert events[0].category == "conflict"
 
     def test_no_event(self, engine):
-        article = MagicMock(title="Спортивные новости", summary="", published_at=datetime.utcnow())
+        article = MagicMock(title="Спортивные новости", summary="", published_at=datetime.now(timezone.utc))
         events = engine.detect_events([article])
         assert len(events) == 0
 
 
 class TestDetectedEvent:
     def test_decay(self):
-        event = DetectedEvent("sanctions", 8.0, "russia", "text", datetime.utcnow() - timedelta(days=30))
-        decayed = event.decayed_severity(datetime.utcnow())
+        event = DetectedEvent("sanctions", 8.0, "russia", "text", datetime.now(timezone.utc) - timedelta(days=30))
+        decayed = event.decayed_severity(datetime.now(timezone.utc))
         assert decayed == pytest.approx(4.0, rel=0.1)  # half-life of 30 days
 
 
@@ -75,8 +75,8 @@ class TestEventRisk:
 
     def test_with_events(self, engine):
         events = [
-            DetectedEvent("sanctions", 8.0, "russia", "text", datetime.utcnow()),
-            DetectedEvent("conflict", 7.0, "iran", "text", datetime.utcnow()),
+            DetectedEvent("sanctions", 8.0, "russia", "text", datetime.now(timezone.utc)),
+            DetectedEvent("conflict", 7.0, "iran", "text", datetime.now(timezone.utc)),
         ]
         result = engine.calculate_event_risk(events)
         assert result["sanctions"] == 8.0
@@ -96,7 +96,7 @@ class TestSubcategoryScore:
         article = MagicMock(
             is_relevant=True,
             subcategory="sanctions",
-            published_at=datetime.utcnow(),
+            published_at=datetime.now(timezone.utc),
             sentiment="negative",
             impact_score=7.0,
             source_name="rbc",
@@ -256,7 +256,7 @@ class TestDailyGeopoliticalRisk:
             subcategory="sanctions",
             title="Новые санкции",
             summary="против РФ",
-            published_at=datetime.utcnow(),
+            published_at=datetime.now(timezone.utc),
             sentiment="negative",
             impact_score=8.0,
             source_name="rbc",
@@ -283,7 +283,7 @@ class TestStoreGeopoliticalRisk:
     def test_success(self, engine):
         db = MagicMock()
         risk = {
-            "date": datetime.utcnow().date(),
+            "date": datetime.now(timezone.utc).date(),
             "risk_score": 5.5,
             "subcategories": {
                 "sanctions": {"risk_score": 6.0},
@@ -310,7 +310,7 @@ class TestStoreGeopoliticalRisk:
         db = MagicMock()
         db.add.side_effect = Exception("DB error")
         risk = {
-            "date": datetime.utcnow().date(),
+            "date": datetime.now(timezone.utc).date(),
             "risk_score": 5.5,
             "subcategories": {
                 "sanctions": {"risk_score": 6.0},

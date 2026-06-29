@@ -5,7 +5,7 @@ Calculates daily sector risk scores based on accumulated news impacts.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,7 @@ class ImpactMatrix:
             Decay factor (0-1, where 1 = no decay)
         """
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
 
         if not published_at:
             return 1.0
@@ -162,7 +162,7 @@ class ImpactMatrix:
             Risk score dict with components
         """
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
 
         total_risk = 0.0
         news_count = 0
@@ -231,7 +231,7 @@ class ImpactMatrix:
         from src.db.models import News
 
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
 
         results = {}
 
@@ -263,7 +263,7 @@ class ImpactMatrix:
         from src.db.models import News
 
         trend_data = []
-        current_date = datetime.utcnow()
+        current_date = datetime.now(timezone.utc)
 
         for day_offset in range(days, -1, -1):
             date = current_date - timedelta(days=day_offset)
@@ -316,7 +316,7 @@ class ImpactMatrix:
 
         articles = db_session.query(News).filter(
             News.is_relevant,
-            News.published_at >= datetime.utcnow() - timedelta(days=days),
+            News.published_at >= datetime.now(timezone.utc) - timedelta(days=days),
         ).all()
 
         if not articles:

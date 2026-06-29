@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,7 +8,6 @@ import pytest
 from src.data.company_risk_aggregator import (
     BASE_WEIGHTS,
     CONTAGION_COEFFICIENT,
-    SECTOR_BASELINE_RISK,
     CompanyRiskAggregator,
 )
 
@@ -140,12 +139,12 @@ class TestContagionBoost:
     def test_no_peers(self, aggregator):
         db = MagicMock()
         db.query.return_value.join.return_value.filter.return_value.all.return_value = []
-        result = CompanyRiskAggregator._contagion_boost(db, 1, "Финансы", datetime.utcnow())
+        result = CompanyRiskAggregator._contagion_boost(db, 1, "Финансы", datetime.now(timezone.utc))
         assert result == 0.0
 
     def test_no_sector(self, aggregator):
         db = MagicMock()
-        result = CompanyRiskAggregator._contagion_boost(db, 1, None, datetime.utcnow())
+        result = CompanyRiskAggregator._contagion_boost(db, 1, None, datetime.now(timezone.utc))
         assert result == 0.0
 
     def test_with_high_risk_peers(self, aggregator):
@@ -154,7 +153,7 @@ class TestContagionBoost:
         peer2 = MagicMock(risk_score=7.0)
         db.query.return_value.join.return_value.filter.return_value.all.return_value = [peer1, peer2]
         expected = ((8.0 + 7.0) / 2 - 6.0) * CONTAGION_COEFFICIENT
-        result = CompanyRiskAggregator._contagion_boost(db, 1, "Финансы", datetime.utcnow())
+        result = CompanyRiskAggregator._contagion_boost(db, 1, "Финансы", datetime.now(timezone.utc))
         assert result == pytest.approx(expected)
 
 
@@ -250,7 +249,7 @@ class TestSentimentMultiplier:
     def test_no_news(self, aggregator):
         db = MagicMock()
         db.query.return_value.join.return_value.filter.return_value.all.return_value = []
-        result = aggregator._sentiment_multiplier(db, 1, datetime.utcnow())
+        result = aggregator._sentiment_multiplier(db, 1, datetime.now(timezone.utc))
         assert result == 1.0
 
     def test_all_positive(self, aggregator):
@@ -259,7 +258,7 @@ class TestSentimentMultiplier:
             MagicMock(sentiment="positive"),
             MagicMock(sentiment="positive"),
         ]
-        result = aggregator._sentiment_multiplier(db, 1, datetime.utcnow())
+        result = aggregator._sentiment_multiplier(db, 1, datetime.now(timezone.utc))
         assert result == 0.8
 
     def test_all_negative(self, aggregator):
@@ -268,7 +267,7 @@ class TestSentimentMultiplier:
             MagicMock(sentiment="negative"),
             MagicMock(sentiment="negative"),
         ]
-        result = aggregator._sentiment_multiplier(db, 1, datetime.utcnow())
+        result = aggregator._sentiment_multiplier(db, 1, datetime.now(timezone.utc))
         assert result == pytest.approx(1.2)
 
 
@@ -276,13 +275,13 @@ class TestRecencyBoost:
     def test_no_recency(self, aggregator):
         db = MagicMock()
         db.query.return_value.filter.return_value.count.return_value = 0
-        result = aggregator._recency_boost(db, 1, datetime.utcnow())
+        result = aggregator._recency_boost(db, 1, datetime.now(timezone.utc))
         assert result == 1.0
 
     def test_with_recency(self, aggregator):
         db = MagicMock()
         db.query.return_value.filter.return_value.count.return_value = 5
-        result = aggregator._recency_boost(db, 1, datetime.utcnow())
+        result = aggregator._recency_boost(db, 1, datetime.now(timezone.utc))
         assert result == pytest.approx(1.1)
 
 
@@ -415,7 +414,7 @@ class TestStoreCompanyRisk:
         risk_data = {
             "instrument_id": 1,
             "ticker": "SBER",
-            "date": datetime.utcnow().date(),
+            "date": datetime.now(timezone.utc).date(),
             "risk_score": 5.5,
             "decomposition": {"sector_risk": 4.0, "geopolitical_risk": 3.0, "macro_risk": 5.0, "company_specific_risk": 2.0, "volatility_contribution": 1.0, "contagion_contribution": 0.0},
             "recent_news_count": 10,
@@ -431,7 +430,7 @@ class TestStoreCompanyRisk:
         risk_data = {
             "instrument_id": 1,
             "ticker": "SBER",
-            "date": datetime.utcnow().date(),
+            "date": datetime.now(timezone.utc).date(),
             "risk_score": 5.5,
             "decomposition": {"sector_risk": 4.0, "geopolitical_risk": 3.0, "macro_risk": 5.0, "company_specific_risk": 2.0, "volatility_contribution": 1.0, "contagion_contribution": 0.0},
             "recent_news_count": 10,

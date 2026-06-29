@@ -5,7 +5,7 @@ comprehensive sector risk assessments.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ class SectorCorrelationTracker:
         from src.db.models import SectorRiskHistory
 
         history = db.query(SectorRiskHistory).filter(
-            SectorRiskHistory.date >= datetime.utcnow().date() - timedelta(days=days),
+            SectorRiskHistory.date >= datetime.now(timezone.utc).date() - timedelta(days=days),
         ).order_by(SectorRiskHistory.date).all()
 
         by_sector: dict[str, list[float]] = {}
@@ -223,7 +223,7 @@ class SectorImpactEngine:
         self, sector: str, db_session: Any, current_date: Optional[datetime] = None
     ) -> dict[str, Any]:
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
 
         from src.db.models import NewsSectorImpact
 
@@ -363,7 +363,7 @@ class SectorImpactEngine:
 
         history = db_session.query(SectorRiskHistory).filter(
             SectorRiskHistory.sector == sector,
-            SectorRiskHistory.date >= datetime.utcnow().date() - timedelta(days=days),
+            SectorRiskHistory.date >= datetime.now(timezone.utc).date() - timedelta(days=days),
         ).order_by(SectorRiskHistory.date).all()
 
         if not history:
@@ -413,7 +413,7 @@ class SectorImpactEngine:
         """
         from src.db.models import SectorRiskHistory
 
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         high_risk = db_session.query(SectorRiskHistory).filter(
             SectorRiskHistory.date == today,
             SectorRiskHistory.risk_score >= threshold,

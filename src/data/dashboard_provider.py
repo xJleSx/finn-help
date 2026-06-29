@@ -8,7 +8,7 @@ Provides data for frontend visualization:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class DashboardDataProvider:
         """
         from src.db.models import News, NewsEvent
 
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         # Get news events
         events = db_session.query(NewsEvent).filter(
@@ -88,7 +88,7 @@ class DashboardDataProvider:
         ).count()
 
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "period_days": days,
             "statistics": {
                 "total_articles": total_articles,
@@ -111,7 +111,7 @@ class DashboardDataProvider:
         """
         from src.db.models import Instrument, SectorRiskHistory
 
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
 
         # Get all sectors
         sectors = db_session.query(Instrument.sector).distinct().filter(
@@ -135,7 +135,7 @@ class DashboardDataProvider:
             }
 
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "date": today.isoformat(),
             "heatmap": heatmap,
         }
@@ -158,7 +158,7 @@ class DashboardDataProvider:
         if not instrument:
             return {"error": f"Instrument {ticker} not found"}
 
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
 
         risk = db_session.query(CompanyRiskHistory).filter(
             CompanyRiskHistory.instrument_id == instrument.id,
@@ -208,7 +208,7 @@ class DashboardDataProvider:
         """
         from src.db.models import GeopoliticalRiskHistory
 
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
 
         geo_risk = db_session.query(GeopoliticalRiskHistory).filter(
             GeopoliticalRiskHistory.date == today
@@ -216,7 +216,7 @@ class DashboardDataProvider:
 
         if not geo_risk:
             return {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "date": today.isoformat(),
                 "total_risk": 0.0,
                 "alert_level": "low",
@@ -237,7 +237,7 @@ class DashboardDataProvider:
             alert_level = "critical"
 
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "date": today.isoformat(),
             "total_risk": geo_risk.risk_score,
             "alert_level": alert_level,
@@ -279,7 +279,7 @@ class DashboardDataProvider:
         """
         from src.db.models import CompanyRiskHistory, Instrument, SectorRiskHistory
 
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         history = []
 
         if target_type == "sector":

@@ -5,7 +5,7 @@ Updates portfolio allocator with new risk components.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ class SignalFusionIntegration:
             },
             "sentiment": dominant_sentiment,
             "recent_articles": len(recent_news),
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     def generate_sector_risk_signal(
@@ -111,7 +111,7 @@ class SignalFusionIntegration:
 
         risk_history = db_session.query(SectorRiskHistory).filter(
             SectorRiskHistory.sector == sector,
-            SectorRiskHistory.date == datetime.utcnow().date(),
+            SectorRiskHistory.date == datetime.now(timezone.utc).date(),
         ).first()
 
         if not risk_history:
@@ -129,7 +129,7 @@ class SignalFusionIntegration:
             "confidence": min(1.0, risk_history.article_count / 5),
             "article_count": risk_history.article_count,
             "components": risk_history.components_json,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     def generate_geopolitical_signal(self, db_session: Any) -> dict[str, Any]:
@@ -150,7 +150,7 @@ class SignalFusionIntegration:
             "confidence": geo_risk["source_diversity_score"],
             "subcategories": geo_risk["subcategories"],
             "article_count": geo_risk["total_article_count"],
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     def adjust_portfolio_weights_for_risk(
@@ -213,14 +213,14 @@ class SignalFusionIntegration:
                 "risk_score": geo_risk["risk_score"],
                 "message": f"Geopolitical risk at {geo_risk['risk_score']:.1f}/10",
                 "action": "Review exposure to high-risk sectors",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 
         # Sector-level alerts
         from src.db.models import SectorRiskHistory
 
         high_risk_sectors = db_session.query(SectorRiskHistory).filter(
-            SectorRiskHistory.date == datetime.utcnow().date(),
+            SectorRiskHistory.date == datetime.now(timezone.utc).date(),
             SectorRiskHistory.risk_score > 6.5,
         ).order_by(SectorRiskHistory.risk_score.desc()).limit(5).all()
 
@@ -233,7 +233,7 @@ class SignalFusionIntegration:
                 "article_count": sector_risk.article_count,
                 "message": f"Sector {sector_risk.sector} risk at {sector_risk.risk_score:.1f}/10",
                 "action": f"Reduce exposure to {sector_risk.sector}",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 
         # Sentiment divergence alerts (uncertainty signals)
@@ -252,7 +252,7 @@ class SignalFusionIntegration:
                 "consensus": div["consensus"],
                 "message": f"Mixed sentiment detected in {ticker} - uncertainty signal",
                 "action": "Monitor for volatility increase",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 
         # Sort by severity and score
