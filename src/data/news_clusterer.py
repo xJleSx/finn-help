@@ -133,8 +133,6 @@ class NewsClusterer:
         return clusters
 
     def cluster_and_save(self, db: Any, articles: list[Any]) -> dict[int, int]:
-        from src.db.models import News
-
         mapping: dict[int, int] = {}
         clusters = self.cluster_articles(articles)
         for cluster in clusters:

@@ -1,13 +1,14 @@
 import pytest
+
 from src.db.models import (
+    CompanyRiskHistory,
+    GeopoliticalRiskHistory,
     News,
+    NewsCompanyImpact,
     NewsEvent,
     NewsInstrument,
     NewsSectorImpact,
-    NewsCompanyImpact,
     SectorRiskHistory,
-    CompanyRiskHistory,
-    GeopoliticalRiskHistory,
 )
 
 
@@ -62,7 +63,7 @@ class TestModuleImports:
         assert NewsBatchProcessor is not None
 
     def test_news_system_factory_import(self):
-        from src.data.news_system import NewsSystemFactory, initialize_news_system, get_news_system
+        from src.data.news_system import NewsSystemFactory, get_news_system, initialize_news_system
         assert NewsSystemFactory is not None
         assert initialize_news_system is not None
         assert get_news_system is not None
@@ -423,8 +424,9 @@ class TestSectorImpactEngineV2:
         assert SectorImpactEngine is not None
 
     def test_get_daily_risk_v2_structure(self, monkeypatch):
+        from datetime import datetime, timezone
+
         from src.data.sector_impact_engine import SectorImpactEngine
-        from datetime import datetime
         engine = SectorImpactEngine(None, None)
 
         class MockTracker:
@@ -440,7 +442,7 @@ class TestSectorImpactEngineV2:
         def mock_risk(sector, db, date=None):
             return {
                 "sector": sector,
-                "date": datetime.utcnow().date(),
+                "date": datetime.now(timezone.utc).date(),
                 "risk_score": 5.0,
                 "components": {},
                 "article_count": 10,
@@ -462,7 +464,7 @@ class TestSectorImpactEngineV2:
         assert result["trend"] == "up"
 
     def test_get_risk_heatmap_structure(self, monkeypatch):
-        from src.data.sector_impact_engine import SectorImpactEngine, SectorCorrelationTracker
+        from src.data.sector_impact_engine import SectorCorrelationTracker, SectorImpactEngine
         engine = SectorImpactEngine(None, None)
 
         def mock_calc(sector, db, date=None):
@@ -519,17 +521,19 @@ class TestImpactMatrix:
         assert 0 < impact <= 10
 
     def test_calculate_decay_fresh(self):
-        from datetime import datetime, timedelta
+        from datetime import datetime, timezone
+
         from src.data.impact_matrix import ImpactMatrix
         m = ImpactMatrix()
-        decay = m.calculate_decay(datetime.utcnow())
+        decay = m.calculate_decay(datetime.now(timezone.utc))
         assert decay == 1.0
 
     def test_calculate_decay_old(self):
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
+
         from src.data.impact_matrix import ImpactMatrix
         m = ImpactMatrix()
-        decay = m.calculate_decay(datetime.utcnow() - timedelta(days=120))
+        decay = m.calculate_decay(datetime.now(timezone.utc) - timedelta(days=120))
         assert decay < 0.1
 
 
@@ -702,8 +706,9 @@ class TestNewsClusterer:
         assert result == []
 
     def test_cluster_single_article(self, monkeypatch):
-        from src.data.news_clusterer import NewsClusterer
         import datetime
+
+        from src.data.news_clusterer import NewsClusterer
         article = type("Article", (), {
             "id": 1,
             "embedding": [0.1] * 768,
@@ -721,8 +726,12 @@ class TestNewsClusterer:
         assert result == []
 
     def test_cluster_two_similar(self, monkeypatch):
+        import datetime
+        import hashlib
+
+        import numpy as np
+
         from src.data.news_clusterer import NewsClusterer
-        import datetime, hashlib, numpy as np
         text = "Russia raises key rate"
         h = int(hashlib.md5(text.lower().encode()).hexdigest(), 16)
         np.random.seed(h % (2**32))
@@ -756,8 +765,12 @@ class TestNewsClusterer:
         assert len(result[0]) == 2
 
     def test_cluster_time_window_exceeded(self, monkeypatch):
+        import datetime
+        import hashlib
+
+        import numpy as np
+
         from src.data.news_clusterer import NewsClusterer
-        import datetime, hashlib, numpy as np
         text = "Some news"
         h = int(hashlib.md5(text.lower().encode()).hexdigest(), 16)
         np.random.seed(h % (2**32))
@@ -803,8 +816,9 @@ class TestNewsClusterer:
         assert emb1 != emb2
 
     def test_get_or_create_event(self):
-        from src.data.news_clusterer import _get_or_create_event
         import datetime
+
+        from src.data.news_clusterer import _get_or_create_event
         a1 = type("Article", (), {
             "id": 1,
             "title": "Main event",
@@ -856,13 +870,13 @@ class TestCompanyRiskAggregator:
 
 class TestSignalFusionIntegration:
     def test_instantiation_requires_deps(self):
-        from src.data.signal_fusion_integration import SignalFusionIntegration
-        from src.data.geopolitical_risk_engine import GeopoliticalRiskEngine
-        from src.data.sector_impact_engine import SectorImpactEngine
         from src.data.company_risk_aggregator import CompanyRiskAggregator
         from src.data.event_detector import EventDetector
+        from src.data.geopolitical_risk_engine import GeopoliticalRiskEngine
         from src.data.impact_matrix import ImpactMatrix
+        from src.data.sector_impact_engine import SectorImpactEngine
         from src.data.sector_mapper import SectorMapper
+        from src.data.signal_fusion_integration import SignalFusionIntegration
 
         geo = GeopoliticalRiskEngine()
         impact = ImpactMatrix()

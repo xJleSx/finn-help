@@ -10,7 +10,7 @@ Features:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import numpy as np
@@ -83,7 +83,7 @@ class CompanyRiskAggregator:
     def _get_market_regime(db_session: Any) -> str:
         """Determine broad market regime (normal / stress)."""
         from src.db.models import GeopoliticalRiskHistory, SectorRiskHistory
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         geo = (
             db_session.query(GeopoliticalRiskHistory)
             .filter(GeopoliticalRiskHistory.date == today)
@@ -176,7 +176,7 @@ class CompanyRiskAggregator:
     ) -> float:
         from src.db.models import SectorRiskHistory
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
         if not instrument.sector:
             return self._get_sector_baseline(None)
         sector_risk = (
@@ -196,7 +196,7 @@ class CompanyRiskAggregator:
     ) -> float:
         from src.db.models import GeopoliticalRiskHistory
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
         geo_risk = (
             db_session.query(GeopoliticalRiskHistory)
             .filter(GeopoliticalRiskHistory.date == current_date.date())
@@ -211,7 +211,7 @@ class CompanyRiskAggregator:
     ) -> float:
         from src.db.models import NewsCompanyImpact
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
         macro_impacts = (
             db_session.query(NewsCompanyImpact)
             .filter(
@@ -233,7 +233,7 @@ class CompanyRiskAggregator:
     ) -> float:
         from src.db.models import NewsCompanyImpact
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
         company_impacts = (
             db_session.query(NewsCompanyImpact)
             .filter(
@@ -307,7 +307,7 @@ class CompanyRiskAggregator:
         current_date: Optional[datetime] = None,
     ) -> dict[str, Any]:
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
 
         from src.db.models import FundamentalMetric, News, NewsInstrument
 
@@ -437,7 +437,7 @@ class CompanyRiskAggregator:
         count: int = 20,
     ) -> list[dict[str, Any]]:
         from src.db.models import CompanyRiskHistory, Instrument
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         high_risk = (
             db_session.query(CompanyRiskHistory)
             .filter(
@@ -472,7 +472,7 @@ class CompanyRiskAggregator:
             db_session.query(CompanyRiskHistory)
             .filter(
                 CompanyRiskHistory.instrument_id == instrument.id,
-                CompanyRiskHistory.date >= datetime.utcnow().date() - timedelta(days=days),
+                CompanyRiskHistory.date >= datetime.now(timezone.utc).date() - timedelta(days=days),
             )
             .order_by(CompanyRiskHistory.date)
             .all()
@@ -508,7 +508,7 @@ class CompanyRiskAggregator:
         """Aggregate risk across a portfolio of instruments."""
         from src.db.models import CompanyRiskHistory
         if current_date is None:
-            current_date = datetime.utcnow()
+            current_date = datetime.now(timezone.utc)
         date = current_date.date()
         risks = (
             db_session.query(CompanyRiskHistory)

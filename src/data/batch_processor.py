@@ -328,7 +328,7 @@ class NewsBatchProcessor:
         """
         from src.db.models import News, NewsEvent, SectorRiskHistory
 
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         last_week = today - timedelta(days=7)
 
         # Count news by category

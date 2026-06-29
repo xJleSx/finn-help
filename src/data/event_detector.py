@@ -5,7 +5,7 @@ Divergence = high uncertainty/contrarian signal.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -114,8 +114,8 @@ class EventDetector:
 
                 # Check time window
                 time_diff = abs(
-                    (articles[j].published_at or datetime.utcnow())
-                    - (article.published_at or datetime.utcnow())
+                    (articles[j].published_at or datetime.now(timezone.utc))
+                    - (article.published_at or datetime.now(timezone.utc))
                 ).days
 
                 if time_diff > time_window_days:
@@ -221,7 +221,7 @@ class SentimentDivergenceDetector:
             }
 
         # Get recent news for these instruments
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
         news_items = db_session.query(News).join(
             NewsInstrument, NewsInstrument.news_id == News.id
         ).filter(
@@ -288,7 +288,7 @@ class SentimentDivergenceDetector:
         from src.db.models import News, NewsInstrument
 
         # Get recent news
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
         news_items = db_session.query(News).join(
             NewsInstrument, NewsInstrument.news_id == News.id
         ).filter(
