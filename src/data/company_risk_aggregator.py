@@ -506,7 +506,7 @@ class CompanyRiskAggregator:
         current_date: Optional[datetime] = None,
     ) -> dict[str, Any]:
         """Aggregate risk across a portfolio of instruments."""
-        from src.db.models import CompanyRiskHistory, Instrument
+        from src.db.models import CompanyRiskHistory
         if current_date is None:
             current_date = datetime.utcnow()
         date = current_date.date()
