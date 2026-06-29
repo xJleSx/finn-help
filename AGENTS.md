@@ -37,27 +37,17 @@
 
 ## Master Plan: Обогащение БД и качество ответов бота
 
-### Этап 0 — Наполнение и обогащение БД (NEW PRIORITY)
+### Этап 0 — Наполнение и обогащение БД (DONE)
 Цель: LLM получает богатый ticker_context (фин.отчётность, bond params, события).
 
-**Collectors (collectors/moex.py + financials.py):**
-- Полные профили компаний: описание, сектор, отрасль, employees, founded, website
-- Финансовая отчётность МСФО/РСБУ (прибыль, выручка, ROE, долг, дивиденды)
-- Параметры облигаций (купон, YTM, рейтинг, оферта, амортизация, дюрация)
-- Корпоративные события (дивиденды, buyback, splits, доп.эмиссия)
-
-**Модели (db/models.py):**
-- CompanyProfile — полное описание компании
-- FinancialReport — улучшить coverage
-- BondOffering — улучшить (добавить рейтинг, оферту, амортизацию)
-- CorporateEvent — buyback, splits, доп.эмиссия
-
-**Регулярное обновление (scheduler/collectors.py):**
-- Ежедневно: цены, новости, курсы валют
-- Еженедельно: фундаментальные метрики, фин.отчётность
-- Ежемесячно: профили компаний, облигации
-
-**Миграции:** Alembic для всех новых моделей.
+- DONE: CompanyProfile модель + SmartLabProfileCollector
+- DONE: CorporateEvent модель + MOEXCorporateEventCollector
+- DONE: FinancialReport collector (SmartLab IFRS), wired to scheduler (weekly)
+- DONE: BondOffering collector (MOEX ISS: coupon, YTM, рейтинг, оферта, амортизация, дюрация)
+- DONE: BondOffering модель (was already in schema)
+- DONE: Scheduler — weekly_update() вызывает financials, bonds, profiles, events
+- DONE: Alembic migration b40a7e5076b2 (company_profiles, corporate_events, alt_data_points, alert_log, model_feedback)
+- DONE: Tests — 11 bonds tests, 13 profiles tests
 
 ### Этап 1 — Анализ текущих ответов бота (~1ч)
 - Собрать примеры ответов /top, /analyze, /allocate
