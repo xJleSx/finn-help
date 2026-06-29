@@ -287,6 +287,22 @@ class MacroIndicator(Base):
     )
 
 
+class AltDataPoint(Base):
+    __tablename__ = "alt_data_points"
+
+    id = Column(Integer, primary_key=True)
+    source_name = Column(String(50), nullable=False, index=True)
+    indicator_name = Column(String(100), nullable=False)
+    value = Column(Float, nullable=False)
+    date = Column(Date, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("source_name", "indicator_name", "date", name="uq_alt_data_point"),
+        Index("ix_alt_data_source_date", "source_name", "date"),
+    )
+
+
 class UserSetting(Base):
     __tablename__ = "user_settings"
 
@@ -325,6 +341,25 @@ class Notification(Base):
     __table_args__ = (
         Index("ix_notifications_user_read", "user_id", "read"),
         Index("ix_notifications_created", "created_at"),
+    )
+
+
+class AlertLog(Base):
+    __tablename__ = "alert_log"
+
+    id = Column(Integer, primary_key=True)
+    ticker = Column(String(20), nullable=False, index=True)
+    alert_type = Column(String(50), nullable=False, index=True)
+    severity = Column(Float, nullable=False, default=0.0)
+    title = Column(String(512), nullable=False)
+    message = Column(Text)
+    created_at = Column(DateTime, default=func.now(), index=True)
+    read = Column(Boolean, default=False)
+    user_id = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index("ix_alert_log_ticker_created", "ticker", "created_at"),
+        Index("ix_alert_log_type_created", "alert_type", "created_at"),
     )
 
 
