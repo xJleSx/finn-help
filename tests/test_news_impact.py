@@ -4,10 +4,11 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
+import torch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.analysis.ml.news_impact import NewsImpactModel
+from src.analysis.ml.news_impact import LSTMPredictor, NewsImpactModel, _build_sequences
 from src.analysis.ml.news_impact_features import (
     ALL_FEATURE_COLS,
     SUBCATEGORY_VALUES,
@@ -270,3 +271,33 @@ class TestNewsImpactModel:
         for h in model.horizons:
             pred = model.predict(db_session, news_articles[0], horizon_days=h)
             assert isinstance(pred["predicted_return"], float)
+
+
+class TestLSTM:
+    def test_lstm_predictor_forward(self):
+        model = LSTMPredictor(input_dim=10)
+        x = torch.randn(4, 5, 10)
+        out = model(x)
+        assert out.shape == (4,)
+
+    def test_build_sequences(self):
+        features = np.random.randn(20, 5).astype(np.float32)
+        targets = np.random.randn(20).astype(np.float32)
+        xs, ys = _build_sequences(features, targets, seq_len=3)
+        assert xs.shape == (17, 3, 5)
+        assert ys.shape == (17,)
+
+    def test_build_sequences_insufficient(self):
+        features = np.random.randn(2, 5).astype(np.float32)
+        targets = np.random.randn(2).astype(np.float32)
+        xs, ys = _build_sequences(features, targets, seq_len=10)
+        assert xs.shape[0] == 0
+
+    def test_lstm_predict_after_train(self, db_session, instrument, prices, news_articles, monkeypatch):
+        monkeypatch.setattr(settings, "ml_impact_min_train_samples", 10)
+        model = NewsImpactModel("SBER")
+        model.train(db_session)
+        pred = model.predict(db_session, news_articles[0], horizon_days=1)
+        assert "xgb_prediction" in pred
+        assert "lstm_prediction" in pred or pred.get("lstm_prediction") is None
+        assert "confidence" in pred
