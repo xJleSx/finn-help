@@ -7,7 +7,11 @@ from sqlalchemy import func
 from src.db.connection import get_session
 from src.db.models import Signal as SignalModel
 from src.scheduler.collectors import (
+    collect_bond_offerings,
+    collect_company_profiles,
+    collect_corporate_events,
     collect_dividends,
+    collect_financial_reports,
     collect_fundamental,
     collect_macro,
     collect_news,
@@ -60,3 +64,19 @@ async def daily_update() -> None:
 
 def run_daily_sync() -> None:
     asyncio.run(daily_update())
+
+
+async def weekly_update() -> None:
+    """Weekly tasks: financial reports, bond offerings, company profiles, corporate events."""
+    logger.info("Starting weekly update cycle...")
+    db = get_session()
+    try:
+        await collect_financial_reports(db)
+        await collect_bond_offerings(db)
+        await collect_company_profiles(db)
+        await collect_corporate_events(db)
+        logger.info("Weekly update cycle completed")
+    except Exception as e:
+        logger.error(f"Weekly update cycle failed: {e}")
+    finally:
+        db.close()

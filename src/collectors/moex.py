@@ -225,6 +225,14 @@ class MOEXCollector:
                 info["issue_date"] = value
         return info
 
+    async def get_security_description(self, ticker: str) -> list[dict[str, Any]]:
+        """Get full security description as name-value pairs."""
+        data = await self._fetch_json(
+            f"/securities/{ticker}.json",
+            {"iss.meta": "off"},
+        )
+        return self._parse_table(data, "description")
+
     async def __aenter__(self) -> Self:
         return self
 

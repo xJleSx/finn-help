@@ -450,6 +450,90 @@ async def collect_social_sentiment() -> None:
         logger.error("Social sentiment cycle failed: %s", e)
 
 
+async def collect_financial_reports(db: Session) -> None:
+    """Fetch/update IFRS financial reports from SmartLab."""
+    from src.collectors.financials import FinancialReportCollector
+    from src.db.models import FinancialReport
+
+    instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
+    if not instruments:
+        return
+
+    collector = FinancialReportCollector()
+    try:
+        for inst in instruments:
+            data = await collector.fetch(inst.ticker)
+            if not data:
+                continue
+            report_date_str = data.pop("reporting_date", None)
+            period_type = data.pop("period_type", "FY")
+            if not report_date_str:
+                continue
+            rd = date.fromisoformat(report_date_str) if isinstance(report_date_str, str) else report_date_str
+
+            existing = db.query(FinancialReport).filter_by(
+                instrument_id=inst.id, report_date=rd, period_type=period_type
+            ).first()
+            if existing:
+                continue
+            report = FinancialReport(
+                instrument_id=inst.id,
+                report_date=rd,
+                period_type=period_type,
+                source="smartlab",
+                **{k: v for k, v in data.items() if hasattr(FinancialReport, k)},
+            )
+            db.add(report)
+        db.commit()
+        logger.info("Financial reports collected for %d instruments", len(instruments))
+    finally:
+        await collector.close()
+
+
+async def collect_bond_offerings(db: Session) -> None:
+    """Fetch/update bond offerings from MOEX ISS."""
+    from src.collectors.bonds import BondOfferingCollector
+    from src.db.models import BondOffering
+
+    instruments = db.query(Instrument).filter(Instrument.instrument_type == "bond").all()
+    if not instruments:
+        return
+
+    collector = BondOfferingCollector()
+    try:
+        for inst in instruments:
+            data = await collector.fetch_by_ticker(inst.ticker)
+            if not data or not data.get("isin"):
+                continue
+
+            isin = data["isin"]
+            existing = db.query(BondOffering).filter_by(instrument_id=inst.id, isin=isin).first()
+            if existing:
+                continue
+
+            offering = BondOffering(
+                instrument_id=inst.id,
+                offering_date=data.get("offering_date"),
+                isin=isin,
+                coupon_type=data.get("coupon_type", "fixed"),
+                coupon_rate=data.get("coupon_rate"),
+                coupon_period_days=data.get("coupon_period_days"),
+                yield_to_maturity=data.get("yield_to_maturity"),
+                maturity_date=data.get("maturity_date"),
+                credit_rating=data.get("credit_rating"),
+                volume=data.get("volume"),
+                has_amortization=data.get("has_amortization", False),
+                has_offer=data.get("has_offer", False),
+                nominal_price=data.get("nominal_price"),
+                current_price_pct=data.get("current_price_pct"),
+            )
+            db.add(offering)
+        db.commit()
+        logger.info("Bond offerings collected for %d instruments", len(instruments))
+    finally:
+        await collector.close()
+
+
 async def collect_company_profiles(db: Session) -> None:
     """Fetch/update company profiles from SmartLab."""
     from src.collectors.profiles import SmartLabProfileCollector, store_company_profile
