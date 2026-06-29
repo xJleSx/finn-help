@@ -762,3 +762,89 @@ class ModelFeedback(Base):
         Index("ix_model_feedback_ticker_name", "ticker", "model_name"),
         Index("ix_model_feedback_created", "created_at"),
     )
+
+
+class CompanyProfile(Base):
+    """Full company profile and description."""
+
+    __tablename__ = "company_profiles"
+
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, unique=True, index=True)
+
+    description = Column(Text, comment="Краткое описание бизнеса")
+    website = Column(String(255), comment="Официальный сайт")
+    employees = Column(Integer, comment="Количество сотрудников")
+    founded_year = Column(Integer, comment="Год основания")
+    industry = Column(String(100), comment="Отрасль")
+    industry_description = Column(Text, comment="Описание отрасли")
+
+    registrar = Column(String(100), comment="Регистратор")
+    auditor = Column(String(100), comment="Аудитор")
+    state_reg_number = Column(String(50), comment="ОГРН")
+    tax_id = Column(String(50), comment="ИНН")
+
+    extra = Column(JSON)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    instrument = relationship("Instrument", backref="profile", uselist=False)
+
+    def __repr__(self):
+        return f"<CompanyProfile instrument_id={self.instrument_id}>"
+
+
+class CorporateEvent(Base):
+    """Corporate actions: dividends, buybacks, splits, additional emissions."""
+
+    __tablename__ = "corporate_events"
+
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
+
+    event_type = Column(
+        String(20), nullable=False, index=True,
+        comment="dividend / buyback / split / emission",
+    )
+    status = Column(
+        String(20), default="announced",
+        comment="announced / approved / executed / cancelled",
+    )
+
+    announcement_date = Column(Date, index=True, comment="Дата объявления")
+    ex_date = Column(Date, comment="Экс-дата (для дивидендов)")
+    record_date = Column(Date, comment="Дата фиксации реестра")
+    payment_date = Column(Date, comment="Дата выплаты/исполнения")
+
+    description = Column(String(500), comment="Описание события")
+
+    # For dividends
+    dividend_amount = Column(Float, comment="Сумма дивиденда на акцию (RUB)")
+    dividend_currency = Column(String(3), default="RUB")
+    dividend_tax_rate = Column(Float, comment="Ставка налога на дивиденды")
+
+    # For buyback
+    buyback_volume = Column(Float, comment="Объём байбэка (RUB)")
+    buyback_shares = Column(Float, comment="Количество акций к выкупу")
+    buyback_price = Column(Float, comment="Цена выкупа (RUB)")
+
+    # For splits / consolidation
+    split_ratio_from = Column(Integer, comment="Было акций")
+    split_ratio_to = Column(Integer, comment="Стало акций")
+
+    # For additional emission
+    emission_volume = Column(Float, comment="Объём доп. эмиссии (RUB)")
+    emission_shares = Column(Float, comment="Количество новых акций")
+    emission_price = Column(Float, comment="Цена размещения (RUB)")
+
+    extra = Column(JSON)
+    created_at = Column(DateTime, default=func.now())
+
+    instrument = relationship("Instrument", backref="corporate_events")
+
+    __table_args__ = (
+        Index("ix_corporate_event_type_date", "event_type", "announcement_date"),
+        Index("ix_corporate_event_instr_date", "instrument_id", "announcement_date"),
+    )
+
+    def __repr__(self):
+        return f"<CorporateEvent {self.event_type} instr={self.instrument_id}>"

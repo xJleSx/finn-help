@@ -35,3 +35,7 @@ logs/
 
 # pytest
 .pytest_cache/
+
+# ML model weights
+*.pt
+*.pth

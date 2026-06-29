@@ -35,107 +35,81 @@
 
 ---
 
-## Master Plan: 6 Phases
+## Master Plan: Обогащение БД и качество ответов бота
 
-### Phase 0 — Чистка и базовая настройка (DONE)
-- .gitignore (Python, IDE, OS)
-- Мёртвый код: удалить неиспользуемые файлы, импорты, переменные
-- 6 падающих тестов — починить
-- mypy strict 847→0
-- CI base: ruff, security, coverage, Postgres service
-- config: .env.example, pyproject.toml
-- Пустые __init__.py удалены
-- Мусор из git-трекинга убран
+### Этап 0 — Наполнение и обогащение БД (NEW PRIORITY)
+Цель: LLM получает богатый ticker_context (фин.отчётность, bond params, события).
 
-### Phase 1 — Архитектура и рефакторинг (PARTIAL)
-**Done:**
-- Pydantic response-модели: schemas.py + response_model= на всех JSON-роутах
-- allocator.allocate_async → native async (убран run_in_executor)
-- item_risk_async в risk.py (используется allocator)
+**Collectors (collectors/moex.py + financials.py):**
+- Полные профили компаний: описание, сектор, отрасль, employees, founded, website
+- Финансовая отчётность МСФО/РСБУ (прибыль, выручка, ROE, долг, дивиденды)
+- Параметры облигаций (купон, YTM, рейтинг, оферта, амортизация, дюрация)
+- Корпоративные события (дивиденды, buyback, splits, доп.эмиссия)
 
-**Todo / Blocked:**
-- service.py: sync/async рефакторинг (~1081 строка, 10 sync/async пар, ~5 внешних вызывающих). Sync-методы нужны CLI/telegram/llm/scheduler. Отложен — требует отдельного планирования.
-- Gateway/Repository слой: выделить из service.py和数据-access в отдельный слой
-- Enum для type safety: instrument types, signal types, roles, risk profiles
-- Устранить дубликаты _analyze_core, _compute_ml, _build_trade_plan (sync и async версии)
+**Модели (db/models.py):**
+- CompanyProfile — полное описание компании
+- FinancialReport — улучшить coverage
+- BondOffering — улучшить (добавить рейтинг, оферту, амортизацию)
+- CorporateEvent — buyback, splits, доп.эмиссия
 
-### Phase 2 — ML и модели (IN PROGRESS)
-**Исследование завершено. Ключевые проблемы:**
-- ~250 строк дубликатов в каждом из 3 классификаторов (XGBoost/LightGBM/CatBoost) — ~80% идентичного кода
-- price_targets.py — нулевое тестовое покрытие (entry zone, stop-loss, take-profit)
-- Гиперпараметры хардкодом (n_estimators=50, max_depth=3, lr=0.1) в каждом классе
-- ensemble.predict() вызывает walk-forward validate на каждый запрос (9 рефитов!)
-- Позиционный доступ results[0]/[1]/[2] ломается если catboost не импортирован
-- Тесты отсутствуют: train(), save(), load(), score(), fit(), anomaly_mask
+**Регулярное обновление (scheduler/collectors.py):**
+- Ежедневно: цены, новости, курсы валют
+- Еженедельно: фундаментальные метрики, фин.отчётность
+- Ежемесячно: профили компаний, облигации
 
-**План:**
-1. BaseMLClassifier — выделить общий базовый класс, убрать дубликаты
-2. Гиперпараметры вынести в src/config
-3. ensemble.py: кеш OOS, починить позиционный доступ
-4. price_targets.py: тесты для всей торговой логики
-5. Тесты train/save/load/score/fit + anomaly_mask для всех классификаторов
-6. model_registry.py: async, убрать хардкод пути data/models/
+**Миграции:** Alembic для всех новых моделей.
 
-### Phase 3 — Безопасность
-- JWT: улучшить (refresh token, expiration, blacklist)
-- Input validation: Pydantic на всех входах
-- Secrets management: убрать хардкод ключей, vault/env
-- Rate limiting: review и донастройка
-- SQL injection: parameterized queries (проверить)
-- CORS: review настроек
+### Этап 1 — Анализ текущих ответов бота (~1ч)
+- Собрать примеры ответов /top, /analyze, /allocate
+- Оценить качество контекста из БД
+- Выявить gaps в данных
 
-### Phase 4 — Тестирование и CI
-- Интеграционные тесты: БД, API end-to-end
-- Coverage: поднять с 40% до целевого уровня
-- CI pipeline: parallel jobs, cache, artifacts
-- Property-based testing (hypothesis) для core-логики
-- Load/stress тесты для API
+### Этап 2 — Дизайн новых форматов ответов (2-3ч)
+- Шаблоны с использованием обогащённых данных (фин. метрики, дивиденды, bond analysis)
+- Персонализация под риск-профиль пользователя
+- Компактные / расширенные режимы вывода
 
-### Phase 5 — Документация и мониторинг
-- API docs: OpenAPI улучшения, примеры
-- Logging: структурированный (JSON), уровни, ротация
-- Метрики: Prometheus + Grafana
-- Health checks: расширить /api/health
-- Monitoring: алерты, дашборды
+### Этап 3 — Рефакторинг форматирования и промптов (4-6ч)
+- src/interfaces/formatters.py — унифицированные форматтеры
+- Обновление LLM-промптов (src/llm/prompts.py)
+- Интеграция богатого контекста из БД в LLM
+- Rich-форматирование для терминала (CLI)
+
+### Этап 4 — Тестирование + итерации (2-3ч)
+- Тесты на реальных данных из БД
+- Сравнение "до/после" на примерах
+- A/B тестирование промптов
+
+### Этап 5 — Расширение
+- Графики в ответах (ASCII-art, Mermaid)
+- Персональные отчёты PDF
+- Advanced context для пользовательских вопросов
 
 ---
 
-## Продвинутые улучшения (после базовых 8 фаз)
+## Предыдущие этапы (завершены)
 
-### 1. Предиктивная аналитика и ML
-- News Impact Prediction Model: DONE (XGBoost Regressor, 3 horizons, 24 features)
-- Sentiment Evolution Prediction: DONE (XGBoost predicting 3/7d ahead, 11 features)
-- Anomaly Detection: DONE (Volume/Sentiment Isolation Forest + Source/Topic frequency analysis + PyTorch Autoencoder, unified detector)
-- Causal Inference: PENDING
-- News Impact Attribution: DONE (SHAP-based feature importance per news article)
+### Audit 12 шагов (DONE)
+| Шаг | Статус |
+|-----|--------|
+| 1. News clustering (BERT) | DONE |
+| 2. LLM spam filter | DONE |
+| 3. Hierarchical categorization | DONE |
+| 4. Sector Impact Engine v2 | DONE |
+| 5. Company Risk Aggregator v2 | DONE |
+| 6. Geopolitical Risk v2 | DONE |
+| 7. News Impact + LSTM ensemble | DONE |
+| 8. Alternative Data framework | DONE |
+| 9. Rebalancing + Broker | DONE |
+| 10. Causal Inference | DONE |
+| 11. NL Query expansion | DONE |
+| 12. Alert System enhancement | DONE |
 
-### 2. Расширение источников данных
-- Social Media: DONE (Telegram collector with keyword ticker detection + sentiment)
-- Alternative Data: DONE (CBR rates via XML API + stub framework for Minfin/Rosstat)
-- Official Sources: DONE (CBR XML parser + MacroIndicator model)
-- Earnings Calls: PENDING
-
-### 3. Автоматизация и оптимизация
-- Automated Summarization: DONE (LLM news cluster summarizer with fallback)
-- Intelligent Alert System: DONE
-- Automated Portfolio Rebalancing: DONE (RebalancingEngine: weight targets, sector limits, conviction-based sizing, broker integration)
-- Self-Learning System: DONE (feedback loop, auto-retrain, A/B model comparison)
-
-### 4. Продвинутая аналитика и визуализация
-- News Impact Attribution (Shapley values): DONE
-- Scenario Analysis & Stress Testing: DONE
-- Interactive Risk Explorer: DONE (RiskExplorer: portfolio risk summary, ticker deep-dive, sector heatmap, correlation table)
-- Natural Language Query Interface: DONE (NLQueryEngine: intent classification, 6 handlers, LLM routing, template fallback)
-
-### 5. Интеграции и экосистема
-- Broker API Integration: DONE (Tinkoff broker client with sandbox/mock — market/limit orders, portfolio sync)
-- Multi-Market Expansion: DONE (KASE collector stub with Instrument.exchange column)
-- Public API: DONE (5 new endpoints: scenario, custom shock, impact, alerts)
-- Улучшенный Telegram Bot: DONE (AlertNotifier: alerts, digest, scenario results)
-
-### Приоритетная дорожная карта
-| Этап | Статус |
-|------|--------|
-| 1. News Impact Prediction + Anomaly Detection + Alerts | DONE |
-| 2. Scenario Analysis + Social Media + Alternative Data | DONE |
-| 3. Broker Integration + Self-Learning + Attribution | DONE |
+### Прочее
+- LICENSE: MIT → BUSL 1.1 (change date 4 years, Apache 2.0 fallback)
+- CI: 1132 tests passing, ruff clean
+- Phase 1 (Architecture): Pydantic models, async allocator, risk refactor
+- Phase 2 (ML): XGBoost/LightGBM/CatBoost ensemble, anomaly detection, price targets
+- Phase 3 (Security): JWT, bcrypt, rate limiting, CORS
+- Phase 4 (Testing): 1132 tests, coverage ~47%
+- Phase 5 (Docs): OpenAPI, logging, health checks

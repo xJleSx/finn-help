@@ -448,3 +448,46 @@ async def collect_social_sentiment() -> None:
         logger.info("Social sentiment: %d signals created", count)
     except Exception as e:
         logger.error("Social sentiment cycle failed: %s", e)
+
+
+async def collect_company_profiles(db: Session) -> None:
+    """Fetch/update company profiles from SmartLab."""
+    from src.collectors.profiles import SmartLabProfileCollector, store_company_profile
+
+    instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
+    if not instruments:
+        return
+
+    collector = SmartLabProfileCollector()
+    try:
+        for inst in instruments:
+            profile = collector.fetch_profile(inst.ticker)
+            if profile:
+                store_company_profile(db, inst, profile)
+                logger.info("Profile updated for %s (%d fields)", inst.ticker, len(profile))
+        db.commit()
+    finally:
+        collector.close()
+
+
+async def collect_corporate_events(db: Session) -> None:
+    """Fetch/update corporate events from MOEX ISS."""
+    from src.collectors.profiles import MOEXCorporateEventCollector, store_corporate_event
+
+    instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
+    if not instruments:
+        return
+
+    collector = MOEXCorporateEventCollector()
+    try:
+        for inst in instruments:
+            events = await collector.fetch_corporate_events(inst.ticker)
+            stored = 0
+            for event in events:
+                if store_corporate_event(db, inst, event):
+                    stored += 1
+            if stored:
+                logger.info("Corporate events for %s: %d new", inst.ticker, stored)
+        db.commit()
+    finally:
+        await collector.close()
