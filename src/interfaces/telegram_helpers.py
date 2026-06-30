@@ -211,6 +211,7 @@ COMMAND_CATEGORIES = {
     ],
     "⚙️ Настройки": [
         ("/profile ПРОФИЛЬ", "Риск-профиль (conservative/balanced/aggressive)"),
+        ("/profile goal СУММА", "Установить финансовую цель"),
         ("/subscribe", "Подписаться на уведомления"),
         ("/unsubscribe", "Отписаться"),
     ],
