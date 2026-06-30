@@ -100,10 +100,10 @@ def html_escape(text: str | None) -> str:
 
 def build_main_reply_keyboard() -> ReplyKeyboardMarkup:
     keyboard = [
-        ["🔍 Анализ", "📊 Портфель"],
-        ["🏆 Топ", "📰 Новости"],
-        ["📋 Сводка", "🏭 Сектора"],
-        ["⚙️ Профиль", "❓ Помощь"],
+        ["🔍 Анализ", "📊 Портфель", "🏆 Топ"],
+        ["📰 Новости", "📋 Сводка", "🏭 Сектора"],
+        ["💰 Аллокация", "➕ Добавить", "➖ Удалить"],
+        ["👥 Авторы", "⚙️ Профиль", "📊 P&L"],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -189,9 +189,15 @@ COMMAND_CATEGORIES = {
         ("/subscribe", "Подписаться на уведомления"),
         ("/unsubscribe", "Отписаться"),
     ],
+    "👥 Авторы": [
+        ("/pulse", "Список авторов Пульса"),
+        ("/pulse AUTHOR", "Статистика автора"),
+        ("/subscribe_author @NAME", "Подписаться на автора"),
+        ("/unsubscribe_author @NAME", "Отписаться от автора"),
+        ("/authors", "Мои подписки"),
+    ],
     "🔬 Прочее": [
         ("/social TICKER", "Social sentiment"),
-        ("/pulse AUTHOR", "Авторы Пульса"),
         ("/correlation", "Корреляция активов"),
         ("/whatif", "Что-если сценарий"),
         ("/report", "Отчёт за 120 дней"),

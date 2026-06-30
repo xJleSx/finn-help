@@ -6,6 +6,7 @@ from functools import wraps
 from typing import Any, Optional, cast
 
 import structlog
+from sqlalchemy import func
 from telegram import BotCommand, Message, ReplyKeyboardMarkup, Update
 from telegram.error import NetworkError
 from telegram.ext import (
@@ -245,6 +246,17 @@ async def reply_keyboard_handler(update: Update, context: ContextTypes.DEFAULT_T
         await sectors(update, context)
     elif text == "⚙️ Профиль":
         await profile(update, context)
+    elif text == "💰 Аллокация":
+        context.args = ["100000"]
+        await allocate(update, context)
+    elif text == "➕ Добавить":
+        await add_start(update, context)
+    elif text == "➖ Удалить":
+        await remove_position(update, context)
+    elif text == "👥 Авторы":
+        await my_authors(update, context)
+    elif text == "📊 P&L":
+        await pnl(update, context)
     elif text == "❓ Помощь":
         if update.effective_message:
             await update.effective_message.reply_text(
@@ -271,12 +283,21 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     cid = update.effective_chat.id
     args = context.args or []
     ntype = args[0] if args else "signal"
-    if ntype not in ("signal", "daily", "geo", "dividend"):
-        ntype = "signal"
+    valid_types = frozenset({"signal", "daily", "geo", "dividend", "trade"})
+    if ntype not in valid_types:
+        await update.effective_message.reply_text(
+            f"Неизвестный тип: {html_escape(ntype)}. Допустимые: {', '.join(sorted(valid_types))}"
+        )
+        return
 
     ns = NotificationService()
-    ns.subscribe(uid, cid, ntype)
-    type_names = {"signal": "сигналы", "daily": "ежедневные сводки", "geo": "гео-риски", "dividend": "дивиденды"}
+    try:
+        ns.subscribe(uid, cid, ntype)
+    except Exception:
+        logger.exception("subscribe_failed", user_id=uid, notify_type=ntype)
+        await update.effective_message.reply_text("❌ Ошибка при подписке. Попробуйте позже.")
+        return
+    type_names = {"signal": "сигналы", "daily": "ежедневные сводки", "geo": "гео-риски", "dividend": "дивиденды", "trade": "сделки"}
     await update.effective_message.reply_text(f"✅ Вы подписаны на {type_names.get(ntype, ntype)}")
 
 
@@ -287,12 +308,87 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     uid = update.effective_user.id
     args = context.args or []
     ntype = args[0] if args else None
+    if ntype is not None:
+        valid_types = frozenset({"signal", "daily", "geo", "dividend", "trade"})
+        if ntype not in valid_types:
+            await update.effective_message.reply_text(
+                f"Неизвестный тип: {html_escape(ntype)}. Допустимые: {', '.join(sorted(valid_types))}"
+            )
+            return
     ns = NotificationService()
-    ns.unsubscribe(uid, ntype)
+    try:
+        ns.unsubscribe(uid, ntype)
+    except Exception:
+        logger.exception("unsubscribe_failed", user_id=uid, notify_type=ntype)
+        await update.effective_message.reply_text("❌ Ошибка при отписке. Попробуйте позже.")
+        return
     if ntype:
-        await update.effective_message.reply_text("❌ Подписка на этот тип уведомлений отменена")
+        type_names = {"signal": "сигналы", "daily": "ежедневные сводки", "geo": "гео-риски", "dividend": "дивиденды", "trade": "сделки"}
+        await update.effective_message.reply_text(f"✅ Подписка на {type_names.get(ntype, ntype)} отменена")
     else:
-        await update.effective_message.reply_text("❌ Все подписки отменены")
+        await update.effective_message.reply_text("✅ Все подписки отменены")
+
+
+@guard(with_cooldown=True)
+async def subscribe_author(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user is None or update.effective_chat is None:
+        return
+    args = context.args or []
+    if not args:
+        await update.effective_message.reply_text("Укажите автора: /subscribe_author @name")
+        return
+    author_nick = args[0].lstrip("@")
+    uid = update.effective_user.id
+    cid = update.effective_chat.id
+    ns = NotificationService()
+    try:
+        ns.subscribe_author(uid, cid, author_nick)
+    except Exception:
+        logger.exception("subscribe_author_failed", user_id=uid, author=author_nick)
+        await update.effective_message.reply_text("❌ Ошибка при подписке на автора. Попробуйте позже.")
+        return
+    await update.effective_message.reply_text(f"✅ Вы подписаны на автора @{html_escape(author_nick)}")
+
+
+@guard(with_cooldown=True)
+async def unsubscribe_author(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user is None:
+        return
+    args = context.args or []
+    if not args:
+        await update.effective_message.reply_text("Укажите автора: /unsubscribe_author @name")
+        return
+    author_nick = args[0].lstrip("@")
+    uid = update.effective_user.id
+    ns = NotificationService()
+    try:
+        ns.unsubscribe_author(uid, author_nick)
+    except Exception:
+        logger.exception("unsubscribe_author_failed", user_id=uid, author=author_nick)
+        await update.effective_message.reply_text("❌ Ошибка при отписке от автора. Попробуйте позже.")
+        return
+    await update.effective_message.reply_text(f"✅ Отписались от автора @{html_escape(author_nick)}")
+
+
+@guard(with_cooldown=True)
+async def my_authors(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user is None:
+        return
+    uid = update.effective_user.id
+    ns = NotificationService()
+    authors = ns.get_user_subscribed_authors(uid)
+    if not authors:
+        await update.effective_message.reply_text(
+            "У вас нет подписок на авторов.\n"
+            "Используйте /subscribe_author @name чтобы подписаться.\n"
+            "Список доступных авторов: /pulse"
+        )
+        return
+    lines = ["👥 <b>Ваши авторы:</b>\n"]
+    for a in authors:
+        lines.append(f"• @{html_escape(a)}")
+    lines.append("\nЧтобы отписаться: /unsubscribe_author @name")
+    await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 @guard()
@@ -1438,6 +1534,93 @@ async def broadcast_enrichment_alerts() -> None:
         db.close()
 
 
+async def broadcast_author_posts() -> None:
+    if app is None:
+        logger.warning("Bot not running, skipping author post broadcast")
+        return
+
+    from datetime import datetime, timezone
+
+    from src.db.connection import get_session
+    from src.db.models import SocialPost
+    from src.social.pulse import PulseAdapter
+
+    ns = NotificationService()
+    db = get_session()
+    try:
+        cfg_authors = getattr(settings, "pulse_authors", None)
+        pulse = PulseAdapter(authors=cfg_authors or [])
+        try:
+            for nick in (cfg_authors or []):
+                subscribers = ns.get_author_subscribers(nick)
+                if not subscribers:
+                    continue
+                recent = db.query(SocialPost).filter_by(author_nick=nick).order_by(SocialPost.published_at.desc()).first()
+                since = recent.published_at if recent else datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)
+                posts = await pulse.fetch_author_posts(nick, since=since)
+                if not posts:
+                    continue
+                for uid, cid in subscribers:
+                    for post in posts[:3]:
+                        text = (
+                            f"👤 <b>@{html_escape(nick)}</b>\n"
+                            f"{html_escape(post.text[:300])}"
+                        )
+                        try:
+                            await app.bot.send_message(chat_id=uid, text=text, parse_mode="HTML")
+                        except Exception as e:
+                            logger.warning("Failed to send author post to %d: %s", uid, e)
+        finally:
+            await pulse.close()
+    finally:
+        db.close()
+
+
+async def broadcast_today_signals() -> None:
+    if app is None:
+        logger.warning("Bot not running, skipping signal broadcast")
+        return
+
+    from datetime import date
+
+    from src.db.connection import get_session
+    from src.db.models import Instrument
+
+    db = get_session()
+    try:
+        signals = (
+            db.query(SignalModel)
+            .filter(func.date(SignalModel.date) == date.today())
+            .order_by(SignalModel.confidence.desc())
+            .limit(20)
+            .all()
+        )
+        if not signals:
+            return
+
+        ns = NotificationService()
+        subscribers = ns.get_subscribers("signal")
+        if not subscribers:
+            return
+
+        text_parts = ["📊 <b>Свежие сигналы на сегодня:</b>\n"]
+        for s in signals:
+            inst = db.query(Instrument).filter_by(id=s.instrument_id).first()
+            ticker = inst.ticker if inst else "?"
+            emoji = "🟢" if s.action in ("BUY", "CAUTIOUS_BUY") else "🔴" if s.action == "SELL" else "⚪"
+            conf = s.confidence or 0
+            text_parts.append(f"{emoji} <b>{ticker}</b>: {s.action} ({conf:.0%})")
+        text = "\n".join(text_parts)
+
+        for uid, cid in subscribers:
+            try:
+                await app.bot.send_message(chat_id=uid, text=text, parse_mode="HTML")
+            except Exception as e:
+                logger.warning("Failed to send signal broadcast to %d: %s", uid, e)
+    finally:
+        db.close()
+
+
 app: Optional[Application[Any, Any, Any, Any, Any, Any]] = None
 _scheduler_task: Optional["asyncio.Task[None]"] = None
 
@@ -1471,6 +1654,9 @@ async def _set_commands(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
         BotCommand("pulse", "Авторы Пульса"),
         BotCommand("report", "Отчёт за 120 дней"),
         BotCommand("pnl", "P&L сводка"),
+        BotCommand("subscribe_author", "Подписаться на автора Pulse"),
+        BotCommand("unsubscribe_author", "Отписаться от автора Pulse"),
+        BotCommand("authors", "Мои подписки на авторов"),
         BotCommand("help", "Помощь"),
     ]
     try:
@@ -1685,10 +1871,13 @@ async def run_bot() -> None:
     app.add_handler(CommandHandler("whatif", whatif))
     app.add_handler(CommandHandler("report", report))
     app.add_handler(CommandHandler("pnl", pnl))
+    app.add_handler(CommandHandler("subscribe_author", subscribe_author))
+    app.add_handler(CommandHandler("unsubscribe_author", unsubscribe_author))
+    app.add_handler(CommandHandler("authors", my_authors))
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    app.add_handler(MessageHandler(filters.Text(["🔍 Анализ", "📊 Портфель", "🏆 Топ", "📰 Новости", "📋 Сводка", "🏭 Сектора", "⚙️ Профиль", "❓ Помощь"]), reply_keyboard_handler))
+    app.add_handler(MessageHandler(filters.Text(["🔍 Анализ", "📊 Портфель", "🏆 Топ", "📰 Новости", "📋 Сводка", "🏭 Сектора", "💰 Аллокация", "➕ Добавить", "➖ Удалить", "👥 Авторы", "⚙️ Профиль", "📊 P&L"]), reply_keyboard_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 
     await app.initialize()
@@ -1698,6 +1887,13 @@ async def run_bot() -> None:
     from src.scheduler.service import start_background as _start_scheduler
 
     _scheduler_task = await _start_scheduler()
+
+    # Clear any stale webhook to prevent 409 Conflict
+    try:
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook cleared before polling")
+    except Exception as e:
+        logger.warning("Failed to clear webhook: %s", e)
 
     polling_retry_delay = 10
     poll_attempt = 0

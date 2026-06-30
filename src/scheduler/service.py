@@ -2,10 +2,11 @@ import asyncio
 import logging
 from datetime import date, datetime, timezone
 
+import structlog
 from src.scheduler.reporting import generate_daily_report, take_snapshot
 from src.scheduler.tasks import daily_update, weekly_update
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 UPDATE_INTERVAL = 300  # 5 min (aggressive 24h mode)
 
@@ -78,14 +79,34 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
                                 target = cid or uid
                                 try:
                                     await bot_app.bot.send_message(
-                                        chat_id=target, text=report.report_text, parse_mode="Markdown"
+                                        chat_id=target, text=report.report_text, parse_mode="HTML"
                                     )
                                 except Exception as e:
                                     logger.warning("Failed to send daily report to %d: %s", target, e)
                         else:
                             logger.info("Daily report:\n%s", report.report_text)
+
+                    # Broadcast fresh signals to subscribers
+                    from src.interfaces.telegram import broadcast_today_signals
+
+                    await broadcast_today_signals()
+
+                    # Broadcast upcoming dividends
+                    from src.interfaces.telegram import broadcast_dividends
+
+                    await broadcast_dividends()
+
+                    # Broadcast enrichment alerts
+                    from src.interfaces.telegram import broadcast_enrichment_alerts
+
+                    await broadcast_enrichment_alerts()
+
+                    # Broadcast new posts from subscribed Pulse authors
+                    from src.interfaces.telegram import broadcast_author_posts
+
+                    await broadcast_author_posts()
                 except Exception as e:
-                    logger.error("Daily snapshot/report failed: %s", e)
+                    logger.error("Daily snapshot/report/broadcast failed: %s", e)
 
             if _is_friday():
                 week_num = date.today().isocalendar()[1]
