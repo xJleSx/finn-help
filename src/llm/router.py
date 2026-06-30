@@ -28,6 +28,7 @@ class LLMRouter:
     async def advise(self, signal: dict[str, object], user_id: str | int | None = None) -> str:
         self._enrich_with_risk_profile(signal, user_id=user_id)
         await self._enrich_with_wolfram(signal)
+        self._enrich_with_enriched_context(signal)
 
         if self._use_groq:
             try:
@@ -42,6 +43,7 @@ class LLMRouter:
     async def report(self, signal: dict[str, object], user_id: str | int | None = None) -> str:
         self._enrich_with_risk_profile(signal, user_id=user_id)
         await self._enrich_with_wolfram(signal)
+        self._enrich_with_enriched_context(signal)
 
         if self._use_groq:
             try:
@@ -89,6 +91,27 @@ class LLMRouter:
         except Exception as e:
             logger.warning("WolframAlpha enrichment failed for %s: %s", ticker, e)
 
+    def _enrich_with_enriched_context(self, signal: dict[str, object]) -> None:
+        ticker = signal.get("ticker")
+        if not ticker or not isinstance(ticker, str):
+            return
+        try:
+            from src.db.connection import get_session
+            from src.db.models import Instrument
+            from src.interfaces.response_formatter import build_enriched_context_block
+
+            db = get_session()
+            try:
+                inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+                if inst:
+                    ctx = build_enriched_context_block(db, inst)
+                    if ctx:
+                        signal["enriched_context"] = ctx
+            finally:
+                db.close()
+        except Exception:
+            pass
+
     def _profile_label(self, user_id: str | int | None = None) -> str:
         try:
             from src.user_profile import profile_manager
@@ -120,9 +143,31 @@ class LLMRouter:
                         parts.append(f"{k}={v}")
                 lines.append(f"Макро: {', '.join(parts)}")
 
-            from datetime import date
+            # Alt data context block
+            alt_lines = []
+            from datetime import date, timedelta
 
             from sqlalchemy import func
+
+            from src.db.models import AltDataPoint
+
+            alt_rows = (
+                db.query(AltDataPoint)
+                .filter(AltDataPoint.date >= date.today() - timedelta(days=7))
+                .order_by(AltDataPoint.date.desc())
+                .all()
+            )
+            if alt_rows:
+                seen: set[str] = set()
+                for r in alt_rows:
+                    key = f"{r.source_name}/{r.indicator_name}"
+                    if key not in seen:
+                        alt_lines.append(f"{r.indicator_name}={r.value:.2f}")
+                        seen.add(key)
+                if alt_lines:
+                    lines.append(f"Альт. данные: {', '.join(alt_lines)}")
+
+            from datetime import date
 
             from src.db.models import Instrument, Price
             from src.db.models import Signal as SignalModel
@@ -215,33 +260,40 @@ class LLMRouter:
                 return cast(str, c)
         return None
 
-    async def _groq_question(self, system: str, user: str) -> str:
+    async def _groq_call(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+    ) -> str:
         from groq import AsyncGroq
 
         client = AsyncGroq(api_key=settings.groq_api_key)
         response = await client.chat.completions.create(
-            model=self._groq_model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.3,
-            max_tokens=1024,
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
         return response.choices[0].message.content or ""
 
-    async def _ollama_question(self, system: str, user: str) -> str:
+    async def _ollama_call(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: float = 120.0,
+    ) -> str:
         import httpx
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             payload = {
-                "model": self._ollama_model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 1024,
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
                 "stream": False,
             }
             resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
@@ -249,88 +301,90 @@ class LLMRouter:
             data: Any = resp.json()
             return cast(str, data.get("message", {}).get("content", ""))
 
+    async def _groq_question(self, system: str, user: str) -> str:
+        return await self._groq_call(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            model=self._groq_model,
+            temperature=0.3,
+            max_tokens=1024,
+        )
+
+    async def _ollama_question(self, system: str, user: str) -> str:
+        return await self._ollama_call(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            model=self._ollama_model,
+            temperature=0.3,
+            max_tokens=1024,
+        )
+
     async def _groq_advise(self, signal: dict[str, object]) -> str:
         try:
-            from groq import AsyncGroq
-
-            client = AsyncGroq(api_key=settings.groq_api_key)
-            response = await client.chat.completions.create(
-                model=self._groq_model,
+            result = await self._groq_call(
                 messages=[
                     {"role": "system", "content": prompts.SYSTEM_PROMPT},
                     {"role": "user", "content": prompts.build_user_message(signal)},
                 ],
+                model=self._groq_model,
                 temperature=LLM_TEMPERATURE,
                 max_tokens=768,
             )
-            return response.choices[0].message.content or self._fallback_text(signal)
+            return result or self._fallback_text(signal)
         except ImportError:
             logger.warning("groq package not installed")
             return self._fallback_text(signal)
 
     async def _ollama_advise(self, signal: dict[str, object]) -> str:
         try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                payload = {
-                    "model": self._ollama_model,
-                    "messages": [
-                        {"role": "system", "content": prompts.SYSTEM_PROMPT},
-                        {"role": "user", "content": prompts.build_user_message(signal)},
-                    ],
-                    "temperature": LLM_TEMPERATURE,
-                    "max_tokens": 768,
-                    "stream": False,
-                }
-                resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
-                resp.raise_for_status()
-                data: Any = resp.json()
-                result: Any = data.get("message", {}).get("content", self._fallback_text(signal))
-                return cast(str, result)
+            result = await self._ollama_call(
+                messages=[
+                    {"role": "system", "content": prompts.SYSTEM_PROMPT},
+                    {"role": "user", "content": prompts.build_user_message(signal)},
+                ],
+                model=self._ollama_model,
+                temperature=LLM_TEMPERATURE,
+                max_tokens=768,
+                timeout=60.0,
+            )
+            return result or self._fallback_text(signal)
         except Exception as e:
             logger.warning(f"ollama failed: {e}")
             return self._fallback_text(signal)
 
     async def _groq_report(self, signal: dict[str, object]) -> str:
         try:
-            from groq import AsyncGroq
-
-            client = AsyncGroq(api_key=settings.groq_api_key)
-            response = await client.chat.completions.create(
-                model=self._groq_model,
+            result = await self._groq_call(
                 messages=[
                     {"role": "system", "content": prompts.REPORT_SYSTEM_PROMPT},
                     {"role": "user", "content": prompts.build_report_message(signal)},
                 ],
+                model=self._groq_model,
                 temperature=0.2,
                 max_tokens=1024,
             )
-            return response.choices[0].message.content or self._fallback_report(signal)
+            return result or self._fallback_report(signal)
         except ImportError:
             logger.warning("groq package not installed")
             return self._fallback_report(signal)
 
     async def _ollama_report(self, signal: dict[str, object]) -> str:
         try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                payload = {
-                    "model": self._ollama_model,
-                    "messages": [
-                        {"role": "system", "content": prompts.REPORT_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompts.build_report_message(signal)},
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": 1024,
-                    "stream": False,
-                }
-                resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
-                resp.raise_for_status()
-                data: Any = resp.json()
-                result: Any = data.get("message", {}).get("content", self._fallback_report(signal))
-                return cast(str, result)
+            result = await self._ollama_call(
+                messages=[
+                    {"role": "system", "content": prompts.REPORT_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompts.build_report_message(signal)},
+                ],
+                model=self._ollama_model,
+                temperature=0.2,
+                max_tokens=1024,
+                timeout=60.0,
+            )
+            return result or self._fallback_report(signal)
         except Exception as e:
             logger.warning(f"ollama report failed: {e}")
             return self._fallback_report(signal)
@@ -573,40 +627,29 @@ class LLMRouter:
         return await self._ollama_social(prompt)
 
     async def _groq_social(self, prompt: str) -> str:
-        from groq import AsyncGroq
-
-        client = AsyncGroq(api_key=settings.groq_api_key)
-        output_limit = 2048
-        response = await client.chat.completions.create(
-            model=settings.social_groq_model,
+        result = await self._groq_call(
             messages=[
                 {"role": "system", "content": "Отвечай JSON-массивом. Компактно."},
                 {"role": "user", "content": prompt},
             ],
+            model=settings.social_groq_model,
             temperature=0.05,
-            max_tokens=output_limit,
+            max_tokens=2048,
         )
-        return response.choices[0].message.content or "[]"
+        return result or "[]"
 
     async def _ollama_social(self, prompt: str) -> str:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            payload = {
-                "model": self._ollama_model,
-                "messages": [
-                    {"role": "system", "content": "Отвечай JSON-массивом. Компактно."},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.05,
-                "max_tokens": 2048,
-                "stream": False,
-            }
-            resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            result: str = data.get("message", {}).get("content", "[]")
-            return result
+        result = await self._ollama_call(
+            messages=[
+                {"role": "system", "content": "Отвечай JSON-массивом. Компактно."},
+                {"role": "user", "content": prompt},
+            ],
+            model=self._ollama_model,
+            temperature=0.05,
+            max_tokens=2048,
+            timeout=300.0,
+        )
+        return result or "[]"
 
 
 llm: LLMRouter = LLMRouter()
