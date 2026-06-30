@@ -37,6 +37,8 @@ from src.db.models import Portfolio as PortModel
 from src.db.models import Signal as SignalModel
 from src.interfaces.telegram_helpers import (
     ACTION_EMOJI,
+    PAGES,
+    TOTAL_PAGES,
     _chunk_text,
     _extract_allocation_amount,
     _find_excluded_tickers,
@@ -46,6 +48,7 @@ from src.interfaces.telegram_helpers import (
     build_help_keyboard,
     build_main_keyboard,
     build_main_reply_keyboard,
+    build_reply_keyboard,
     build_top_keyboard,
     format_start_html,
     get_portfolio_positions,
@@ -232,6 +235,32 @@ async def reply_keyboard_handler(update: Update, context: ContextTypes.DEFAULT_T
     if not update.effective_message or not update.effective_message.text:
         return
     text = update.effective_message.text
+
+    # Page navigation
+    if text == "▶️":
+        page = context.user_data.get("kb_page", 1) if context.user_data else 1
+        next_page = min(page + 1, TOTAL_PAGES)
+        if context.user_data is not None:
+            context.user_data["kb_page"] = next_page
+        await update.effective_message.reply_text(
+            f"Страница {next_page}/{TOTAL_PAGES}",
+            reply_markup=build_reply_keyboard(next_page),
+        )
+        return
+    if text == "◀️":
+        page = context.user_data.get("kb_page", 1) if context.user_data else 1
+        prev_page = max(page - 1, 1)
+        if context.user_data is not None:
+            context.user_data["kb_page"] = prev_page
+        await update.effective_message.reply_text(
+            f"Страница {prev_page}/{TOTAL_PAGES}",
+            reply_markup=build_reply_keyboard(prev_page),
+        )
+        return
+    if text.startswith("🔢"):
+        return
+
+    # Page 1 — Основное
     if text == "🔍 Анализ":
         await top(update, context)
     elif text == "📊 Портфель":
@@ -244,19 +273,51 @@ async def reply_keyboard_handler(update: Update, context: ContextTypes.DEFAULT_T
         await daily(update, context)
     elif text == "🏭 Сектора":
         await sectors(update, context)
-    elif text == "⚙️ Профиль":
-        await profile(update, context)
     elif text == "💰 Аллокация":
         context.args = ["100000"]
         await allocate(update, context)
+    elif text == "🧪 Стресс-тест":
+        await stress(update, context)
+    elif text == "🔄 Корреляция":
+        await correlation(update, context)
+    # Page 2 — Портфель
     elif text == "➕ Добавить":
         await add_start(update, context)
     elif text == "➖ Удалить":
         await remove_position(update, context)
-    elif text == "👥 Авторы":
-        await my_authors(update, context)
+    elif text == "📜 История":
+        await history(update, context)
+    elif text == "📤 Экспорт CSV":
+        await export_portfolio(update, context)
+    elif text == "⏪ Бэктест":
+        context.args = ["100000"]
+        await backtest(update, context)
+    elif text == "⚙️ Профиль":
+        await profile(update, context)
     elif text == "📊 P&L":
         await pnl(update, context)
+    elif text == "📄 Отчёт":
+        await report(update, context)
+    elif text == "💱 Курсы":
+        await rates(update, context)
+    # Page 3 — Соц/Риски
+    elif text == "👥 Авторы":
+        await my_authors(update, context)
+    elif text == "📰 Соц.сен.":
+        context.args = []
+        await social_cmd(update, context)
+    elif text == "🌍 Гео-риск":
+        await geo(update, context)
+    elif text == "🔮 What-If":
+        await whatif(update, context)
+    elif text == "📡 Статус":
+        await bot_status(update, context)
+    elif text == "🔔 Подписки":
+        await subscribe(update, context)
+    elif text == "🏠 /start":
+        await start(update, context)
+    elif text == "🌙 Ночн.режим":
+        await profile(update, context)
     elif text == "❓ Помощь":
         if update.effective_message:
             await update.effective_message.reply_text(
@@ -1657,6 +1718,9 @@ async def _set_commands(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
         BotCommand("subscribe_author", "Подписаться на автора Pulse"),
         BotCommand("unsubscribe_author", "Отписаться от автора Pulse"),
         BotCommand("authors", "Мои подписки на авторов"),
+        BotCommand("favorite", "Избранное (add/list/remove)"),
+        BotCommand("allocate_interactive", "Интерактивное распределение"),
+        BotCommand("status", "Статус бота и подписки"),
         BotCommand("help", "Помощь"),
     ]
     try:
@@ -1809,6 +1873,190 @@ async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(chunk, parse_mode="HTML")
 
 
+@guard()
+async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from datetime import datetime, timezone
+
+    ns = NotificationService()
+    signal_subs = len(ns.get_subscribers("signal"))
+    daily_subs = len(ns.get_subscribers("daily"))
+    dividend_subs = len(ns.get_subscribers("dividend"))
+
+    uptime = ""
+    if app and app.updater and app.updater.running:
+        uptime = "✅ Бот работает"
+    else:
+        uptime = "⚠️ Бот не на связи"
+
+    text = (
+        f"<b>📡 Статус бота</b>\n\n"
+        f"{uptime}\n"
+        f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        f"<b>Подписки:</b>\n"
+        f"🔔 Сигналы: {signal_subs}\n"
+        f"📋 Сводки: {daily_subs}\n"
+        f"💵 Дивиденды: {dividend_subs}\n"
+    )
+    await update.effective_message.reply_text(text, parse_mode="HTML")
+
+
+@guard(with_cooldown=True)
+async def favorite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user is None:
+        return
+    uid = update.effective_user.id
+    args = context.args or []
+    subcmd = args[0].lower() if args else "list"
+
+    from src.db.connection import get_session
+    from src.db.models import Favorite as FavoriteModel, Instrument
+
+    db = get_session()
+    try:
+        if subcmd == "add":
+            if len(args) < 2:
+                await update.effective_message.reply_text("Укажите тикер: /favorite add SBER")
+                return
+            ticker = args[1].upper()
+            inst = db.query(Instrument).filter_by(ticker=ticker).first()
+            if not inst:
+                await update.effective_message.reply_text(f"Инструмент {ticker} не найден в БД")
+                return
+            existing = db.query(FavoriteModel).filter_by(user_id=uid, ticker=ticker).first()
+            if existing:
+                await update.effective_message.reply_text(f"⭐ {ticker} уже в избранном")
+                return
+            db.add(FavoriteModel(user_id=uid, ticker=ticker))
+            db.commit()
+            await update.effective_message.reply_text(f"⭐ {ticker} добавлен в избранное")
+
+        elif subcmd == "remove":
+            if len(args) < 2:
+                await update.effective_message.reply_text("Укажите тикер: /favorite remove SBER")
+                return
+            ticker = args[1].upper()
+            fav = db.query(FavoriteModel).filter_by(user_id=uid, ticker=ticker).first()
+            if not fav:
+                await update.effective_message.reply_text(f"{ticker} нет в избранном")
+                return
+            db.delete(fav)
+            db.commit()
+            await update.effective_message.reply_text(f"⭐ {ticker} удалён из избранного")
+
+        elif subcmd == "list":
+            favs = db.query(FavoriteModel).filter_by(user_id=uid).order_by(FavoriteModel.created_at).all()
+            if not favs:
+                await update.effective_message.reply_text(
+                    "У вас нет избранных инструментов.\n"
+                    "Добавьте через /favorite add TICKER"
+                )
+                return
+            lines = ["⭐ <b>Избранное:</b>\n"]
+            for f in favs:
+                inst = db.query(Instrument).filter_by(ticker=f.ticker).first()
+                name = inst.full_name if inst else ""
+                lines.append(f"• <b>{f.ticker}</b> — {html_escape(name or '?')}")
+            await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
+
+        else:
+            await update.effective_message.reply_text(
+                "Команды:\n"
+                "• /favorite add TICKER — добавить в избранное\n"
+                "• /favorite remove TICKER — удалить из избранного\n"
+                "• /favorite list — показать избранное"
+            )
+    except Exception as e:
+        db.rollback()
+        logger.exception("favorite_command_error")
+        await update.effective_message.reply_text("❌ Ошибка при работе с избранным")
+    finally:
+        db.close()
+
+
+# --- Interactive Allocator ConversationHandler ---
+ALLOC_AMOUNT, ALLOC_EXCLUDE, ALLOC_PROFILE = range(10, 13)
+
+
+async def alloc_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not await _check_access(update):
+        return ConversationHandler.END
+    if not update.effective_message:
+        return ConversationHandler.END
+    await update.effective_message.reply_text(
+        "💰 Введите сумму для распределения (например, 100000):",
+    )
+    return ALLOC_AMOUNT
+
+
+async def alloc_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_message or not update.effective_message.text or not context.user_data:
+        return ConversationHandler.END
+    text = update.effective_message.text.strip().replace(" ", "").replace(",", ".")
+    try:
+        amount = float(text)
+        if amount < 500:
+            await update.effective_message.reply_text("Минимальная сумма — 500 ₽. Попробуйте ещё раз:")
+            return ALLOC_AMOUNT
+        context.user_data["alloc_amount"] = amount
+    except ValueError:
+        await update.effective_message.reply_text("Введите число, например 100000:")
+        return ALLOC_AMOUNT
+
+    await update.effective_message.reply_text(
+        "Какие тикеры исключить? (через пробел, или отправьте «-» чтобы продолжить)\n"
+        "Например: GAZP SBER"
+    )
+    return ALLOC_EXCLUDE
+
+
+async def alloc_exclude(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_message or not update.effective_message.text or not context.user_data:
+        return ConversationHandler.END
+    text = update.effective_message.text.strip()
+    if text and text != "-":
+        exclude = set(t.upper() for t in text.split())
+        context.user_data["alloc_exclude"] = exclude
+    else:
+        context.user_data["alloc_exclude"] = set()
+
+    await update.effective_message.reply_text(
+        "Какой риск-профиль?\n"
+        "• <b>conservative</b> — консервативный\n"
+        "• <b>balanced</b> — сбалансированный (по умолчанию)\n"
+        "• <b>aggressive</b> — агрессивный\n\n"
+        "Отправьте профиль или «-» для默认ного:",
+        parse_mode="HTML",
+    )
+    return ALLOC_PROFILE
+
+
+async def alloc_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_message or not update.effective_message.text or not context.user_data:
+        return ConversationHandler.END
+    text = update.effective_message.text.strip().lower()
+    if text in ("conservative", "balanced", "aggressive"):
+        context.user_data["alloc_profile"] = text
+    else:
+        context.user_data["alloc_profile"] = "balanced"
+
+    amount = context.user_data["alloc_amount"]
+    exclude = context.user_data.get("alloc_exclude", set())
+    profile = context.user_data.get("alloc_profile", "balanced")
+
+    allocator.set_profile(profile)
+    await _reply_with_allocation(update, amount, exclude=exclude)
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def alloc_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if context.user_data:
+        context.user_data.clear()
+    if update.effective_message:
+        await update.effective_message.reply_text("❌ Распределение отменено")
+    return ConversationHandler.END
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Unhandled error", exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
@@ -1835,6 +2083,7 @@ async def run_bot() -> None:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", start))
+    app.add_handler(CommandHandler("status", bot_status))
     app.add_handler(CommandHandler("analyze", analyze))
     app.add_handler(CommandHandler("ask", ask))
     app.add_handler(CommandHandler("allocate", allocate))
@@ -1871,13 +2120,37 @@ async def run_bot() -> None:
     app.add_handler(CommandHandler("whatif", whatif))
     app.add_handler(CommandHandler("report", report))
     app.add_handler(CommandHandler("pnl", pnl))
+    app.add_handler(CommandHandler("favorite", favorite))
+    app.add_handler(CommandHandler("allocate_interactive", alloc_start))
+    app.add_handler(
+        ConversationHandler(
+            entry_points=[CommandHandler("allocate_interactive", alloc_start)],
+            states={
+                ALLOC_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, alloc_amount)],
+                ALLOC_EXCLUDE: [MessageHandler(filters.TEXT & ~filters.COMMAND, alloc_exclude)],
+                ALLOC_PROFILE: [MessageHandler(filters.TEXT & ~filters.COMMAND, alloc_profile)],
+            },
+            fallbacks=[CommandHandler("cancel", alloc_cancel)],
+        )
+    )
     app.add_handler(CommandHandler("subscribe_author", subscribe_author))
     app.add_handler(CommandHandler("unsubscribe_author", unsubscribe_author))
     app.add_handler(CommandHandler("authors", my_authors))
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    app.add_handler(MessageHandler(filters.Text(["🔍 Анализ", "📊 Портфель", "🏆 Топ", "📰 Новости", "📋 Сводка", "🏭 Сектора", "💰 Аллокация", "➕ Добавить", "➖ Удалить", "👥 Авторы", "⚙️ Профиль", "📊 P&L"]), reply_keyboard_handler))
+    app.add_handler(MessageHandler(filters.Text([
+        "🔍 Анализ", "📊 Портфель", "🏆 Топ",
+        "📰 Новости", "📋 Сводка", "🏭 Сектора",
+        "💰 Аллокация", "🧪 Стресс-тест", "🔄 Корреляция",
+        "➕ Добавить", "➖ Удалить", "📜 История",
+        "📤 Экспорт CSV", "⏪ Бэктест", "⚙️ Профиль",
+        "📊 P&L", "📄 Отчёт", "💱 Курсы",
+        "👥 Авторы", "📰 Соц.сен.", "🌍 Гео-риск",
+        "🔮 What-If", "📡 Статус", "🔔 Подписки",
+        "🏠 /start", "🌙 Ночн.режим", "❓ Помощь",
+        "◀️", "▶️", "🔢 1/3", "🔢 2/3", "🔢 3/3",
+    ]), reply_keyboard_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 
     await app.initialize()
