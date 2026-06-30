@@ -1,18 +1,14 @@
-import logging
-from datetime import date, timedelta
+from __future__ import annotations
+
 from typing import Any, Optional
 
-import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query
+import structlog
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.analysis.ml.price_targets import build_trade_plan
-from src.analysis.ml.price_targets import to_dict as trade_plan_to_dict
-from src.analysis.service import analysis_service
-from src.db.models import Indicator, Instrument, Price, Signal, User
-from src.interfaces.api.auth import get_current_user, get_db
+from src.db.models import User
+from src.interfaces.api.auth import get_current_user
+from src.interfaces.api.dependencies import get_market_service
 from src.interfaces.api.schemas import (
     AdviceResponse,
     AskResponse,
@@ -22,9 +18,9 @@ from src.interfaces.api.schemas import (
     PriceData,
     TradePlanResponse,
 )
-from src.llm.router import llm
+from src.market.service import MarketService
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["instruments"])
 
 
@@ -36,234 +32,71 @@ class AskBody(BaseModel):
 @router.get("/api/instruments", response_model=list[InstrumentListItem])
 async def list_instruments(
     type_filter: Optional[str] = Query(None, alias="type"),
-    db: AsyncSession = Depends(get_db),
+    svc: MarketService = Depends(get_market_service),
 ) -> list[dict[str, Any]]:
-    q = select(Instrument)
-    if type_filter:
-        q = q.where(Instrument.instrument_type == type_filter)
-    q = q.order_by(Instrument.ticker)
-    result = await db.execute(q)
-    instruments = result.scalars().all()
-
-    output = []
-    for inst in instruments:
-        price_result = await db.execute(
-            select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()).limit(1)
-        )
-        last_price = price_result.scalar_one_or_none()
-        output.append(
-            {
-                "id": inst.id,
-                "ticker": inst.ticker,
-                "full_name": inst.full_name,
-                "sector": inst.sector,
-                "type": inst.instrument_type,
-                "last_price": last_price.close if last_price else None,
-                "last_date": last_price.date.isoformat() if last_price else None,
-            }
-        )
-    return output
+    return await svc.list_instruments(type_filter)
 
 
 @router.get("/api/instruments/{ticker}", response_model=InstrumentDetail)
-async def get_instrument(ticker: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
-    inst = result.scalar_one_or_none()
-    if not inst:
-        raise HTTPException(404, "Instrument not found")
-    return {
-        "id": inst.id,
-        "ticker": inst.ticker,
-        "full_name": inst.full_name,
-        "isin": inst.isin,
-        "sector": inst.sector,
-        "type": inst.instrument_type,
-        "lot_size": inst.lot_size,
-        "currency": inst.currency,
-    }
+async def get_instrument(
+    ticker: str,
+    svc: MarketService = Depends(get_market_service),
+) -> dict[str, Any]:
+    return await svc.get_instrument(ticker)
 
 
 @router.get("/api/instruments/{ticker}/prices", response_model=list[PriceData])
 async def get_prices(
     ticker: str,
     days: int = Query(365, le=365 * 5),
-    db: AsyncSession = Depends(get_db),
+    svc: MarketService = Depends(get_market_service),
 ) -> list[dict[str, Any]]:
-    result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
-    inst = result.scalar_one_or_none()
-    if not inst:
-        raise HTTPException(404, "Instrument not found")
-
-    cutoff = date.today() - timedelta(days=days)
-    price_result = await db.execute(
-        select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date)
-    )
-    prices = price_result.scalars().all()
-    return [
-        {
-            "date": p.date.isoformat(),
-            "open": p.open,
-            "high": p.high,
-            "low": p.low,
-            "close": p.close,
-            "volume": p.volume,
-        }
-        for p in prices
-    ]
+    return await svc.get_prices(ticker, days)
 
 
 @router.get("/api/instruments/{ticker}/indicators", response_model=list[IndicatorData])
 async def get_indicators(
     ticker: str,
     days: int = Query(90),
-    db: AsyncSession = Depends(get_db),
+    svc: MarketService = Depends(get_market_service),
 ) -> list[dict[str, Any]]:
-    result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
-    inst = result.scalar_one_or_none()
-    if not inst:
-        raise HTTPException(404, "Instrument not found")
-
-    cutoff = date.today() - timedelta(days=days)
-    ind_result = await db.execute(
-        select(Indicator).where(Indicator.instrument_id == inst.id, Indicator.date >= cutoff).order_by(Indicator.date)
-    )
-    inds = ind_result.scalars().all()
-    return [
-        {
-            "date": i.date.isoformat(),
-            "rsi": i.rsi,
-            "macd_line": i.macd_line,
-            "macd_signal": i.macd_signal,
-            "macd_hist": i.macd_hist,
-            "sma_20": i.sma_20,
-            "sma_50": i.sma_50,
-            "sma_200": i.sma_200,
-            "bb_upper": i.bb_upper,
-            "bb_lower": i.bb_lower,
-            "bb_mid": i.bb_mid,
-            "volume_sma_20": i.volume_sma_20,
-            "atr": i.atr,
-        }
-        for i in inds
-    ]
-
-
-async def _resolve_signal(ticker: str, db: AsyncSession) -> tuple[Instrument, Any]:
-    result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
-    inst = result.scalar_one_or_none()
-    if not inst:
-        raise HTTPException(404, "Instrument not found")
-
-    signal_result = await db.execute(
-        select(Signal)
-        .where(
-            Signal.instrument_id == inst.id,
-            func.date(Signal.date) == date.today(),
-        )
-        .order_by(Signal.date.desc())
-        .limit(1)
-    )
-    cached = signal_result.scalar_one_or_none()
-    if cached and cached.fused_json:
-        return inst, cached.fused_json
-
-    try:
-        fused = await analysis_service.analyze_single(db, inst, ticker)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-    await analysis_service.fusion.save_signal(db, int(inst.id), fused)
-    return inst, fused
+    return await svc.get_indicators(ticker, days)
 
 
 @router.get("/api/instruments/{ticker}/signal")
-async def get_signal(ticker: str, db: AsyncSession = Depends(get_db)) -> Any:
-    _, fused = await _resolve_signal(ticker, db)
-    return fused
+async def get_signal(
+    ticker: str,
+    svc: MarketService = Depends(get_market_service),
+) -> Any:
+    return await svc.get_signal(ticker)
 
 
 @router.get("/api/instruments/{ticker}/trade-plan", response_model=TradePlanResponse)
 async def get_trade_plan(
     ticker: str,
     profile: str = Query("balanced"),
-    db: AsyncSession = Depends(get_db),
+    svc: MarketService = Depends(get_market_service),
 ) -> dict[str, Any]:
-    result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
-    inst = result.scalar_one_or_none()
-    if not inst:
-        raise HTTPException(404, "Instrument not found")
-
-    price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
-    prices = price_result.scalars().all()
-    if len(prices) < 20:
-        raise HTTPException(400, "Not enough price data")
-
-    df = pd.DataFrame(
-        [
-            {"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume}
-            for p in prices
-        ]
-    )
-    ind_result = await db.execute(select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date))
-    inds = ind_result.scalars().all()
-    ind_df = pd.DataFrame(
-        [
-            {
-                "date": i.date,
-                "rsi": i.rsi,
-                "atr": i.atr,
-                "sma_20": i.sma_20,
-                "sma_50": i.sma_50,
-                "macd_hist": i.macd_hist,
-            }
-            for i in inds
-        ]
-    )
-
-    if ind_df.empty:
-        raise HTTPException(400, "No indicator data")
-
-    latest = df.iloc[-1]
-    ind_latest = ind_df.iloc[-1]
-    close = float(latest["close"])
-    sma20 = float(ind_latest.get("sma_20") or close)
-    atr = float(ind_latest.get("atr") or close * 0.02)
-    if atr <= 0 or close <= 0:
-        raise HTTPException(400, "Invalid price data")
-
-    plan = build_trade_plan(close, sma20, atr, df, profile=profile)  # type: ignore[arg-type]
-    return {
-        "ticker": ticker.upper(),
-        "profile": profile,
-        "current_price": close,
-        **trade_plan_to_dict(plan),
-    }
+    return await svc.get_trade_plan(ticker, profile)
 
 
 @router.get("/api/instruments/{ticker}/advice", response_model=AdviceResponse)
 async def get_advice(
     ticker: str,
-    db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user),
+    svc: MarketService = Depends(get_market_service),
 ) -> dict[str, Any]:
-    _, fused = await _resolve_signal(ticker, db)
-    advice = await llm.advise(fused, user_id=int(user.id) if user else None)
-    return {"signal": fused, "advice": advice, "user_id": user.id if user else None}
+    return await svc.get_advice(ticker, int(user.id) if user else None)
 
 
 @router.post("/api/ask", response_model=AskResponse)
 async def ask_question(
     body: AskBody,
-    db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user),
+    svc: MarketService = Depends(get_market_service),
 ) -> dict[str, Any]:
-    answer = await llm.answer_question(
+    return await svc.ask_question(
         question=body.question,
         user_id=int(user.id) if user else None,
         ticker_context=body.ticker_context,
     )
-    return {
-        "answer": answer,
-        "user_id": user.id if user else None,
-        "risk_profile": getattr(user, "risk_profile", "balanced") if user else "balanced",
-    }

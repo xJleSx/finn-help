@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +20,7 @@ from src.interfaces.api.schemas import (
     ScenarioResponse,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["analysis"])
 
 
@@ -44,8 +44,9 @@ async def run_scenario_analysis(
         result = await loop.run_in_executor(None, _run_scenario_sync, user_id)
         return result
     except Exception as e:
-        logger.exception("Scenario analysis failed for user_id=%s", user_id)
+        logger.exception("scenario_failed", user_id=user_id)
         raise HTTPException(500, f"Scenario analysis failed: {e}")
+
 
 
 def _custom_scenario_sync(ticker: str, shock_pct: float, user_id: int) -> dict[str, Any]:
@@ -82,7 +83,7 @@ async def custom_scenario(
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
-        logger.exception("Custom scenario failed for ticker=%s", ticker)
+        logger.exception("custom_scenario_failed", ticker=ticker)
         raise HTTPException(500, f"Custom scenario failed: {e}")
 
 
@@ -157,8 +158,9 @@ async def get_alerts(
         alerts = await loop.run_in_executor(None, _get_alerts_sync, user_id, limit)
         return {"alerts": alerts}
     except Exception as e:
-        logger.exception("Failed to get alerts for user_id=%s", user_id)
+        logger.exception("alerts_get_failed", user_id=user_id)
         raise HTTPException(500, f"Failed to get alerts: {e}")
+
 
 
 def _refresh_alerts_sync(user_id: int) -> int:
@@ -184,8 +186,9 @@ async def refresh_alerts(
         count = await loop.run_in_executor(None, _refresh_alerts_sync, user_id)
         return {"new_alerts": count}
     except Exception as e:
-        logger.exception("Alert refresh failed")
+        logger.exception("alert_refresh_failed")
         raise HTTPException(500, f"Alert refresh failed: {e}")
+
 
 
 # ── Risk explorer endpoints ──────────────────────────────────────────────
@@ -221,8 +224,9 @@ async def risk_portfolio_summary(
         result = await loop.run_in_executor(None, _risk_portfolio_summary_sync, user_id)
         return result
     except Exception as e:
-        logger.exception("Risk portfolio summary failed for user_id=%s", user_id)
+        logger.exception("risk_portfolio_summary_failed", user_id=user_id)
         raise HTTPException(500, f"Risk portfolio summary failed: {e}")
+
 
 
 @router.get("/api/risk/deep-dive/{ticker}")
@@ -235,8 +239,9 @@ async def risk_ticker_deep_dive(
         result = await loop.run_in_executor(None, _risk_ticker_deep_dive_sync, ticker, user_id)
         return result
     except Exception as e:
-        logger.exception("Risk deep dive failed for %s", ticker)
+        logger.exception("risk_deep_dive_failed", ticker=ticker)
         raise HTTPException(500, f"Risk deep dive failed: {e}")
+
 
 
 # ── Causal inference endpoint ────────────────────────────────────────────
@@ -269,5 +274,6 @@ async def causal_analysis(
         result = await loop.run_in_executor(None, _causal_analysis_sync, ticker, target)
         return result
     except Exception as e:
-        logger.exception("Causal analysis failed for %s", ticker)
+        logger.exception("causal_analysis_failed", ticker=ticker)
         raise HTTPException(500, f"Causal analysis failed: {e}")
+

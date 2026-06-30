@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import asyncio
-import logging
+import structlog
 from datetime import date, timedelta
 from typing import Any, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from src.db.connection import get_session
@@ -18,7 +21,7 @@ from src.notifications import (
     SignalNotification,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 ACTION_EMOJI = {
     "BUY": "🟢",
@@ -66,14 +69,26 @@ def format_daily_summary_text(n: DailySummaryNotification) -> str:
 
 
 class NotificationService:
-    # --- Subscriptions ---
-
     VALID_NOTIFY_TYPES = frozenset({"signal", "daily", "geo", "dividend", "trade"})
+
+    def __init__(self, db: AsyncSession | None = None) -> None:
+        self._db = db
+
+    def _get_sync_db(self) -> Session:
+        return get_session()
+
+    async def _run_sync(self, fn, *args, **kwargs):
+        if self._db is not None:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, fn, *args, **kwargs)
+        return fn(*args, **kwargs)
+
+    # --- Subscriptions ---
 
     def subscribe(self, user_id: int, chat_id: int, notify_type: str = "daily") -> None:
         if notify_type not in self.VALID_NOTIFY_TYPES:
             raise ValueError(f"Invalid notify_type: {notify_type}")
-        db = get_session()
+        db = self._get_sync_db()
         try:
             sub = db.query(Subscription).filter_by(user_id=user_id).first()
             if sub:
@@ -84,7 +99,7 @@ class NotificationService:
                 db.add(sub)
             db.commit()
         except Exception as e:
-            logger.error("Failed to subscribe %d: %s", user_id, e)
+            logger.error("subscription_failed", user_id=user_id, error=str(e))
             db.rollback()
         finally:
             db.close()
@@ -92,7 +107,7 @@ class NotificationService:
     def unsubscribe(self, user_id: int, notify_type: str | None = None) -> None:
         if notify_type is not None and notify_type not in self.VALID_NOTIFY_TYPES:
             raise ValueError(f"Invalid notify_type: {notify_type}")
-        db = get_session()
+        db = self._get_sync_db()
         try:
             sub = db.query(Subscription).filter_by(user_id=user_id).first()
             if sub:
@@ -102,13 +117,13 @@ class NotificationService:
                     db.delete(sub)
                 db.commit()
         except Exception as e:
-            logger.error("Failed to unsubscribe %d: %s", user_id, e)
+            logger.error("unsubscribe_failed", user_id=user_id, error=str(e))
             db.rollback()
         finally:
             db.close()
 
     def get_subscribers(self, notify_type: str = "signal") -> list[tuple[int, int]]:
-        db = get_session()
+        db = self._get_sync_db()
         try:
             col = getattr(Subscription, f"notify_{notify_type}", None)
             if col is None:
@@ -123,7 +138,7 @@ class NotificationService:
     def save_notification(
         self, user_id: int, notif_type: str, message: str, title: str | None = None, data: dict[str, Any] | None = None
     ) -> None:
-        db = get_session()
+        db = self._get_sync_db()
         try:
             n = Notification(
                 user_id=user_id,
@@ -135,13 +150,13 @@ class NotificationService:
             db.add(n)
             db.commit()
         except Exception as e:
-            logger.error("Failed to save notification: %s", e)
+            logger.error("save_notification_failed", user_id=user_id, error=str(e))
             db.rollback()
         finally:
             db.close()
 
     def was_signal_sent_today(self, ticker: str, notif_type: str = "signal") -> bool:
-        db = get_session()
+        db = self._get_sync_db()
         try:
             today = date.today()
             count = (
@@ -158,14 +173,14 @@ class NotificationService:
             db.close()
 
     def get_unread_count(self, user_id: int) -> int:
-        db = get_session()
+        db = self._get_sync_db()
         try:
             return db.query(Notification).filter_by(user_id=user_id, read=False).count()
         finally:
             db.close()
 
     def mark_read(self, user_id: int, notif_id: int | None = None) -> None:
-        db = get_session()
+        db = self._get_sync_db()
         try:
             q = db.query(Notification).filter_by(user_id=user_id, read=False)
             if notif_id:
@@ -173,7 +188,7 @@ class NotificationService:
             q.update({"read": True})
             db.commit()
         except Exception as e:
-            logger.error("Failed to mark notifications read: %s", e)
+            logger.error("mark_read_failed", user_id=user_id, error=str(e))
             db.rollback()
         finally:
             db.close()
@@ -181,7 +196,7 @@ class NotificationService:
     # --- Signal changes ---
 
     def get_signal_changes(self) -> list[SignalNotification]:
-        db = get_session()
+        db = self._get_sync_db()
         try:
             daily = date.today()
             recent = (
@@ -206,7 +221,7 @@ class NotificationService:
                 if self.was_signal_sent_today(str(inst.ticker)):
                     continue
 
-                fused: dict[str, Any] = s.fused_json if s.fused_json else {}  # type: ignore[assignment]
+                fused: dict[str, Any] = s.fused_json if s.fused_json else {}
                 n = SignalNotification(
                     ticker=str(inst.ticker),
                     action=str(s.action),
@@ -224,7 +239,7 @@ class NotificationService:
     # --- Geo risk ---
 
     def get_geo_change(self) -> Optional[GeoRiskNotification]:
-        db = get_session()
+        db = self._get_sync_db()
         try:
             today_score = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
             if not today_score:
@@ -250,7 +265,7 @@ class NotificationService:
     def get_upcoming_dividends(self, days_ahead: int = 14) -> list[DividendNotification]:
         from src.db.models import Dividend
 
-        db = get_session()
+        db = self._get_sync_db()
         try:
             cutoff = date.today() + timedelta(days=days_ahead)
             upcoming = (
@@ -278,7 +293,7 @@ class NotificationService:
     # --- Daily summary ---
 
     def get_daily_summary(self) -> DailySummaryNotification:
-        db = get_session()
+        db = self._get_sync_db()
         try:
             daily = date.today()
             signals = db.query(SignalModel).filter(SignalModel.date >= daily).all()
@@ -321,7 +336,7 @@ class NotificationService:
 
     def check_price_targets(self) -> list[PriceTargetAlert]:
         alerts = []
-        db = get_session()
+        db = self._get_sync_db()
         try:
             positions = db.query(Portfolio).all()
             for p in positions:
@@ -451,7 +466,7 @@ class NotificationService:
 
     async def check_rebalance_async(self, db: object | None = None) -> list[RebalanceAlert]:
         def _run() -> list[RebalanceAlert]:
-            session = get_session()
+            session = self._get_sync_db()
             try:
                 return self.check_rebalance(session)
             finally:
@@ -459,3 +474,6 @@ class NotificationService:
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _run)
+
+    def was_signal_sent_today_sync(self, ticker: str, notif_type: str = "signal") -> bool:
+        return self.was_signal_sent_today(ticker, notif_type)
