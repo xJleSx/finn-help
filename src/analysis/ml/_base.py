@@ -107,6 +107,8 @@ class PersistMixin:
 class BaseMLClassifier(PersistMixin, ABC):
     def __init__(self, ticker: str = ""):
         self._model: Any = None
+        self._calibrator: Any = None
+        self._bootstrap_models: list[Any] = []
         self._ticker = ticker
 
     @property
@@ -202,11 +204,17 @@ class BaseMLClassifier(PersistMixin, ABC):
             confidence = 1.0 - abs(proba - 0.5) * 10
             signal_score = 0.0
 
+        pred_lower, pred_upper = self._bootstrap_interval(features, proba)
+        bootstrap_uncertainty = round(pred_upper - pred_lower, 3) if pred_upper > pred_lower else 0.0
+
         return {
             "action": action,
             "confidence": round(min(confidence, 1.0), 2),
             "signal_score": round(signal_score, 3),
             "probability": round(proba, 3),
+            "prediction_interval_lower": round(pred_lower, 3),
+            "prediction_interval_upper": round(pred_upper, 3),
+            "bootstrap_uncertainty": bootstrap_uncertainty,
         }
 
     def hpo(self, x_train: np.ndarray, y_train: np.ndarray, x_val: np.ndarray, y_val: np.ndarray, n_trials: int = 20) -> dict[str, Any]:
@@ -319,13 +327,30 @@ class BaseMLClassifier(PersistMixin, ABC):
             return None, None, None, None
         return x_all[train_slice], y_all[train_slice], x_all[val_slice], y_all[val_slice]
 
+    def _bootstrap_interval(self, features: pd.DataFrame, proba: float) -> tuple[float, float]:
+        if not self._bootstrap_models or len(self._bootstrap_models) < 3:
+            return proba, 0.0
+        preds = []
+        for bm in self._bootstrap_models:
+            try:
+                p = float(bm.predict_proba(features.iloc[-1:])[0, 1])
+                preds.append(p)
+            except Exception:
+                continue
+        if len(preds) < 3:
+            return proba, 0.0
+        lower = float(np.percentile(preds, 5))
+        upper = float(np.percentile(preds, 95))
+        return max(0.0, lower), min(1.0, upper)
+
     def _predict_latest(self, features: pd.DataFrame) -> float:
         latest = features.iloc[-1:]
+        pred_model = self._calibrator if self._calibrator is not None else self._model
         try:
-            return float(self._model.predict_proba(latest)[0, 1])
+            return float(pred_model.predict_proba(latest)[0, 1])
         except Exception:
             base = features[BASE_FEATURE_COLS].iloc[-1:]
-            return float(self._model.predict_proba(base)[0, 1])
+            return float(pred_model.predict_proba(base)[0, 1])
 
     def _train_on_the_fly(
         self, df: pd.DataFrame, features: pd.DataFrame, anomaly_mask: np.ndarray | None = None,
@@ -364,6 +389,31 @@ class BaseMLClassifier(PersistMixin, ABC):
 
             model = self._create_model()
             model.fit(x_train, y_train)
+
+            self._calibrator = None
+            if val_slice.start < val_slice.stop and len(x_val) > 0:
+                try:
+                    from sklearn.calibration import CalibratedClassifierCV
+
+                    calibrator = CalibratedClassifierCV(model, cv="prefit", method="sigmoid")
+                    calibrator.fit(x_val, y_val)
+                    self._calibrator = calibrator
+                except Exception as e:
+                    logger.debug("Calibration failed: %s", e)
+
+            self._bootstrap_models = []
+            n_bootstrap = settings.ml_bootstrap_samples
+            if n_bootstrap > 0 and len(x_train) >= 40:
+                rng = np.random.default_rng(42)
+                for i in range(n_bootstrap):
+                    idx = rng.integers(0, len(x_train), size=len(x_train))
+                    bx, by = x_train[idx], y_train[idx]
+                    try:
+                        bm = self._create_model()
+                        bm.fit(bx, by)
+                        self._bootstrap_models.append(bm)
+                    except Exception:
+                        continue
 
             if val_slice.start < val_slice.stop and len(x_val) > 0:
                 preds = model.predict(x_val)

@@ -79,6 +79,7 @@ class Settings(BaseSettings):
 
     ml_hpo_enabled: bool = False
     ml_hpo_trials: int = 20
+    ml_bootstrap_samples: int = 0
 
     ml_anomaly_volume_contamination: float = 0.1
     ml_anomaly_sentiment_contamination: float = 0.1
