@@ -481,10 +481,8 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         from src.scheduler.reporting import generate_weekly_report_text
 
         text = await generate_weekly_report_text()
-        try:
-            await update.effective_message.reply_text(html_escape(text), parse_mode="HTML")
-        except Exception:
-            await update.effective_message.reply_text(text)
+        for chunk in _chunk_text(text, 4096):
+            await update.effective_message.reply_text(chunk, parse_mode="HTML")
     except Exception:
         logger.exception("Weekly report failed")
         await update.effective_message.reply_text("Не удалось сформировать недельную сводку.")
@@ -1785,46 +1783,92 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     db = get_session()
     try:
-        row = db.query(UserSetting).filter_by(key="risk_profile").first()
-        current: str = str(row.value) if row else "balanced"
+        risk_row = db.query(UserSetting).filter_by(key="risk_profile").first()
+        current: str = str(risk_row.value) if risk_row else "balanced"
 
-        if context.args:
-            new_profile = context.args[0].lower()
-            if new_profile not in ("conservative", "balanced", "aggressive"):
-                await update.effective_message.reply_text("Доступные профили: conservative, balanced, aggressive")
-                return
+        goal_row = db.query(UserSetting).filter_by(key="goal").first()
+        current_goal: float = float(goal_row.value) if goal_row else 0.0
 
+        args = context.args or []
+
+        # Change risk profile
+        if args and args[0].lower() in ("conservative", "balanced", "aggressive"):
+            new_profile = args[0].lower()
             allocator.set_profile(new_profile)
-            if row:
-                row.value = str(new_profile)  # type: ignore[assignment]
+            if risk_row:
+                risk_row.value = str(new_profile)
             else:
                 db.add(UserSetting(key="risk_profile", value=new_profile))
             db.commit()
             names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
             await update.effective_message.reply_text(f"✅ Профиль изменён на <b>{names[new_profile]}</b>")
+            return
+
+        # Set goal
+        if args and args[0].lower() == "goal" and len(args) >= 2:
+            try:
+                new_goal = float(args[1].replace(" ", "").replace(",", "."))
+            except ValueError:
+                await update.effective_message.reply_text("Укажите сумму: /profile goal 1000000")
+                return
+            if goal_row:
+                goal_row.value = str(new_goal)
+            else:
+                db.add(UserSetting(key="goal", value=str(new_goal)))
+            db.commit()
+            await update.effective_message.reply_text(f"🎯 Цель изменена на {new_goal:,.0f} ₽")
+            return
+
+        # Show profile
+        names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
+        desc = {
+            "conservative": "50% ETF, 25% облигации, 20% дивидендные, 5% рост",
+            "balanced": "40% ETF, 30% дивидендные, 20% облигации, 10% рост",
+            "aggressive": "40% рост, 25% ETF, 25% дивидендные, 10% облигации",
+        }
+
+        # Calculate actual portfolio value
+        portfolio_value = 0.0
+        try:
+            rows = get_portfolio_positions(db)
+            portfolio_value = sum(r["value"] for r in rows)
+        except Exception:
+            pass
+
+        p_tickers: list[Any] = cast(list[Any], personal.get("favorite_tickers", []))
+        p_horizon: str = cast(str, personal.get("investment_horizon", "medium"))
+        horizon_label = {"short": "Краткосрочный", "medium": "Среднесрочный", "long": "Долгосрочный"}
+
+        text = "📊 <b>Личные настройки</b>\n\n"
+        text += f"👤 Профиль риска: <b>{names.get(current, current)}</b>\n"
+        text += f"💰 Портфель: {portfolio_value:,.0f} ₽\n"
+        if current_goal > 0:
+            pct = (portfolio_value / current_goal) * 100 if current_goal > 0 else 0
+            text += f"🎯 Цель: {current_goal:,.0f} ₽ ({pct:.1f}%)\n"
         else:
-            names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
-            desc = {
-                "conservative": "50% ETF, 25% облигации, 20% дивидендные, 5% рост",
-                "balanced": "40% ETF, 30% дивидендные, 20% облигации, 10% рост",
-                "aggressive": "40% рост, 25% ETF, 25% дивидендные, 10% облигации",
-            }
-            text = "📊 <b>Личные настройки</b>\n\n"
-            text += f"👤 Профиль риска: <b>{names.get(current, current)}</b>\n"
+            text += f"🎯 Цель: не задана\n"
+        text += f"📅 Горизонт: {horizon_label.get(p_horizon, p_horizon)}\n"
 
-            p_capital: int = cast(int, personal.get("capital", 100_000))
-            p_tickers: list[Any] = cast(list[Any], personal.get("favorite_tickers", []))
-            p_horizon: str = cast(str, personal.get("investment_horizon", "medium"))
-            horizon_label = {"short": "Краткосрочный", "medium": "Среднесрочный", "long": "Долгосрочный"}
-            text += f"💰 Капитал: {p_capital:,.0f} ₽\n"
-            text += f"📅 Горизонт: {horizon_label.get(p_horizon, p_horizon)}\n"
-            if p_tickers:
-                text += f"⭐ Избранные: {', '.join(p_tickers[:10])}\n"
+        # Show portfolio by sector
+        if rows:
+            sectors: dict[str, float] = {}
+            for r in rows:
+                sec = r.get("sector", "Прочее")
+                sectors[sec] = sectors.get(sec, 0) + r["value"]
+            if sectors:
+                text += "\n<b>Сектора:</b>\n"
+                for sec, val in sorted(sectors.items(), key=lambda x: -x[1]):
+                    pct = val / portfolio_value * 100 if portfolio_value > 0 else 0
+                    text += f"  • {sec}: {pct:.0f}%\n"
 
-            text += "\n<b>Сменить профиль:</b>\n"
-            for k, name in names.items():
-                text += f"• <code>/profile {k}</code> — {name} ({desc[k]})\n"
-            await update.effective_message.reply_text(text, parse_mode="HTML")
+        if p_tickers:
+            text += f"\n⭐ Избранные: {', '.join(p_tickers[:10])}\n"
+
+        text += "\n<b>Команды:</b>\n"
+        for k, name in names.items():
+            text += f"• <code>/profile {k}</code> — {name} ({desc[k]})\n"
+        text += f"• <code>/profile goal СУММА</code> — установить цель\n"
+        await update.effective_message.reply_text(text, parse_mode="HTML")
     finally:
         db.close()
 

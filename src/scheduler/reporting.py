@@ -264,11 +264,11 @@ async def generate_daily_report() -> DailyReport | None:
 
 
 async def generate_weekly_report_text() -> str:
-    """Сформировать текст еженедельной сводки (без сохранения, только текст)."""
+    """Сформировать текст еженедельной сводки (HTML)."""
     db = get_session()
     try:
         instruments = db.query(Instrument).all()
-        lines = ["📆 *Недельная сводка*", ""]
+        lines = ["📆 <b>Недельная сводка</b>", ""]
         changed: list[str] = []
 
         for inst in instruments:
@@ -280,28 +280,44 @@ async def generate_weekly_report_text() -> str:
                 .all()
             )
             if len(recent) < 2:
-                continue
-            curr, prev_snap = recent[0], recent[1]
+                recent_daily = (
+                    db.query(MetricSnapshot)
+                    .filter(MetricSnapshot.instrument_id == inst.id)
+                    .order_by(MetricSnapshot.taken_at.desc())
+                    .limit(2)
+                    .all()
+                )
+                if len(recent_daily) < 2:
+                    continue
+                curr, prev_snap = recent_daily[0], recent_daily[1]
+            else:
+                curr, prev_snap = recent[0], recent[1]
             ticker = str(inst.ticker or "")
 
             parts = []
-            if curr.delta_price_pct is not None:
-                emoji = "🟢" if curr.delta_price_pct > 0 else "🔴"
-                parts.append(f"{emoji} цена {curr.delta_price_pct:+.1f}%")
-            if curr.delta_rsi is not None:
-                parts.append(f"RSI {prev_snap.rsi:.0f}→{curr.rsi:.0f}")
-            if curr.delta_action_changed:
-                parts.append(f"сигнал {prev_snap.signal_action}→{curr.signal_action}")
-            if curr.delta_score is not None:
-                parts.append(f"score {curr.delta_score:+.3f}")
+            try:
+                if curr.delta_price_pct is not None:
+                    emoji = "🟢" if curr.delta_price_pct > 0 else "🔴"
+                    parts.append(f"{emoji} цена {curr.delta_price_pct:+.1f}%")
+                if curr.delta_rsi is not None:
+                    parts.append(f"RSI {prev_snap.rsi:.0f}→{curr.rsi:.0f}")
+                if curr.delta_action_changed:
+                    parts.append(f"сигнал {prev_snap.signal_action}→{curr.signal_action}")
+                if curr.delta_score is not None:
+                    parts.append(f"score {curr.delta_score:+.3f}")
+            except Exception:
+                pass
 
             if parts:
-                changed.append(f"• *{ticker}*: {' | '.join(parts)}")
+                changed.append(f"• <b>{ticker}</b>: {' | '.join(parts)}")
 
         if changed:
-            lines.extend(changed)
+            lines.extend(changed[:30])
+            if len(changed) > 30:
+                lines.append(f"... и ещё {len(changed) - 30} инструментов")
         else:
             lines.append("Изменений за неделю нет.")
+            lines.append("Убедитесь, что запущен `finn update` для сбора данных.")
 
         lines.append("")
         lines.append("💡 Для детального анализа используйте /analyze TICKER")

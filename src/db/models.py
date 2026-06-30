@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text as sa_text,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -399,6 +400,8 @@ class FeatureCache(Base):
     feature_type = Column(String(50), nullable=False)
     date = Column(Date, nullable=False)
     value_json = Column(JSON, nullable=False)
+    version = Column(Integer, nullable=False, server_default=sa_text("1"))
+    ttl_hours = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=func.now())
 
     __table_args__ = (
