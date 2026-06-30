@@ -98,14 +98,37 @@ def html_escape(text: str | None) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def build_main_reply_keyboard() -> ReplyKeyboardMarkup:
-    keyboard = [
+PAGES: dict[int, list[list[str]]] = {
+    1: [
         ["🔍 Анализ", "📊 Портфель", "🏆 Топ"],
         ["📰 Новости", "📋 Сводка", "🏭 Сектора"],
-        ["💰 Аллокация", "➕ Добавить", "➖ Удалить"],
-        ["👥 Авторы", "⚙️ Профиль", "📊 P&L"],
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        ["💰 Аллокация", "🧪 Стресс-тест", "🔄 Корреляция"],
+        ["◀️", "🔢 1/3", "▶️"],
+    ],
+    2: [
+        ["➕ Добавить", "➖ Удалить", "📜 История"],
+        ["📤 Экспорт CSV", "⏪ Бэктест", "⚙️ Профиль"],
+        ["📊 P&L", "📄 Отчёт", "💱 Курсы"],
+        ["◀️", "🔢 2/3", "▶️"],
+    ],
+    3: [
+        ["👥 Авторы", "📰 Соц.сен.", "🌍 Гео-риск"],
+        ["🔮 What-If", "📡 Статус", "🔔 Подписки"],
+        ["🏠 /start", "🌙 Ночн.режим", "❓ Помощь"],
+        ["◀️", "🔢 3/3", "▶️"],
+    ],
+}
+
+TOTAL_PAGES = 3
+
+
+def build_reply_keyboard(page: int = 1) -> ReplyKeyboardMarkup:
+    page = max(1, min(page, TOTAL_PAGES))
+    return ReplyKeyboardMarkup(PAGES[page], resize_keyboard=True)
+
+
+def build_main_reply_keyboard() -> ReplyKeyboardMarkup:
+    return build_reply_keyboard(page=1)
 
 
 def build_main_keyboard() -> InlineKeyboardMarkup:
@@ -168,7 +191,9 @@ COMMAND_CATEGORIES = {
     ],
     "💰 Портфель": [
         ("/portfolio", "Мой портфель"),
-        ("/allocate СУММА", "Куда вложить"),
+        ("/allocate СУММА", "Куда вложить (быстро)"),
+        ("/allocate_interactive", "Куда вложить (интерактивно)"),
+        ("/favorite add/remove/list", "Избранное"),
         ("/add TICKER КОЛ", "Добавить позицию"),
         ("/remove TICKER", "Удалить позицию"),
         ("/history TICKER", "История сигналов"),
@@ -202,6 +227,7 @@ COMMAND_CATEGORIES = {
         ("/whatif", "Что-если сценарий"),
         ("/report", "Отчёт за 120 дней"),
         ("/pnl", "P&L сводка"),
+        ("/status", "Статус бота"),
     ],
 }
 

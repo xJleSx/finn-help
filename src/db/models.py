@@ -341,6 +341,19 @@ class AuthorSubscription(Base):
     )
 
 
+class Favorite(Base):
+    __tablename__ = "favorites"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    ticker = Column(String(20), nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "ticker", name="uq_user_favorite_ticker"),
+    )
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 
