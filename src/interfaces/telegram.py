@@ -54,6 +54,13 @@ from src.interfaces.telegram_helpers import (
     get_portfolio_positions,
     html_escape,
 )
+from src.notifications.channels import (
+    ALL_CHANNELS,
+    PushMessage,
+    PushManager,
+    load_preferences,
+    set_preference,
+)
 from src.notifications.service import NotificationService, format_daily_summary_text, format_signal_text
 from src.portfolio.allocator import allocator
 from src.reports import generate_portfolio_csv
@@ -1944,6 +1951,73 @@ async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.effective_message.reply_text(text, parse_mode="HTML")
 
 
+CHANNEL_NAMES = {"telegram": "Telegram", "email": "Email", "web": "Web Push"}
+
+
+@guard(with_cooldown=True)
+async def channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user is None:
+        return
+    uid = update.effective_user.id
+    args = context.args or []
+    db = get_session()
+    try:
+        if not args or args[0] == "status":
+            prefs = load_preferences(db, uid)
+            lines = ["<b>📨 Каналы уведомлений</b>\n"]
+            for ch in ["telegram", "email", "web"]:
+                p = prefs.get(ch, {})
+                status = "✅" if p.get("enabled", True) else "❌"
+                sev = p.get("min_severity", "LOW")
+                lines.append(f"{status} <b>{CHANNEL_NAMES.get(ch, ch)}</b> — min {sev}")
+            await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
+
+        elif args[0] == "set":
+            if len(args) < 3:
+                await update.effective_message.reply_text(
+                    "Использование: /channel set <telegram|email|web> <on|off>"
+                )
+                return
+            ch = args[1].lower()
+            if ch not in ALL_CHANNELS:
+                await update.effective_message.reply_text(f"Неизвестный канал: {html_escape(ch)}")
+                return
+            enabled = args[2].lower() == "on"
+            set_preference(db, uid, channel=ch, enabled=enabled)
+            status = "включён" if enabled else "отключён"
+            await update.effective_message.reply_text(f"✅ {CHANNEL_NAMES.get(ch, ch)} {status}")
+
+        elif args[0] == "severity":
+            if len(args) < 3:
+                await update.effective_message.reply_text(
+                    "Использование: /channel severity <telegram|email|web> <LOW|MEDIUM|HIGH|CRITICAL>"
+                )
+                return
+            ch = args[1].lower()
+            if ch not in ALL_CHANNELS:
+                await update.effective_message.reply_text(f"Неизвестный канал: {html_escape(ch)}")
+                return
+            level = args[2].upper()
+            if level not in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
+                await update.effective_message.reply_text("Уровень: LOW, MEDIUM, HIGH или CRITICAL")
+                return
+            set_preference(db, uid, channel=ch, min_severity=level)
+            await update.effective_message.reply_text(
+                f"✅ {CHANNEL_NAMES.get(ch, ch)}: мин. уровень <b>{level}</b>",
+                parse_mode="HTML",
+            )
+
+        else:
+            await update.effective_message.reply_text(
+                "Команды: /channel status, /channel set <канал> <on|off>, /channel severity <канал> <уровень>"
+            )
+    except Exception:
+        logger.exception("channel_cmd_failed", user_id=uid)
+        await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
+    finally:
+        db.close()
+
+
 @guard(with_cooldown=True)
 async def favorite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user is None:
@@ -2164,6 +2238,7 @@ async def run_bot() -> None:
     app.add_handler(CommandHandler("whatif", whatif))
     app.add_handler(CommandHandler("report", report))
     app.add_handler(CommandHandler("pnl", pnl))
+    app.add_handler(CommandHandler("channel", channel_cmd))
     app.add_handler(CommandHandler("favorite", favorite))
     app.add_handler(CommandHandler("allocate_interactive", alloc_start))
     app.add_handler(
