@@ -7,7 +7,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.alerts.engine import AlertDeduplicator, AlertEngine, AlertTimer
+from src.alerts.deduplicator import AlertDeduplicator, AlertTimer
+from src.alerts.engine import AlertEngine
+from src.alerts.scorer import build_alert, classify_priority
 from src.db.models import Base, Instrument, News, NewsInstrument, Portfolio
 
 
@@ -135,32 +137,26 @@ class TestAlertTimer:
 
 class TestAlertEngineUnit:
     def test_classify_critical(self):
-        engine = AlertEngine()
-        priority, reason = engine._classify(anomaly_score=0.85, pred_return=0.01, in_portfolio=False)
+        priority, reason = classify_priority(anomaly_score=0.85, pred_return=0.01, in_portfolio=False)
         assert priority == "CRITICAL"
 
     def test_classify_high(self):
-        engine = AlertEngine()
-        priority, reason = engine._classify(anomaly_score=0.65, pred_return=0.005, in_portfolio=False)
+        priority, reason = classify_priority(anomaly_score=0.65, pred_return=0.005, in_portfolio=False)
         assert priority == "HIGH"
 
     def test_classify_medium(self):
-        engine = AlertEngine()
-        priority, reason = engine._classify(anomaly_score=0.45, pred_return=0.003, in_portfolio=False)
+        priority, reason = classify_priority(anomaly_score=0.45, pred_return=0.003, in_portfolio=False)
         assert priority == "MEDIUM"
 
     def test_classify_low(self):
-        engine = AlertEngine()
-        priority, reason = engine._classify(anomaly_score=0.1, pred_return=0.0, in_portfolio=False)
+        priority, reason = classify_priority(anomaly_score=0.1, pred_return=0.0, in_portfolio=False)
         assert priority == "LOW"
 
     def test_classify_portfolio_boost(self):
-        engine = AlertEngine()
-        priority, reason = engine._classify(anomaly_score=0.7, pred_return=0.025, in_portfolio=True)
+        priority, reason = classify_priority(anomaly_score=0.7, pred_return=0.025, in_portfolio=True)
         assert priority == "CRITICAL"
 
     def test_build_alert_structure(self):
-        engine = AlertEngine()
         article = News(
             id=42, title="Test article", category="MACRO",
             subcategory="inflation", source_name="Interfax",
@@ -168,7 +164,7 @@ class TestAlertEngineUnit:
         )
         anomaly = {"anomaly_score": 0.6, "is_anomaly": True, "details": {}}
         impact = {"predicted_return": 0.015, "confidence": 0.7, "model_loaded": True}
-        alert = engine._build_alert(article, "SBER", anomaly, impact, in_portfolio=True)
+        alert = build_alert(article, "SBER", anomaly, impact, in_portfolio=True)
         assert alert["news_id"] == 42
         assert alert["ticker"] == "SBER"
         assert alert["priority"] == "HIGH"
@@ -176,11 +172,10 @@ class TestAlertEngineUnit:
         assert 0.0 <= alert["priority_score"] <= 1.0
 
     def test_build_alert_no_impact(self):
-        engine = AlertEngine()
         article = News(id=1, title="Test", published_at=datetime.now(timezone.utc))
         anomaly = {"anomaly_score": 0.0, "is_anomaly": False, "details": {}}
         impact = {"predicted_return": 0.0, "confidence": 0.0, "model_loaded": False}
-        alert = engine._build_alert(article, "SBER", anomaly, impact, in_portfolio=False)
+        alert = build_alert(article, "SBER", anomaly, impact, in_portfolio=False)
         assert alert["priority"] == "LOW"
         # recency score = 1.0, weight = 0.1 -> 0.1; portfolio score = 0.3, weight = 0.2 -> 0.06
         assert alert["priority_score"] == pytest.approx(0.16, rel=0.01)

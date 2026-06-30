@@ -5,12 +5,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-from src.alerts.engine import (
-    AlertAggregator,
-    AlertHistory,
-    AlertPushService,
-    UserAlertPreferences,
-)
+from src.alerts.history import AlertHistory
+from src.alerts.preferences import UserAlertPreferences
+from src.alerts.prioritizer import AlertAggregator
+from src.alerts.push import AlertPushService
 from src.db.models import AlertLog
 
 
@@ -214,7 +212,7 @@ class TestUserAlertPreferences:
     def test_filter_quiet_hours_blocks_non_critical(self):
         prefs = UserAlertPreferences()
         now = datetime.now(timezone.utc)
-        with patch("src.alerts.engine.datetime") as mock_dt:
+        with patch("src.alerts.preferences.datetime") as mock_dt:
             mock_dt.now.return_value = now.replace(hour=23, minute=0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             alerts = [
