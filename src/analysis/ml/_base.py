@@ -34,10 +34,54 @@ BASE_FEATURE_COLS = [
 ]
 
 
-class BaseMLClassifier(ABC):
-    def __init__(self, ticker: str = ""):
-        self._model: Any = None
-        self._ticker = ticker
+def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
+    needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
+    if not all(c in df.columns for c in needed):
+        return pd.DataFrame()
+
+    result = df[needed].copy()
+    result["price_sma20"] = result["close"] / result["sma_20"].replace(0, np.nan)
+    result["price_sma50"] = result["close"] / result["sma_50"].replace(0, np.nan)
+    result["sma20_sma50"] = result["sma_20"] / result["sma_50"].replace(0, np.nan)
+    result["rsi_norm"] = result["rsi"] / 100
+    result["macd_signal_binary"] = (result["macd_hist"] > 0).astype(int)
+    for c in EVENT_FEATURE_COLS:
+        result[c] = df[c].values if c in df.columns else 0
+    result = result.dropna()
+    return result
+
+
+def log_shap(model: Any, x_train: np.ndarray, x_val: np.ndarray, model_name: str, feature_names: list[str]) -> None:
+    try:
+        import shap
+
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(x_val)
+        mean_abs = np.mean(np.abs(shap_values), axis=0)
+        if len(mean_abs) > 0:
+            top_k = min(5, len(mean_abs))
+            top_idx = np.argsort(mean_abs)[-top_k:][::-1]
+            parts = [f"{feature_names[i]}:{mean_abs[i]:.4f}" for i in top_idx]
+            logger.info("%s — SHAP top features: %s", model_name, " ".join(parts))
+    except Exception as e:
+        logger.debug("SHAP unavailable: %s", e)
+
+
+def log_feature_importance(model: Any, feature_names: list[str]) -> list[dict[str, Any]]:
+    try:
+        scores = model.feature_importances_
+        indices = np.argsort(scores)[-10:][::-1]
+        return [
+            {"feature": feature_names[i], "importance": round(float(scores[i]), 4)}
+            for i in indices
+        ]
+    except Exception:
+        return []
+
+
+class PersistMixin:
+    _model: Any = None
+    _ticker: str = ""
 
     @property
     @abstractmethod
@@ -46,6 +90,24 @@ class BaseMLClassifier(ABC):
     @property
     def model_name(self) -> str:
         return f"{self._model_prefix}_{self._ticker}" if self._ticker else self._model_prefix
+
+    def save(self, metrics: Optional[dict[str, Any]] = None) -> str:
+        if self._model is None:
+            raise ValueError("No trained model to save")
+        return save_model(self._model, self.model_name, metrics=metrics)
+
+    def load(self, version: Optional[str] = None) -> Any:
+        self._model = self._post_load(load_from_registry(self.model_name, version=version))
+        return self._model
+
+    def _post_load(self, model: Any) -> Any:
+        return model
+
+
+class BaseMLClassifier(PersistMixin, ABC):
+    def __init__(self, ticker: str = ""):
+        self._model: Any = None
+        self._ticker = ticker
 
     @property
     def _common_model_params(self) -> dict[str, Any]:
@@ -58,20 +120,8 @@ class BaseMLClassifier(ABC):
     @abstractmethod
     def _create_model(self) -> Any: ...
 
-    def _post_load(self, model: Any) -> Any:
-        return model
-
-    def save(self, metrics: Optional[dict[str, Any]] = None) -> str:
-        if self._model is None:
-            raise ValueError("No trained model to save")
-        return save_model(self._model, self.model_name, metrics=metrics)
-
-    def load(self, version: Optional[str] = None) -> Any:
-        self._model = self._post_load(load_from_registry(self.model_name, version=version))
-        return self._model
-
     def train(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> bool:
-        features = self._prepare_features(df)
+        features = prepare_features(df)
         if features.empty or len(features) < settings.ml_min_train_rows:
             return False
         result = self._train_on_the_fly(df, features, anomaly_mask=anomaly_mask)
@@ -92,7 +142,7 @@ class BaseMLClassifier(ABC):
         if df.empty or len(df) < settings.ml_min_predict_rows:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
 
-        features = self._prepare_features(df)
+        features = prepare_features(df)
         if features.empty or len(features) < settings.ml_min_train_rows:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
 
@@ -139,7 +189,7 @@ class BaseMLClassifier(ABC):
         }
 
     def score(self, df: pd.DataFrame) -> float:
-        features = self._prepare_features(df)
+        features = prepare_features(df)
         if features.empty or len(features) < settings.ml_min_train_rows:
             return 0.0
         lookahead = settings.ml_lookahead
@@ -163,23 +213,6 @@ class BaseMLClassifier(ABC):
     def fit(self, x_train: Any, y_train: Any) -> None:
         self._model = self._create_model()
         self._model.fit(x_train, y_train)
-
-    @staticmethod
-    def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
-        needed = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
-        if not all(c in df.columns for c in needed):
-            return pd.DataFrame()
-
-        result = df[needed].copy()
-        result["price_sma20"] = result["close"] / result["sma_20"].replace(0, np.nan)
-        result["price_sma50"] = result["close"] / result["sma_50"].replace(0, np.nan)
-        result["sma20_sma50"] = result["sma_20"] / result["sma_50"].replace(0, np.nan)
-        result["rsi_norm"] = result["rsi"] / 100
-        result["macd_signal_binary"] = (result["macd_hist"] > 0).astype(int)
-        for c in EVENT_FEATURE_COLS:
-            result[c] = df[c].values if c in df.columns else 0
-        result = result.dropna()
-        return result
 
     def _predict_latest(self, features: pd.DataFrame) -> float:
         latest = features.iloc[-1:]
@@ -249,28 +282,24 @@ class BaseMLClassifier(ABC):
                         baseline_acc,
                         val_metrics["accuracy"] - baseline_acc,
                     )
-                self._log_shap(model, x_train, x_val)
+                log_shap(model, x_train, x_val, self.model_name, self._feature_names())
 
             return model, val_metrics
         except Exception as e:
             logger.warning("%s training failed: %s", self.model_name, e)
             return None
 
-    def _log_shap(self, model: Any, x_train: np.ndarray, x_val: np.ndarray) -> None:
-        try:
-            import shap
-
-            explainer = shap.TreeExplainer(model)
-            shap_values = explainer.shap_values(x_val)
-            mean_abs = np.mean(np.abs(shap_values), axis=0)
-            if len(mean_abs) > 0:
-                top_k = min(5, len(mean_abs))
-                top_idx = np.argsort(mean_abs)[-top_k:][::-1]
-                feature_names = self._feature_names()
-                parts = [f"{feature_names[i]}:{mean_abs[i]:.4f}" for i in top_idx]
-                logger.info("%s — SHAP top features: %s", self.model_name, " ".join(parts))
-        except Exception as e:
-            logger.debug("SHAP unavailable: %s", e)
-
     def _feature_names(self) -> list[str]:
         return BASE_FEATURE_COLS + EVENT_FEATURE_COLS
+
+
+class BaseRegressor(PersistMixin, ABC):
+    def __init__(self, ticker: str = ""):
+        self._model: Any = None
+        self._ticker = ticker
+
+    @abstractmethod
+    def train(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    @abstractmethod
+    def predict(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...

@@ -7,17 +7,17 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from src.analysis.ml._base import BaseRegressor, log_feature_importance
 from src.config import settings
 from src.db.models import Instrument, News, NewsInstrument
 from src.model_registry import load_model as load_from_registry
-from src.model_registry import save_model
 
 logger = logging.getLogger(__name__)
 
 
-class SentimentEvolutionModel:
+class SentimentEvolutionModel(BaseRegressor):
     def __init__(self, ticker: str = ""):
-        self._ticker = ticker.upper()
+        super().__init__(ticker)
         self._models: dict[int, Any] = {}
         self._feature_names = [
             "sentiment_mean", "sentiment_std", "article_count",
@@ -28,11 +28,10 @@ class SentimentEvolutionModel:
 
     @property
     def _model_prefix(self) -> str:
-        prefix = "sentiment_evolution"
-        return f"{prefix}_{self._ticker}" if self._ticker else prefix
+        return "sentiment_evolution"
 
     def _model_name(self, horizon_days: int) -> str:
-        return f"{self._model_prefix}_{horizon_days}d"
+        return f"{self.model_name}_{horizon_days}d"
 
     @property
     def horizons(self) -> list[int]:
@@ -143,10 +142,11 @@ class SentimentEvolutionModel:
             self._models[h] = model
             metrics = {"rmse": round(rmse, 4), "mae": round(mae, 4), "direction_accuracy": round(direction_acc, 4)}
 
-            fi = self._feature_importance(model)
+            fi = log_feature_importance(model, self._feature_names)
             if fi:
                 metrics["top_features"] = fi[:5]
 
+            from src.model_registry import save_model
             save_model(model, self._model_name(h), metrics=metrics)
             logger.info(
                 "%s %dd — RMSE=%.4f MAE=%.4f DirAcc=%.2f (n=%d)",
@@ -248,15 +248,7 @@ class SentimentEvolutionModel:
         return results
 
     def _feature_importance(self, model: Any) -> list[dict[str, Any]]:
-        try:
-            scores = model.feature_importances_
-            indices = np.argsort(scores)[-10:][::-1]
-            return [
-                {"feature": self._feature_names[i], "importance": round(float(scores[i]), 4)}
-                for i in indices
-            ]
-        except Exception:
-            return []
+        return log_feature_importance(model, self._feature_names)
 
     def load(self, horizon_days: int) -> Any:
         model = load_from_registry(self._model_name(horizon_days))

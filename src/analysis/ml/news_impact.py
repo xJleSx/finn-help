@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from src.analysis.ml._base import BaseRegressor, log_feature_importance
 from src.analysis.ml.news_impact_features import (
     ALL_FEATURE_COLS,
     build_training_data,
@@ -14,7 +15,6 @@ from src.analysis.ml.news_impact_features import (
 )
 from src.config import settings
 from src.model_registry import load_model as load_from_registry
-from src.model_registry import save_model
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,6 @@ LSTM_SEQ_LEN = 10
 
 
 class LSTMPredictor(nn.Module):
-    """Simple LSTM for sequence-based return prediction from news features."""
-
     def __init__(
         self, input_dim: int, hidden: int = LSTM_HIDDEN,
         layers: int = LSTM_LAYERS, dropout: float = LSTM_DROPOUT,
@@ -54,31 +52,26 @@ def _build_sequences(features: np.ndarray, targets: np.ndarray, seq_len: int = L
     return np.array(xs, dtype=np.float32), np.array(ys, dtype=np.float32)
 
 
-class NewsImpactModel:
-    """XGBoost + LSTM ensemble predictor for news-driven return impact."""
-
+class NewsImpactModel(BaseRegressor):
     def __init__(self, ticker: str = ""):
-        self._ticker = ticker.upper()
+        super().__init__(ticker)
         self._models: dict[int, Any] = {}
         self._lstm_models: dict[int, Any] = {}
         self._feature_names: list[str] = list(ALL_FEATURE_COLS)
 
     @property
     def _model_prefix(self) -> str:
-        prefix = "news_impact"
-        return f"{prefix}_{self._ticker}" if self._ticker else prefix
+        return "news_impact"
 
     def _model_name(self, horizon_days: int) -> str:
-        return f"{self._model_prefix}_{horizon_days}d"
+        return f"{self.model_name}_{horizon_days}d"
 
     def _lstm_model_name(self, horizon_days: int) -> str:
-        return f"{self._model_prefix}_{horizon_days}d_lstm"
+        return f"{self.model_name}_{horizon_days}d_lstm"
 
     @property
     def horizons(self) -> list[int]:
         return sorted(int(h) for h in settings.ml_impact_horizons.split(","))
-
-    # ── XGBoost model ───────────────────────────────────────────────────────
 
     def _create_model(self) -> Any:
         import xgboost as xgb
@@ -89,8 +82,6 @@ class NewsImpactModel:
             objective="reg:squarederror",
             verbosity=0,
         )
-
-    # ── LSTM helper ─────────────────────────────────────────────────────────
 
     def _train_lstm(
         self, x_train: np.ndarray, y_train: np.ndarray, input_dim: int
@@ -119,8 +110,6 @@ class NewsImpactModel:
             pred = model(x_t)
             return float(pred.item())
 
-    # ── Training ────────────────────────────────────────────────────────────
-
     def train(self, db: Any, ticker: Optional[str] = None) -> dict[str, Any]:
         ticker = (ticker or self._ticker).upper()
         df = build_training_data(db, ticker)
@@ -144,7 +133,6 @@ class NewsImpactModel:
             x_train, x_val = x[:split], x[split:]
             y_train, y_val = y[:split], y[split:]
 
-            # XGBoost
             xgb_model = self._create_model()
             xgb_model.fit(x_train, y_train, eval_set=[(x_val, y_val)], verbose=False)
             xgb_preds = xgb_model.predict(x_val)
@@ -154,9 +142,8 @@ class NewsImpactModel:
             mae_xgb = float(np.mean(np.abs(xgb_preds - y_val)))
             dir_acc_xgb = float(np.mean((np.sign(xgb_preds) == np.sign(y_val)) | (np.abs(y_val) < 0.001)))
 
-            fi = self._feature_importance(xgb_model)
+            fi = log_feature_importance(xgb_model, self._feature_names)
 
-            # LSTM (requires sequence data)
             has_lstm = False
             lstm_rmse = 0.0
             lstm_dir_acc = 0.0
@@ -179,7 +166,6 @@ class NewsImpactModel:
                 torch.save(lstm_model.state_dict(), f"{self._lstm_model_name(h)}.pt")
                 has_lstm = True
 
-            # Ensemble: average XGBoost + LSTM predictions
             if has_lstm and len(xs_val) == len(x_val[LSTM_SEQ_LEN:]):
                 xgb_ens = xgb_preds
                 lstm_ens = lstm_preds[:len(xgb_ens)]
@@ -210,6 +196,7 @@ class NewsImpactModel:
             if fi:
                 metrics["top_features"] = fi[:5]
 
+            from src.model_registry import save_model
             save_model(xgb_model, self._model_name(h), metrics=metrics)
             logger.info(
                 "%s %dd — RMSE=%.4f LSTM=%.4f Ens=%.4f DirAcc=%.2f (n=%d)",
@@ -218,8 +205,6 @@ class NewsImpactModel:
             results["horizons"][h] = metrics
 
         return results
-
-    # ── Prediction ──────────────────────────────────────────────────────────
 
     def predict(self, db: Any, news_article: Any, horizon_days: int = 1) -> dict[str, Any]:
         model = self._models.get(horizon_days)
@@ -235,7 +220,6 @@ class NewsImpactModel:
 
         xgb_pred = float(model.predict(vec)[0])
 
-        # LSTM prediction (if available)
         lstm_pred = 0.0
         lstm_model = self._lstm_models.get(horizon_days)
         if lstm_model is None:
@@ -253,7 +237,6 @@ class NewsImpactModel:
             with torch.no_grad():
                 lstm_pred = float(lstm_model(torch.from_numpy(vec.reshape(1, 1, -1))).item())
 
-        # Ensemble
         if lstm_model is not None:
             final_pred = (xgb_pred + lstm_pred) / 2.0
         else:
@@ -271,8 +254,6 @@ class NewsImpactModel:
             "confidence": round(confidence, 4),
             "model_loaded": True,
         }
-
-    # ── Evaluate ────────────────────────────────────────────────────────────
 
     def evaluate(self, db: Any, ticker: Optional[str] = None) -> dict[str, Any]:
         ticker = (ticker or self._ticker).upper()
@@ -311,18 +292,8 @@ class NewsImpactModel:
             }
         return results
 
-    # ── Feature importance ──────────────────────────────────────────────────
-
     def _feature_importance(self, model: Any) -> list[dict[str, Any]]:
-        try:
-            scores = model.feature_importances_
-            indices = np.argsort(scores)[-10:][::-1]
-            return [
-                {"feature": self._feature_names[i], "importance": round(float(scores[i]), 4)}
-                for i in indices
-            ]
-        except Exception:
-            return []
+        return log_feature_importance(model, self._feature_names)
 
     def load(self, horizon_days: int) -> Any:
         model = load_from_registry(self._model_name(horizon_days))

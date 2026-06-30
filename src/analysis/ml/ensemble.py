@@ -4,8 +4,10 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from src.analysis.ml._base import EVENT_FEATURE_COLS, BASE_FEATURE_COLS, prepare_features
 from src.analysis.ml.walk_forward import (
     adjust_confidence_by_oos,
+    build_labels,
     model_weight_from_oos,
     walk_forward_validate,
 )
@@ -14,23 +16,7 @@ from src.model_registry import save_model
 
 logger = logging.getLogger(__name__)
 
-EVENT_FEATURE_COLS = ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]
-
 FEATURE_COLS = ["rsi", "macd_hist", "sma_20", "sma_50", "close"]
-
-
-def _build_features(df: pd.DataFrame) -> pd.DataFrame:
-    needed = FEATURE_COLS
-    result = df[needed].copy() if all(c in df.columns for c in needed) else df.copy()
-    result["price_sma20"] = result["close"] / result["sma_20"].replace(0, np.nan)
-    result["price_sma50"] = result["close"] / result["sma_50"].replace(0, np.nan)
-    result["sma20_sma50"] = result["sma_20"] / result["sma_50"].replace(0, np.nan)
-    result["rsi_norm"] = result["rsi"] / 100
-    result["macd_signal_binary"] = (result["macd_hist"] > 0).astype(int)
-    for c in EVENT_FEATURE_COLS:
-        if c in df.columns:
-            result[c] = df[c].values
-    return result
 
 
 class EnsemblePredictor:
@@ -75,7 +61,7 @@ class EnsemblePredictor:
     def _build_x(self, df: pd.DataFrame) -> np.ndarray | None:
         if not all(c in df.columns for c in FEATURE_COLS):
             return None
-        features = _build_features(df)
+        features = prepare_features(df)
         return features.dropna().values
 
     def _get_weights(self, oos_list: list[dict[str, Any]]) -> list[float]:
@@ -231,7 +217,7 @@ class EnsemblePredictor:
             lookahead = 5
             threshold = 0.03
 
-            features = _build_features(df).dropna()
+            features = prepare_features(df)
 
             if len(features) < 50:
                 return None
@@ -282,12 +268,12 @@ class EnsemblePredictor:
         if not all(c in df.columns for c in FEATURE_COLS):
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
-        features = _build_features(df)
-        future_returns = df["close"].shift(-lookahead) / df["close"] - 1
-        aligned = features.iloc[:-lookahead].copy()
-        labels = np.asarray(future_returns.iloc[: len(aligned)].values).astype(float)
-        y_raw = np.where(labels > threshold, 1, np.where(labels < -threshold, 0, np.nan))
-        mask = ~np.isnan(y_raw)
+        features = prepare_features(df)
+        y_raw, mask = build_labels(df["close"], lookahead=lookahead, threshold=threshold)
+        n = min(len(features), len(y_raw))
+        aligned = features.iloc[:n].copy()
+        mask = mask[:n]
+        y_raw = y_raw[:n]
         if mask.sum() < 30:
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 

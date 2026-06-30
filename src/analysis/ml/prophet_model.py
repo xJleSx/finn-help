@@ -4,29 +4,19 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from src.model_registry import load_model as load_from_registry
-from src.model_registry import save_model
+from src.analysis.ml._base import BaseRegressor
 
 logger = logging.getLogger(__name__)
 
 
-class ProphetPredictor:
+class ProphetPredictor(BaseRegressor):
     def __init__(self, ticker: str = ""):
+        super().__init__(ticker)
         self._model: Optional[Any] = None
-        self._ticker = ticker
 
     @property
-    def model_name(self) -> str:
-        return f"prophet_{self._ticker}" if self._ticker else "prophet"
-
-    def save(self, metrics: Optional[dict[str, Any]] = None) -> str:
-        if self._model is None:
-            raise ValueError("No trained model to save")
-        return save_model(self._model, self.model_name, metrics=metrics)
-
-    def load(self, version: Optional[str] = None) -> Any:
-        self._model = load_from_registry(self.model_name, version=version)
-        return self._model
+    def _model_prefix(self) -> str:
+        return "prophet"
 
     def train(self, df: pd.DataFrame) -> bool:
         if df.empty or len(df) < 30:
@@ -200,8 +190,8 @@ class ProphetPredictor:
         trend_df["ds"] = pd.to_datetime(trend_df["ds"])
         trend_df["y"] = trend_df["y"].clip(lower=0.01)
 
-        future = self._model.make_future_dataframe(periods=days_ahead)  # type: ignore[union-attr]
-        forecast = self._model.predict(future)  # type: ignore[union-attr]
+        future = self._model.make_future_dataframe(periods=days_ahead)
+        forecast = self._model.predict(future)
 
         last_date = trend_df["ds"].max()
         future_forecast = forecast[forecast["ds"] > last_date]
