@@ -1,14 +1,16 @@
-import logging
+from __future__ import annotations
+
 import re
 from typing import Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+import structlog
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
 from src.db.models import Portfolio as PortModel
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 ACTION_EMOJI = {
     "BUY": "\U0001f7e2",
@@ -90,6 +92,22 @@ RUSSIAN_NAMES: dict[str, str] = {
 }
 
 
+def html_escape(text: str | None) -> str:
+    if text is None:
+        return ""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def build_main_reply_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = [
+        ["🔍 Анализ", "📊 Портфель"],
+        ["🏆 Топ", "📰 Новости"],
+        ["📋 Сводка", "🏭 Сектора"],
+        ["⚙️ Профиль", "❓ Помощь"],
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
 def build_main_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
         [
@@ -116,15 +134,88 @@ def build_analyze_keyboard(ticker: str) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🏭 Сектора", callback_data="action:sectors"),
-            InlineKeyboardButton("🏆 Топ", callback_data="action:top"),
+            InlineKeyboardButton("🏠 Главная", callback_data="action:home"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def build_top_keyboard() -> InlineKeyboardMarkup:
-    keyboard = [[InlineKeyboardButton("\U0001f4b0 Распределить 100 000 ₽", callback_data="action:portfolio")]]
+    keyboard = [
+        [InlineKeyboardButton("\U0001f4b0 Распределить 100 000 ₽", callback_data="action:portfolio")],
+        [InlineKeyboardButton("🏠 Главная", callback_data="action:home")],
+    ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def build_help_keyboard() -> InlineKeyboardMarkup:
+    keyboard = [
+        [InlineKeyboardButton("🔍 Анализ", callback_data="action:top"),
+         InlineKeyboardButton("💰 Аллокация", callback_data="action:portfolio")],
+        [InlineKeyboardButton("📊 Портфель", callback_data="action:portfolio"),
+         InlineKeyboardButton("📰 Новости", callback_data="action:news")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+COMMAND_CATEGORIES = {
+    "📊 Анализ": [
+        ("/analyze TICKER", "Анализ инструмента"),
+        ("/ask ВОПРОС", "Спросить ассистента"),
+        ("/top", "Лучшие возможности"),
+        ("/sectors", "Сектора рынка"),
+        ("/news", "Последние новости"),
+    ],
+    "💰 Портфель": [
+        ("/portfolio", "Мой портфель"),
+        ("/allocate СУММА", "Куда вложить"),
+        ("/add TICKER КОЛ", "Добавить позицию"),
+        ("/remove TICKER", "Удалить позицию"),
+        ("/history TICKER", "История сигналов"),
+    ],
+    "📈 Отчёты": [
+        ("/daily", "Ежедневная сводка"),
+        ("/weekly", "Недельная сводка"),
+        ("/stress", "Стресс-тест"),
+        ("/backtest", "Бэктест"),
+        ("/export", "CSV отчёт"),
+    ],
+    "🌍 Рынок": [
+        ("/rates", "Курсы валют"),
+        ("/geo", "Геополитический риск"),
+    ],
+    "⚙️ Настройки": [
+        ("/profile ПРОФИЛЬ", "Риск-профиль (conservative/balanced/aggressive)"),
+        ("/subscribe", "Подписаться на уведомления"),
+        ("/unsubscribe", "Отписаться"),
+    ],
+    "🔬 Прочее": [
+        ("/social TICKER", "Social sentiment"),
+        ("/pulse AUTHOR", "Авторы Пульса"),
+        ("/correlation", "Корреляция активов"),
+        ("/whatif", "Что-если сценарий"),
+        ("/report", "Отчёт за 120 дней"),
+        ("/pnl", "P&L сводка"),
+    ],
+}
+
+
+def format_start_html() -> str:
+    lines = [
+        "<b>🤖 FinAdvisor — финансовый ассистент</b>\n",
+        "Просто напишите вопрос про акцию, например:",
+        "→ <i>анализ сбер</i>",
+        "→ <i>что с газпромом?</i>",
+        "→ <i>куда вложить 50000</i>",
+        "",
+    ]
+    for cat_name, cmds in COMMAND_CATEGORIES.items():
+        lines.append(f"<b>{cat_name}</b>")
+        for cmd, desc in cmds:
+            lines.append(f"  <code>{html_escape(cmd)}</code> — {html_escape(desc)}")
+        lines.append("")
+    lines.append("Используйте кнопки ниже для быстрого доступа ⬇️")
+    return "\n".join(lines)
 
 
 def _find_tickers(text: str) -> list[str]:
@@ -335,11 +426,11 @@ def _format_allocation_plan(picks: list[dict[str, Any]], capital: float) -> str:
                 u["shares"] += extra_shares
                 u["amount"] = u["shares"] * (u["last_price"] or 1)
             u["pct"] = u["amount"] / capital
-    text = "📊 *Как бы я распределил эти деньги:*\n\n"
+    text = "<b>📊 Как бы я распределил эти деньги:</b>\n\n"
     allocated = 0.0
     for item in used:
         allocated += item["amount"]
-        text += f"• *{item['ticker']}* ({item.get('name', '')}): {item['amount']:,.0f} ₽ ({item['pct'] * 100:.0f}%)"
+        text += f"• <b>{html_escape(item['ticker'])}</b> ({html_escape(item.get('name', ''))}): {item['amount']:,.0f} ₽ ({item['pct'] * 100:.0f}%)"
         if item["shares"] > 0:
             text += f" → {item['shares']} шт. по {item['last_price']:.0f} ₽"
         risk = item.get("risk", {})
@@ -353,9 +444,9 @@ def _format_allocation_plan(picks: list[dict[str, Any]], capital: float) -> str:
                 text += f"\n   ⚠️ Риск дневного падения: до {var:.1f}%"
         text += "\n"
     leftover = round(capital - allocated, 2)
-    text += f"\n💰 *Итого:* {allocated:,.0f} из {capital:,.0f} ₽"
+    text += f"\n💰 <b>Итого:</b> {allocated:,.0f} из {capital:,.0f} ₽"
     if leftover > 0:
-        text += f"\n💤 *Остаток:* {leftover:,.0f} ₽"
+        text += f"\n💤 <b>Остаток:</b> {leftover:,.0f} ₽"
     return text
 
 
@@ -372,8 +463,6 @@ def get_portfolio_positions(db: Any) -> list[dict[str, Any]]:
         inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
         price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
         last_price = price.close if price else 0
-        # Fallback: MOEX возвращает цены облигаций в % от номинала → умножаем на 10
-        # (или nominal/100 если nominal нестандартный). Защита для старых данных в БД.
         if last_price and inst and inst.instrument_type == "bond" and last_price < 500:
             n = inst.nominal or 1000
             last_price = last_price * n / 100

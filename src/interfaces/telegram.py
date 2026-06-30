@@ -1,12 +1,12 @@
 import asyncio
 import io
-import logging
 import time
 from collections import OrderedDict
 from functools import wraps
 from typing import Any, Optional, cast
 
-from telegram import Message, Update
+import structlog
+from telegram import BotCommand, Message, ReplyKeyboardMarkup, Update
 from telegram.error import NetworkError
 from telegram.ext import (
     Application,
@@ -42,15 +42,19 @@ from src.interfaces.telegram_helpers import (
     _find_tickers,
     _format_allocation_plan,
     build_analyze_keyboard,
+    build_help_keyboard,
     build_main_keyboard,
+    build_main_reply_keyboard,
     build_top_keyboard,
+    format_start_html,
     get_portfolio_positions,
+    html_escape,
 )
 from src.notifications.service import NotificationService, format_daily_summary_text, format_signal_text
 from src.portfolio.allocator import allocator
 from src.reports import generate_portfolio_csv
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 analysis_cache: OrderedDict[str, tuple[float, dict[str, Any] | None, str]] = OrderedDict()
 
@@ -212,39 +216,50 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await stress(update, context)
         elif action == "export":
             await export_portfolio(update, context)
+        elif action == "home":
+            if isinstance(msg, Message):
+                await msg.reply_text(
+                    format_start_html(),
+                    reply_markup=build_main_reply_keyboard(),
+                    parse_mode="HTML",
+                )
+        elif action == "news":
+            await news(update, context)
+
+
+async def reply_keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_message or not update.effective_message.text:
+        return
+    text = update.effective_message.text
+    if text == "🔍 Анализ":
+        await top(update, context)
+    elif text == "📊 Портфель":
+        await portfolio(update, context)
+    elif text == "🏆 Топ":
+        await top(update, context)
+    elif text == "📰 Новости":
+        await news(update, context)
+    elif text == "📋 Сводка":
+        await daily(update, context)
+    elif text == "🏭 Сектора":
+        await sectors(update, context)
+    elif text == "⚙️ Профиль":
+        await profile(update, context)
+    elif text == "❓ Помощь":
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                format_start_html(),
+                reply_markup=build_main_reply_keyboard(),
+                parse_mode="HTML",
+            )
 
 
 @guard()
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
-        "\U0001f916 FinAdvisor — финансовый ассистент\n\n"
-        "Просто напишите вопрос про акцию:\n"
-        "• «анализ сбер»\n"
-        "• «что с газпромом?»\n"
-        "• «дивиденды лукойла»\n"
-        "• «куда вложить 50000»\n"
-        "• или /analyze SBER\n\n"
-        "Команды:\n"
-        "/analyze TICKER — анализ инструмента\n"
-        "/ask вопрос — совет в свободной форме\n"
-        "/allocate СУММА — куда вложить деньги\n"
-        "/portfolio — портфель\n"
-        "/rates — курсы валют\n"
-        "/geo — геополитический риск\n"
-        "/subscribe — подписаться на уведомления\n"
-        "/unsubscribe — отписаться\n"
-        "/daily — ежедневная сводка\n"
-        "/stress — стресс-тест портфеля\n"
-        "/backtest — история стратегии\n"
-        "/profile — риск-профиль (conservative/balanced/aggressive)\n"
-        "/add SBER 10 — добавить в портфель\n"
-        "/remove SBER — удалить из портфеля\n"
-        "/history SBER — история сигналов\n"
-        "/sectors — сектора рынка\n"
-        "/top — лучшие возможности\n"
-        "/export — CSV-отчёт портфеля\n\n"
-        "Используйте кнопки для быстрого доступа \u2935\ufe0f",
-        reply_markup=build_main_keyboard(),
+        format_start_html(),
+        reply_markup=build_main_reply_keyboard(),
+        parse_mode="HTML",
     )
 
 
@@ -291,13 +306,9 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if report and report.report_text:
             text = str(report.report_text)
             try:
-                await update.effective_message.reply_markdown(text)
+                await update.effective_message.reply_text(text, parse_mode="HTML")
             except Exception:
-                logger.warning("Daily report Markdown error, falling back to plain text (len=%d)", len(text))
-                try:
-                    await update.effective_message.reply_text(text)
-                except Exception as e:
-                    logger.error("Daily report plain text failed too: %s", e)
+                await update.effective_message.reply_text(text)
         else:
             await update.effective_message.reply_text(
                 "Ежедневный отчёт ещё не сформирован. Он появляется после 23:50 МСК."
@@ -313,7 +324,10 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         from src.scheduler.reporting import generate_weekly_report_text
 
         text = await generate_weekly_report_text()
-        await update.effective_message.reply_markdown(text)
+        try:
+            await update.effective_message.reply_text(html_escape(text), parse_mode="HTML")
+        except Exception:
+            await update.effective_message.reply_text(text)
     except Exception:
         logger.exception("Weekly report failed")
         await update.effective_message.reply_text("Не удалось сформировать недельную сводку.")
@@ -379,15 +393,15 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     crash_results = tester.run_crash_scenarios()
     sector_results = tester.run_sector_shocks()
 
-    text = "🧪 *Стресс-тест портфеля*\n\n"
+    text = "🧪 <b>Стресс-тест портфеля</b>\n\n"
     text += f"Сумма: {tester.total:,.0f} ₽\n\n"
-    text += "*Кризисные сценарии:*\n"
+    text += "<b>Кризисные сценарии:</b>\n"
     text += tester.format_results(crash_results)
-    text += "*Секторальные шоки:*\n"
+    text += "<b>Секторальные шоки:</b>\n"
     text += tester.format_results(sector_results)
 
     for chunk in _chunk_text(text, 4096):
-        await update.effective_message.reply_markdown(chunk)
+        await update.effective_message.reply_text(chunk, parse_mode="HTML")
 
 
 @guard(with_cooldown=True)
@@ -405,7 +419,8 @@ async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.effective_message.reply_text(f"🕰 Прогоняю стратегию для {amount:,.0f} ₽ за последний год...")
     result = backtest_allocation(capital=amount)
-    await update.effective_message.reply_markdown(result.summary())
+    summary = html_escape(result.summary())
+    await update.effective_message.reply_text(summary, parse_mode="HTML")
 
 
 @guard(with_cooldown=True)
@@ -429,12 +444,12 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.effective_message.reply_text(f"Нет истории сигналов для {ticker}")
             return
 
-        lines = [f"📈 *История сигналов — {ticker}*\n"]
+        lines = [f"📈 <b>История сигналов — {html_escape(ticker)}</b>\n"]
         for s in reversed(signals):
             emoji = "🟢" if s.action in ("BUY", "CAUTIOUS_BUY") else "🔴" if s.action == "SELL" else "⚪"
             conf = s.confidence or 0
-            lines.append(f"{emoji} {s.date}  **{s.action}** _{conf:.0%}_")
-        await update.effective_message.reply_markdown("\n".join(lines))
+            lines.append(f"{emoji} {s.date}  <b>{html_escape(s.action)}</b> <i>{conf:.0%}</i>")
+        await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
     finally:
         db.close()
 
@@ -461,15 +476,15 @@ async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         perf = sector_analyzer.compute_sector_performance(db)
         vol = sector_analyzer.compute_sector_volatility(db)
-        lines = ["🏭 *Доходность секторов (30д):*\n"]
+        lines = ["🏭 <b>Доходность секторов (30д):</b>\n"]
         sorted_sectors = sorted(perf.items(), key=lambda x: x[1], reverse=True)
         for sector, perf_val in sorted_sectors:
             emoji = "\U0001f7e2" if perf_val > 0 else "\U0001f534"
             v = vol.get(sector, "")
             vol_str = f" (волат. {v:.0%})" if isinstance(v, float) else ""
-            lines.append(f"{emoji} {sector}: {perf_val:+.1%}{vol_str}")
+            lines.append(f"{emoji} {html_escape(sector)}: {perf_val:+.1%}{vol_str}")
 
-        await update.effective_message.reply_markdown("\n".join(lines))
+        await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
     finally:
         db.close()
 
@@ -502,30 +517,29 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 if len(categories[cat]) < 5:
                     categories[cat].append(p)
 
-            text = "🏆 *Топ по категориям:*\n\n"
+            text = "🏆 <b>Топ по категориям:</b>\n\n"
             for cat, items in categories.items():
-                text += f"▫️ *{cat}*\n"
+                text += f"▫️ <b>{html_escape(cat)}</b>\n"
                 for i, p in enumerate(items, 1):
                     score = p.get("score", 0)
-                    text += f"  {i}. *{p['ticker']}* — score {score:.2f}\n"
+                    text += f"  {i}. <b>{html_escape(p['ticker'])}</b> — score {score:.2f}\n"
                     reason = p.get("reason", "")
                     if reason:
-                        text += f"     → {reason[:80]}\n"
-                    # enrichment
+                        text += f"     → {html_escape(reason[:80])}\n"
                     inst = _db.query(Instrument).filter_by(ticker=p["ticker"]).first()
                     if inst:
                         profile = load_company_profile(_db, inst.id)
                         if profile and profile.description:
-                            text += f"     {profile.description[:180]}\n"
+                            text += f"     {html_escape(profile.description[:180])}\n"
                         report = load_financial_report(_db, inst.id)
                         fh = build_financial_highlights(report)
                         if fh:
-                            text += f"     {fh[0]}\n"
+                            text += f"     {html_escape(fh[0])}\n"
                 text += "\n"
         finally:
             _db.close()
 
-        await update.effective_message.reply_markdown(text, reply_markup=build_top_keyboard())
+        await update.effective_message.reply_text(text, reply_markup=build_top_keyboard(), parse_mode="HTML")
     except Exception:
         logger.warning("Top command error", exc_info=True)
         await update.effective_message.reply_text(
@@ -542,18 +556,18 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not rows:
                 await update.effective_message.reply_text("Нет новостей.")
                 return
-            text = "📰 *Последние 50 новостей:*\n\n"
+            text = "📰 <b>Последние 50 новостей:</b>\n\n"
             for i, n in enumerate(rows, 1):
-                title = (n.title or "")[:120]
+                title = html_escape((n.title or "")[:120])
                 pub = n.published_at.strftime("%d.%m.%Y") if n.published_at else "?"
-                src = n.source_name or n.source_type or "?"
+                src = html_escape(n.source_name or n.source_type or "?")
                 sent = f" ({n.sentiment_score:+.2f})" if n.sentiment_score is not None else ""
                 text += f"{i}. [{pub}] {title}{sent}\n"
                 if n.source_name:
                     text += f"   — {src}\n"
                 text += "\n"
             for chunk in _chunk_text(text, 4096):
-                await update.effective_message.reply_markdown(chunk)
+                await update.effective_message.reply_text(chunk, parse_mode="HTML")
         finally:
             db.close()
     except Exception:
@@ -672,7 +686,6 @@ def _describe_risk(sharpe: float, max_dd: float) -> str:
 
 
 def _format_data_advice(fused: dict[str, Any]) -> str:
-    """Понятный анализ без сложных терминов."""
     parts = []
     components = fused.get("components", {})
     risk = fused.get("risk_metrics", {})
@@ -694,37 +707,37 @@ def _format_data_advice(fused: dict[str, Any]) -> str:
             extra = " — технические индикаторы на стороне покупателей"
         elif tech_score < -0.3:
             extra = " — технические индикаторы на стороне продавцов"
-        parts.append(f"📊 *Технический анализ*: {desc}{extra}")
+        parts.append(f"📊 <b>Технический анализ</b>: {desc}{extra}")
 
     if risk:
         sharpe = risk.get("sharpe", 0)
         max_dd = risk.get("max_drawdown", 0)
         desc = _describe_risk(sharpe, max_dd)
-        parts.append(f"📈 *Риски*: {desc}")
+        parts.append(f"📈 <b>Риски</b>: {desc}")
 
     vol_regime = vol.get("regime", "") if vol else ""
     if vol_regime == "HIGH":
-        parts.append("🌊 *Волатильность*: высокая — цена может резко меняться")
+        parts.append("🌊 <b>Волатильность</b>: высокая — цена может резко меняться")
     elif vol_regime == "LOW":
-        parts.append("🌊 *Волатильность*: низкая — цена стабильна")
+        parts.append("🌊 <b>Волатильность</b>: низкая — цена стабильна")
     elif vol_regime:
-        parts.append("🌊 *Волатильность*: обычная")
+        parts.append("🌊 <b>Волатильность</b>: обычная")
 
     sent = components.get("sentiment", {})
     sent_score = sent.get("score", 0) if sent else 0
     if sent_score > 0.1:
-        parts.append("📰 *Новости*: позитивные — рынок поддерживает актив")
+        parts.append("📰 <b>Новости</b>: позитивные — рынок поддерживает актив")
     elif sent_score < -0.1:
-        parts.append("📰 *Новости*: негативные — вокруг актива больше плохих новостей")
+        parts.append("📰 <b>Новости</b>: негативные — вокруг актива больше плохих новостей")
     elif sent_score != 0:
-        parts.append("📰 *Новости*: нейтральные")
+        parts.append("📰 <b>Новости</b>: нейтральные")
 
     ml = components.get("ml", {})
     ml_change = ml.get("change_pct") if ml else None
     if ml_change is not None:
         direction = "рост" if ml_change > 0 else "снижение"
         tp = ml.get("target_price")
-        line = f"🤖 *Прогноз модели*: {direction} {abs(ml_change):.1f}%"
+        line = f"🤖 <b>Прогноз модели</b>: {direction} {abs(ml_change):.1f}%"
         if tp:
             line += f" (цель {tp:.0f} ₽)"
         parts.append(line)
@@ -795,7 +808,7 @@ async def _reply_with_analysis(update: Update, ticker: str) -> None:
     }
     label = action_labels.get(action, action.lower())
 
-    text = f"{emoji} *{ticker}* — {label}\n"
+    text = f"{emoji} <b>{html_escape(ticker)}</b> — {label}\n"
     text += f"Уверенность: {confidence:.0%}\n"
 
     # enrichment blocks
@@ -816,21 +829,21 @@ async def _reply_with_analysis(update: Update, ticker: str) -> None:
             profile = load_company_profile(_db, inst.id)
             pb = build_profile_block(profile) if profile else ""
             if pb:
-                text += f"\n🏢 *Профиль:*\n{pb}\n"
+                text += f"\n🏢 <b>Профиль:</b>\n{html_escape(pb)}\n"
 
             report = load_financial_report(_db, inst.id)
             fh = build_financial_highlights(report)
             if fh:
-                text += "\n📊 *Финансовые highlights:*\n"
+                text += "\n📊 <b>Финансовые highlights:</b>\n"
                 for hl in fh:
-                    text += f"• {hl}\n"
+                    text += f"• {html_escape(hl)}\n"
 
             events = load_upcoming_events(_db, inst.id, days=90)
             ce = build_corporate_events_block(events)
             if ce:
-                text += "\n📅 *Корпоративные события:*\n"
+                text += "\n📅 <b>Корпоративные события:</b>\n"
                 for ev in ce:
-                    text += f"• {ev}\n"
+                    text += f"• {html_escape(ev)}\n"
     finally:
         _db.close()
 
@@ -842,11 +855,11 @@ async def _reply_with_analysis(update: Update, ticker: str) -> None:
 
     chunks = _chunk_text(text, 4096)
     if msg:
-        await msg.edit_text(chunks[0], parse_mode="Markdown", reply_markup=build_analyze_keyboard(ticker))
+        await msg.edit_text(chunks[0], parse_mode="HTML", reply_markup=build_analyze_keyboard(ticker))
     else:
-        await update.effective_message.reply_markdown(chunks[0], reply_markup=build_analyze_keyboard(ticker))
+        await update.effective_message.reply_text(chunks[0], reply_markup=build_analyze_keyboard(ticker), parse_mode="HTML")
     for chunk in chunks[1:]:
-        await update.effective_message.reply_markdown(chunk, reply_markup=build_analyze_keyboard(ticker))
+        await update.effective_message.reply_text(chunk, reply_markup=build_analyze_keyboard(ticker), parse_mode="HTML")
 
 
 async def _reply_with_allocation(update: Update, capital: float, exclude: set[str] | None = None) -> None:
@@ -860,7 +873,7 @@ async def _reply_with_allocation(update: Update, capital: float, exclude: set[st
             await msg.edit_text("Не удалось подобрать варианты. Запустите `finn update` для загрузки данных.")
             return
 
-        text = f"\U0001f4b0 *Рекомендации для {capital:,.0f} ₽*"
+        text = f"\U0001f4b0 <b>Рекомендации для {capital:,.0f} ₽</b>"
         if exclude:
             text += f" (без {', '.join(sorted(exclude))})"
         text += "\n\n"
@@ -870,32 +883,32 @@ async def _reply_with_allocation(update: Update, capital: float, exclude: set[st
             reason = p.get("reason", "")
             last_price = p.get("last_price")
             price_str = f"цена {last_price:.0f} ₽" if last_price else ""
-            text += f"{i}. *{p['ticker']}* ({name}) — {p['category']}\n"
+            text += f"{i}. <b>{html_escape(p['ticker'])}</b> ({html_escape(name)}) — {html_escape(p['category'])}\n"
             text += f"   {price_str}\n"
             if reason:
-                text += f"   \u2192 {reason}\n"
+                text += f"   \u2192 {html_escape(reason)}\n"
             risk = p.get("risk", {})
             if risk:
-                parts = []
+                rparts = []
                 if risk.get("var_95"):
-                    parts.append(f"риск падения {risk['var_95']:.1f}%/день")
+                    rparts.append(f"риск падения {risk['var_95']:.1f}%/день")
                 if risk.get("stop_loss_pct"):
-                    parts.append(f"стоп-лосс {risk['stop_loss_pct']:.1f}%")
+                    rparts.append(f"стоп-лосс {risk['stop_loss_pct']:.1f}%")
                 if risk.get("suggested_shares"):
-                    parts.append(f"макс. {risk['suggested_shares']} шт")
-                if parts:
-                    text += f"   {' • '.join(parts)}\n"
+                    rparts.append(f"макс. {risk['suggested_shares']} шт")
+                if rparts:
+                    text += f"   {' • '.join(rparts)}\n"
             text += "\n"
 
         chunks = _chunk_text(text, 4096)
         allocation_text = _format_allocation_plan(picks, capital)
         alloc_chunks = _chunk_text(allocation_text, 4096) if allocation_text else []
 
-        await msg.edit_text(chunks[0], parse_mode="Markdown")
+        await msg.edit_text(chunks[0], parse_mode="HTML")
         for chunk in chunks[1:]:
-            await update.effective_message.reply_markdown(chunk)
+            await update.effective_message.reply_text(chunk, parse_mode="HTML")
         for chunk in alloc_chunks:
-            await update.effective_message.reply_markdown(chunk)
+            await update.effective_message.reply_text(chunk, parse_mode="HTML")
     except Exception:
         logger.warning("Recommendation error", exc_info=True)
         await msg.edit_text("\u274c Не удалось рассчитать рекомендации. Убедитесь, что запущен `finn update`.")
@@ -919,9 +932,9 @@ async def _ask_llm_general(update: Update, text: str, ticker_context: str = "") 
             answer = "Не могу сформулировать ответ. Попробуйте уточнить вопрос или указать тикер через /analyze"
 
         chunks = _chunk_text(answer, 4096)
-        await msg.edit_text(chunks[0], parse_mode="Markdown")
+        await msg.edit_text(html_escape(chunks[0]), parse_mode="HTML")
         for chunk in chunks[1:]:
-            await update.effective_message.reply_markdown(chunk)
+            await update.effective_message.reply_text(html_escape(chunk), parse_mode="HTML")
     except Exception:
         logger.warning("LLM error", exc_info=True)
         await msg.edit_text(
@@ -965,11 +978,11 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     if accounts:
                         balance = await tbank.get_account_balance(str(cast(dict[str, Any], accounts[0])["id"]))
                         await msg.edit_text(
-                            f"📭 *Портфель пуст*\n\n"
+                            f"📭 <b>Портфель пуст</b>\n\n"
                             f"💵 Доступно: {balance:,.0f} ₽\n\n"
                             f"Сигналы пока не дают BUY/SELL.\n"
-                            f"Текущие сигналы: `/portfolio` (обновляется раз в час)",
-                            parse_mode="Markdown",
+                            f"Текущие сигналы: <code>/portfolio</code> (обновляется раз в час)",
+                            parse_mode="HTML",
                         )
                         return
                 await msg.edit_text("📭 Портфель пуст. Нет счетов в T-Bank.")
@@ -979,11 +992,11 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 await msg.edit_text("📭 Портфель пуст. Нет позиций.")
                 return
 
-        lines = ["📊 *Портфель (T-Bank)*\n"]
+        lines = ["📊 <b>Портфель (T-Bank)</b>\n"]
         if sync_errors:
-            lines.append("⚠️ *Ошибки синка:*\n")
+            lines.append("⚠️ <b>Ошибки синка:</b>\n")
             for err in sync_errors[:3]:
-                lines.append(f"• {err[:120]}")
+                lines.append(f"• {html_escape(err[:120])}")
             lines.append("")
         total_value = 0.0
         total_cost = 0.0
@@ -1004,7 +1017,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 pnl_line = "   P&L: ~0 ₽"
 
             lines.append(
-                f"{emoji} *{r['ticker']}*: {qty:.0f} шт × {cur:.2f} ₽\n"
+                f"{emoji} <b>{html_escape(r['ticker'])}</b>: {qty:.0f} шт × {cur:.2f} ₽\n"
                 f"   Средняя: {avg:.2f} | Стоимость: {val:,.0f} ₽\n"
                 f"{pnl_line}"
             )
@@ -1021,8 +1034,8 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if total_pnl_str and total_pnl_pct_str
             else " | P&L: ~0 ₽"
         )
-        lines.append(f"\n{total_emoji} *Итого:* {total_value:,.0f} ₽{pnl_suffix}")
-        await msg.edit_text("\n".join(lines), parse_mode="Markdown")
+        lines.append(f"\n{total_emoji} <b>Итого:</b> {total_value:,.0f} ₽{pnl_suffix}")
+        await msg.edit_text("\n".join(lines), parse_mode="HTML")
     finally:
         db.close()
 
@@ -1085,7 +1098,7 @@ async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await _save_position(update, ticker, qty)
         return ConversationHandler.END
 
-    await update.effective_message.reply_text("Введите *тикер* инструмента (например, SBER):", parse_mode="Markdown")
+    await update.effective_message.reply_text("Введите <b>тикер</b> инструмента (например, SBER):", parse_mode="HTML")
     return TICKER
 
 
@@ -1093,7 +1106,7 @@ async def add_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_message or not update.effective_message.text or not context.user_data:
         return ConversationHandler.END
     context.user_data["add_ticker"] = update.effective_message.text.strip().upper()
-    await update.effective_message.reply_text("Введите *количество* (например, 10):", parse_mode="Markdown")
+    await update.effective_message.reply_text("Введите <b>количество</b> (например, 10):", parse_mode="HTML")
     return QUANTITY
 
 
@@ -1105,12 +1118,12 @@ async def add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         context.user_data["add_qty"] = qty
     except ValueError:
         await update.effective_message.reply_text(
-            "Количество должно быть числом. Попробуйте ещё раз:", parse_mode="Markdown"
+            "Количество должно быть числом. Попробуйте ещё раз:", parse_mode="HTML"
         )
         return QUANTITY
     await update.effective_message.reply_text(
-        "Введите *среднюю цену* (или отправьте `-` для автоматической):",
-        parse_mode="Markdown",
+        "Введите <b>среднюю цену</b> (или отправьте <code>-</code> для автоматической):",
+        parse_mode="HTML",
     )
     return PRICE
 
@@ -1126,7 +1139,7 @@ async def add_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             avg_price = float(text.replace(",", "."))
         except ValueError:
             await update.effective_message.reply_text(
-                "Цена должна быть числом или `-`. Попробуйте ещё раз:", parse_mode="Markdown"
+                "Цена должна быть числом или <code>-</code>. Попробуйте ещё раз:", parse_mode="HTML"
             )
             return PRICE
 
@@ -1316,7 +1329,7 @@ async def broadcast_signal(n: Any) -> None:
     subscribers = await _ns_get_subscribers(ns, "signal")
     for uid, cid in subscribers:
         try:
-            await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+            await app.bot.send_message(chat_id=uid, text=html_escape(text), parse_mode="HTML")
             await _ns_save_notification(ns, uid, "signal", text, title=n.ticker)
         except Exception as e:
             logger.warning(f"Failed to send signal to {uid}: {e}")
@@ -1335,12 +1348,12 @@ async def broadcast_dividends() -> None:
     for uid, cid in subscribers:
         for d in dividends:
             text = (
-                f"💵 *{d.ticker}* — дивиденды {d.amount:.0f} ₽/акц"
+                f"💵 <b>{html_escape(d.ticker)}</b> — дивиденды {d.amount:.0f} ₽/акц"
                 + (f" ({d.yield_pct:.1f}%)" if d.yield_pct else "")
                 + (f"\n📅 Дивидендная отсечка: {d.ex_date}" if d.ex_date else "")
             )
             try:
-                await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+                await app.bot.send_message(chat_id=uid, text=text, parse_mode="HTML")
                 await _ns_save_notification(ns, uid, "dividend", text, title=d.ticker)
             except Exception as e:
                 logger.warning(f"Failed to send dividend to {uid}: {e}")
@@ -1357,7 +1370,7 @@ async def broadcast_daily_summary() -> None:
     subscribers = await _ns_get_subscribers(ns, "daily")
     for uid, cid in subscribers:
         try:
-            await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+            await app.bot.send_message(chat_id=uid, text=html_escape(text), parse_mode="HTML")
             await _ns_save_notification(ns, uid, "daily", text, title="Ежедневная сводка")
         except Exception as e:
             logger.warning(f"Failed to send daily to {uid}: {e}")
@@ -1378,18 +1391,18 @@ async def broadcast_trade(
         return
 
     emoji = "🟢" if direction == "BUY" else "🔴"
-    text = f"{emoji} *{ticker}* — {direction} {quantity} шт. по {price:.2f} ₽\nСтатус: {status}"
+    text = f"{emoji} <b>{html_escape(ticker)}</b> — {direction} {quantity} шт. по {price:.2f} ₽\nСтатус: {html_escape(status)}"
     if reason:
-        text += f"\n📌 Причина: {reason}"
+        text += f"\n📌 Причина: {html_escape(reason)}"
     if order_id:
-        text += f"\n🆔 Заявка: `{order_id[:12]}...`"
+        text += f"\n🆔 Заявка: <code>{html_escape(order_id[:12])}...</code>"
     if portfolio_value is not None:
         text += f"\n💵 Портфель: {portfolio_value:,.0f} ₽"
 
     ns = NotificationService()
     for uid, cid in ns.get_subscribers("trade"):
         try:
-            await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+            await app.bot.send_message(chat_id=uid, text=text, parse_mode="HTML")
             ns.save_notification(uid, "trade", text, title=ticker)
         except Exception as e:
             logger.warning(f"Failed to send trade to {uid}: {e}")
@@ -1429,6 +1442,43 @@ app: Optional[Application[Any, Any, Any, Any, Any, Any]] = None
 _scheduler_task: Optional["asyncio.Task[None]"] = None
 
 
+async def _set_commands(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
+    commands = [
+        BotCommand("start", "Главное меню"),
+        BotCommand("analyze", "Анализ инструмента (тикер)"),
+        BotCommand("ask", "Спросить ассистента"),
+        BotCommand("top", "Лучшие возможности сейчас"),
+        BotCommand("portfolio", "Мой портфель"),
+        BotCommand("allocate", "Куда вложить (сумма)"),
+        BotCommand("add", "Добавить позицию"),
+        BotCommand("remove", "Удалить позицию"),
+        BotCommand("history", "История сигналов (тикер)"),
+        BotCommand("daily", "Ежедневная сводка"),
+        BotCommand("weekly", "Недельная сводка"),
+        BotCommand("sectors", "Сектора рынка"),
+        BotCommand("stress", "Стресс-тест"),
+        BotCommand("backtest", "Бэктест стратегии"),
+        BotCommand("correlation", "Корреляция активов"),
+        BotCommand("whatif", "Что-если сценарий"),
+        BotCommand("news", "Последние новости"),
+        BotCommand("rates", "Курсы валют"),
+        BotCommand("geo", "Геополитический риск"),
+        BotCommand("profile", "Риск-профиль"),
+        BotCommand("subscribe", "Подписаться на уведомления"),
+        BotCommand("unsubscribe", "Отписаться от уведомлений"),
+        BotCommand("export", "CSV-отчёт портфеля"),
+        BotCommand("social", "Social sentiment (тикер)"),
+        BotCommand("pulse", "Авторы Пульса"),
+        BotCommand("report", "Отчёт за 120 дней"),
+        BotCommand("pnl", "P&L сводка"),
+        BotCommand("help", "Помощь"),
+    ]
+    try:
+        await app.bot.set_my_commands(commands)
+    except Exception:
+        logger.warning("Failed to set bot commands", exc_info=True)
+
+
 def _stop_scheduler() -> None:
     from src.scheduler.service import stop as _sched_stop
 
@@ -1440,7 +1490,7 @@ async def correlation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     tickers = list(context.args) if context.args else None
     text = correlation_table(tickers)
     for chunk in _chunk_text(text, 4096):
-        await update.effective_message.reply_markdown(chunk)
+        await update.effective_message.reply_text(html_escape(chunk), parse_mode="HTML")
 
 
 @guard()
@@ -1475,7 +1525,7 @@ async def whatif(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text = whatif_scenario(ticker, shock, portfolio_value)
 
     for chunk in _chunk_text(text, 4096):
-        await update.effective_message.reply_markdown(chunk)
+        await update.effective_message.reply_text(html_escape(chunk), parse_mode="HTML")
 
 
 @guard()
@@ -1501,7 +1551,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 db.add(UserSetting(key="risk_profile", value=new_profile))
             db.commit()
             names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
-            await update.effective_message.reply_text(f"✅ Профиль изменён на *{names[new_profile]}*")
+            await update.effective_message.reply_text(f"✅ Профиль изменён на <b>{names[new_profile]}</b>")
         else:
             names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
             desc = {
@@ -1509,8 +1559,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "balanced": "40% ETF, 30% дивидендные, 20% облигации, 10% рост",
                 "aggressive": "40% рост, 25% ETF, 25% дивидендные, 10% облигации",
             }
-            text = "📊 *Личные настройки*\n\n"
-            text += f"👤 Профиль риска: *{names.get(current, current)}*\n"
+            text = "📊 <b>Личные настройки</b>\n\n"
+            text += f"👤 Профиль риска: <b>{names.get(current, current)}</b>\n"
 
             p_capital: int = cast(int, personal.get("capital", 100_000))
             p_tickers: list[Any] = cast(list[Any], personal.get("favorite_tickers", []))
@@ -1521,10 +1571,10 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if p_tickers:
                 text += f"⭐ Избранные: {', '.join(p_tickers[:10])}\n"
 
-            text += "\n*Сменить профиль:*\n"
+            text += "\n<b>Сменить профиль:</b>\n"
             for k, name in names.items():
-                text += f"• `/profile {k}` — {name} ({desc[k]})\n"
-            await update.effective_message.reply_markdown(text)
+                text += f"• <code>/profile {k}</code> — {name} ({desc[k]})\n"
+            await update.effective_message.reply_text(text, parse_mode="HTML")
     finally:
         db.close()
 
@@ -1556,27 +1606,29 @@ async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     pnl, pnl_pct = get_day_pnl()
     trades = get_trade_history(limit=10)
-    text = "📊 *P&L*\n\n"
+    text = "📊 <b>P&L</b>\n\n"
     text += f"Сегодня: {pnl:+,.0f} ₽ ({pnl_pct:+.2%})\n\n"
     if trades:
-        text += "*Последние сделки:*\n"
+        text += "<b>Последние сделки:</b>\n"
         for t in trades[:5]:
             t_pnl_val: Optional[float] = cast(Optional[float], t.get("pnl"))
             emoji = "🟢" if t_pnl_val is not None and t_pnl_val >= 0 else "🔴"
-            text += f"{emoji} {t['ticker']} {t['direction']} {t['quantity']}шт @ {t['price']:.2f}"
+            text += f"{emoji} {html_escape(t['ticker'])} {t['direction']} {t['quantity']}шт @ {t['price']:.2f}"
             if t_pnl_val is not None:
                 text += f" ({t_pnl_val:+.0f} ₽)"
             text += "\n"
     if not trades:
         text += "Сделок пока нет."
     for chunk in _chunk_text(text, 4096):
-        await update.effective_message.reply_markdown(chunk)
+        await update.effective_message.reply_text(chunk, parse_mode="HTML")
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error("Unhandled error: %s", context.error, exc_info=context.error)
+    logger.error("Unhandled error", exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
-        await update.effective_message.reply_text("Произошла внутренняя ошибка. Попробуйте позже.")
+        await update.effective_message.reply_text(
+            "❌ Произошла внутренняя ошибка. Попробуйте позже или напишите /start",
+        )
 
 
 async def run_bot() -> None:
@@ -1590,6 +1642,8 @@ async def run_bot() -> None:
         builder.proxy(settings.telegram_proxy_url)
         logger.info("Telegram bot using proxy: %s", settings.telegram_proxy_url)
     app = builder.build()
+
+    await _set_commands(app)
 
     app.add_error_handler(error_handler)
 
@@ -1634,6 +1688,7 @@ async def run_bot() -> None:
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
+    app.add_handler(MessageHandler(filters.Text(["🔍 Анализ", "📊 Портфель", "🏆 Топ", "📰 Новости", "📋 Сводка", "🏭 Сектора", "⚙️ Профиль", "❓ Помощь"]), reply_keyboard_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 
     await app.initialize()
