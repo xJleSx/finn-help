@@ -114,6 +114,21 @@ class PulseAdapter(SocialDataSource):
                 logger.warning("Pulse: HTTP %d for @%s", e.response.status_code, nick)
             return None
 
+    async def fetch_author_posts(self, author_nick: str, since: datetime | None = None) -> list[RawPost]:
+        html = await self._fetch_profile_page(author_nick)
+        if not html:
+            return []
+        posts = self._parse_posts_from_html(author_nick, html)
+        result: list[RawPost] = []
+        for post in posts:
+            if since and post.published_at and post.published_at < since:
+                continue
+            post.text = clean_text(post.text)
+            post.tickers = extract_tickers(post.text)
+            result.append(post)
+        logger.info("Pulse: collected %d posts from @%s", len(result), author_nick)
+        return result
+
     @async_retry(max_attempts=3, base_delay=2.0)
     async def fetch_author_stats(self, author_nick: str) -> dict[str, Any] | None:
         await self._rate_limit()

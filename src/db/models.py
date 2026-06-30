@@ -326,6 +326,21 @@ class Subscription(Base):
     __table_args__ = (UniqueConstraint("user_id", name="uq_subscription_user"),)
 
 
+class AuthorSubscription(Base):
+    __tablename__ = "author_subscriptions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    chat_id = Column(BigInteger, nullable=False)
+    author_nick = Column(String(100), nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "author_nick", name="uq_user_author_sub"),
+        Index("ix_author_sub_author", "author_nick"),
+    )
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 

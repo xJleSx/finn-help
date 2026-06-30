@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from src.db.connection import get_session
-from src.db.models import GeoRiskScore, Instrument, Notification, Portfolio, Price, Subscription
+from src.db.models import AuthorSubscription, GeoRiskScore, Instrument, Notification, Portfolio, Price, Subscription
 from src.db.models import Signal as SignalModel
 from src.notifications import (
     DailySummaryNotification,
@@ -130,6 +130,68 @@ class NotificationService:
                 return []
             results = db.query(Subscription.user_id, Subscription.chat_id).filter(col).all()
             return [(r.user_id, r.chat_id) for r in results]
+        finally:
+            db.close()
+
+    # --- Author subscriptions ---
+
+    def subscribe_author(self, user_id: int, chat_id: int, author_nick: str) -> None:
+        db = self._get_sync_db()
+        try:
+            existing = (
+                db.query(AuthorSubscription)
+                .filter_by(user_id=user_id, author_nick=author_nick)
+                .first()
+            )
+            if existing:
+                return
+            sub = AuthorSubscription(user_id=user_id, chat_id=chat_id, author_nick=author_nick)
+            db.add(sub)
+            db.commit()
+        except Exception as e:
+            logger.error("subscribe_author_failed", user_id=user_id, author=author_nick, error=str(e))
+            db.rollback()
+        finally:
+            db.close()
+
+    def unsubscribe_author(self, user_id: int, author_nick: str) -> None:
+        db = self._get_sync_db()
+        try:
+            sub = (
+                db.query(AuthorSubscription)
+                .filter_by(user_id=user_id, author_nick=author_nick)
+                .first()
+            )
+            if sub:
+                db.delete(sub)
+                db.commit()
+        except Exception as e:
+            logger.error("unsubscribe_author_failed", user_id=user_id, author=author_nick, error=str(e))
+            db.rollback()
+        finally:
+            db.close()
+
+    def get_author_subscribers(self, author_nick: str) -> list[tuple[int, int]]:
+        db = self._get_sync_db()
+        try:
+            results = (
+                db.query(AuthorSubscription.user_id, AuthorSubscription.chat_id)
+                .filter_by(author_nick=author_nick)
+                .all()
+            )
+            return [(r.user_id, r.chat_id) for r in results]
+        finally:
+            db.close()
+
+    def get_user_subscribed_authors(self, user_id: int) -> list[str]:
+        db = self._get_sync_db()
+        try:
+            results = (
+                db.query(AuthorSubscription.author_nick)
+                .filter_by(user_id=user_id)
+                .all()
+            )
+            return [r.author_nick for r in results]
         finally:
             db.close()
 
