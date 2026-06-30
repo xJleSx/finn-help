@@ -49,7 +49,16 @@ class TestMemoryCache:
 
 class TestMemKey:
     def test_uppercases_ticker(self):
-        assert _mem_key("sber", "atr") == "SBER:atr"
+        key = _mem_key("sber", "atr")
+        assert key.startswith("SBER:atr:v")
+
+    def test_includes_version(self):
+        key = _mem_key("sber", "atr")
+        assert key == "SBER:atr:v1"
+
+    def test_version_uppercased(self):
+        key = _mem_key("GAZP", "technical")
+        assert key == "GAZP:technical:v1"
 
 
 class TestGetCached:
@@ -74,7 +83,7 @@ class TestGetCached:
             mock_db.close.assert_called_once()
 
     def test_returns_stale(self):
-        from datetime import date, timedelta
+        from datetime import date, timedelta, datetime
 
         with (
             patch("src.analysis.feature_store._mem") as mock_mem,
@@ -85,6 +94,9 @@ class TestGetCached:
             row = MagicMock()
             row.date = date.today() - timedelta(days=2)
             row.value_json = {"old": True}
+            row.version = 1
+            row.ttl_hours = None
+            row.created_at = datetime.utcnow()
             mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = row
             mock_get_session.return_value = mock_db
 
@@ -93,7 +105,7 @@ class TestGetCached:
             mock_db.close.assert_called_once()
 
     def test_returns_fresh(self):
-        from datetime import date
+        from datetime import date, datetime
 
         with (
             patch("src.analysis.feature_store._mem") as mock_mem,
@@ -104,6 +116,9 @@ class TestGetCached:
             row = MagicMock()
             row.date = date.today()
             row.value_json = {"fresh": True}
+            row.version = 1
+            row.ttl_hours = None
+            row.created_at = datetime.utcnow()
             mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = row
             mock_get_session.return_value = mock_db
 
