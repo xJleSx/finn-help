@@ -20,7 +20,7 @@ from src.constants import (
     SECTOR_NAMES,
 )
 from src.db.connection import get_session, session_scope
-from src.db.models import Dividend, Instrument, Price
+from src.db.models import CorporateEvent, Dividend, FundamentalMetric, Instrument, Price
 from src.portfolio.risk import item_risk, item_risk_async
 
 logger = logging.getLogger(__name__)
@@ -95,6 +95,93 @@ class PortfolioAllocator:
         return result_list
 
 
+
+    async def _allocate_from_data_core(
+        self, capital: float, existing: list[dict[str, Any]],
+        instruments_data: list[dict[str, Any]],
+        score_fn: Any, risk_fn: Any,
+    ) -> dict[str, Any]:
+        plan = {}
+        total_allocated = 0.0
+        sector_allocation: dict[str, float] = {}
+
+        for category, cfg in self._weights().items():
+            budget = capital * cfg["weight"]
+            candidates = await score_fn(instruments_data, category, budget, existing)
+
+            max_positions = cfg["max"]
+            for tier in ALLOCATOR_CAPITAL_TIERS:
+                if capital < tier["max_capital"] and budget < tier["min_budget"]:
+                    max_positions = tier["max_positions"]
+                    break
+
+            selected = candidates[:max_positions]
+            if not selected:
+                continue
+
+            cat_total = sum(s["score"] for s in selected) or 1
+            category_items = []
+            for item in selected:
+                share = item["score"] / cat_total
+                amount = round(budget * share, 2)
+
+                last_price = item.get("last_price")
+                if last_price and last_price > 0 and amount < last_price:
+                    continue
+
+                sector = item.get("sector", "Прочее")
+                limit = SECTOR_LIMITS.get(sector, 0.30)
+                current_sector_weight = (sector_allocation.get(sector, 0.0) + amount) / capital
+                if capital >= ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL and current_sector_weight > limit:
+                    continue
+
+                sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
+
+                risk = await risk_fn(item)
+                category_items.append(
+                    {
+                        "ticker": item["ticker"],
+                        "name": item["name"],
+                        "amount": amount,
+                        "reason": item.get("reason", ""),
+                        "expected_yield": item.get("yield", 0),
+                        "sector": sector,
+                        "last_price": item.get("last_price"),
+                        "risk": risk,
+                    }
+                )
+                total_allocated += amount
+
+            plan[category] = {
+                "label": cfg["label"],
+                "budget": round(budget, 2),
+                "items": category_items,
+            }
+
+        leftover = round(capital - total_allocated, 2)
+        if leftover > max(ALLOCATOR_LEFTOVER_MIN_ABS, capital * ALLOCATOR_LEFTOVER_THRESHOLD):
+            for cat_name in ["etf", "dividend"]:
+                if cat_name in plan and plan[cat_name]["items"]:
+                    items = plan[cat_name]["items"]
+                    total_score = sum(it.get("amount", 0) for it in items) or 1
+                    for it in items:
+                        frac = it["amount"] / total_score
+                        it["amount"] = round(it["amount"] + leftover * frac, 2)
+                    total_allocated += leftover
+                    break
+
+        projected_monthly = self._calc_projected_yield(plan, capital)
+
+        return {
+            "capital": capital,
+            "total_allocated": round(total_allocated, 2),
+            "reserve": round(capital - total_allocated, 2),
+            "plan": plan,
+            "projected_monthly_yield": round(projected_monthly, 2),
+            "projected_monthly_pct": round((projected_monthly / capital) * 100 if capital > 0 else 0, 2),
+            "existing_portfolio": existing,
+            "sector_allocation": sector_allocation,
+        }
 
     def _allocate_from_data(
         self, capital: float, existing: list[dict[str, Any]],
@@ -186,174 +273,11 @@ class PortfolioAllocator:
         self, capital: float, existing: list[dict[str, Any]],
         instruments_data: list[dict[str, Any]], db: AsyncSession,
     ) -> dict[str, Any]:
-        plan = {}
-        total_allocated = 0.0
-        sector_allocation: dict[str, float] = {}
-
-        for category, cfg in self._weights().items():
-            budget = capital * cfg["weight"]
-            candidates = await self._score_candidates_async(instruments_data, category, budget, existing, db)
-
-            max_positions = cfg["max"]
-            for tier in ALLOCATOR_CAPITAL_TIERS:
-                if capital < tier["max_capital"] and budget < tier["min_budget"]:
-                    max_positions = tier["max_positions"]
-                    break
-
-            selected = candidates[:max_positions]
-            if not selected:
-                continue
-
-            cat_total = sum(s["score"] for s in selected) or 1
-            category_items = []
-            for item in selected:
-                share = item["score"] / cat_total
-                amount = round(budget * share, 2)
-
-                last_price = item.get("last_price")
-                if last_price and last_price > 0 and amount < last_price:
-                    continue
-
-                sector = item.get("sector", "Прочее")
-                limit = SECTOR_LIMITS.get(sector, 0.30)
-                current_sector_weight = (sector_allocation.get(sector, 0.0) + amount) / capital
-                if capital >= ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL and current_sector_weight > limit:
-                    continue
-
-                sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
-
-                risk = await item_risk_async(item, db, capital)
-                category_items.append(
-                    {
-                        "ticker": item["ticker"],
-                        "name": item["name"],
-                        "amount": amount,
-                        "reason": item.get("reason", ""),
-                        "expected_yield": item.get("yield", 0),
-                        "sector": sector,
-                        "last_price": item.get("last_price"),
-                        "risk": risk,
-                    }
-                )
-                total_allocated += amount
-
-            plan[category] = {
-                "label": cfg["label"],
-                "budget": round(budget, 2),
-                "items": category_items,
-            }
-
-        leftover = round(capital - total_allocated, 2)
-        if leftover > max(ALLOCATOR_LEFTOVER_MIN_ABS, capital * ALLOCATOR_LEFTOVER_THRESHOLD):
-            for cat_name in ["etf", "dividend"]:
-                if cat_name in plan and plan[cat_name]["items"]:
-                    items = plan[cat_name]["items"]
-                    total_score = sum(it.get("amount", 0) for it in items) or 1
-                    for it in items:
-                        frac = it["amount"] / total_score
-                        it["amount"] = round(it["amount"] + leftover * frac, 2)
-                    total_allocated += leftover
-                    break
-
-        projected_monthly = self._calc_projected_yield(plan, capital)
-
-        return {
-            "capital": capital,
-            "total_allocated": round(total_allocated, 2),
-            "reserve": round(capital - total_allocated, 2),
-            "plan": plan,
-            "projected_monthly_yield": round(projected_monthly, 2),
-            "projected_monthly_pct": round((projected_monthly / capital) * 100 if capital > 0 else 0, 2),
-            "existing_portfolio": existing,
-            "sector_allocation": sector_allocation,
-        }
-
-
-    async def _allocate_from_data_async(
-        self, capital: float, existing: list[dict[str, Any]],
-        instruments_data: list[dict[str, Any]], db: AsyncSession,
-    ) -> dict[str, Any]:
-        plan = {}
-        total_allocated = 0.0
-        sector_allocation: dict[str, float] = {}
-
-        for category, cfg in self._weights().items():
-            budget = capital * cfg["weight"]
-            candidates = await self._score_candidates_async(instruments_data, category, budget, existing, db)
-
-            max_positions = cfg["max"]
-            for tier in ALLOCATOR_CAPITAL_TIERS:
-                if capital < tier["max_capital"] and budget < tier["min_budget"]:
-                    max_positions = tier["max_positions"]
-                    break
-
-            selected = candidates[:max_positions]
-            if not selected:
-                continue
-
-            cat_total = sum(s["score"] for s in selected) or 1
-            category_items = []
-            for item in selected:
-                share = item["score"] / cat_total
-                amount = round(budget * share, 2)
-
-                last_price = item.get("last_price")
-                if last_price and last_price > 0 and amount < last_price:
-                    continue
-
-                sector = item.get("sector", "Прочее")
-                limit = SECTOR_LIMITS.get(sector, 0.30)
-                current_sector_weight = (sector_allocation.get(sector, 0.0) + amount) / capital
-                if capital >= ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL and current_sector_weight > limit:
-                    continue
-
-                sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
-
-                risk = await item_risk_async(item, db, capital)
-                category_items.append(
-                    {
-                        "ticker": item["ticker"],
-                        "name": item["name"],
-                        "amount": amount,
-                        "reason": item.get("reason", ""),
-                        "expected_yield": item.get("yield", 0),
-                        "sector": sector,
-                        "last_price": item.get("last_price"),
-                        "risk": risk,
-                    }
-                )
-                total_allocated += amount
-
-            plan[category] = {
-                "label": cfg["label"],
-                "budget": round(budget, 2),
-                "items": category_items,
-            }
-
-        leftover = round(capital - total_allocated, 2)
-        if leftover > max(ALLOCATOR_LEFTOVER_MIN_ABS, capital * ALLOCATOR_LEFTOVER_THRESHOLD):
-            for cat_name in ["etf", "dividend"]:
-                if cat_name in plan and plan[cat_name]["items"]:
-                    items = plan[cat_name]["items"]
-                    total_score = sum(it.get("amount", 0) for it in items) or 1
-                    for it in items:
-                        frac = it["amount"] / total_score
-                        it["amount"] = round(it["amount"] + leftover * frac, 2)
-                    total_allocated += leftover
-                    break
-
-        projected_monthly = self._calc_projected_yield(plan, capital)
-
-        return {
-            "capital": capital,
-            "total_allocated": round(total_allocated, 2),
-            "reserve": round(capital - total_allocated, 2),
-            "plan": plan,
-            "projected_monthly_yield": round(projected_monthly, 2),
-            "projected_monthly_pct": round((projected_monthly / capital) * 100 if capital > 0 else 0, 2),
-            "existing_portfolio": existing,
-            "sector_allocation": sector_allocation,
-        }
+        async def score(data, cat, budget, _existing):
+            return await self._score_candidates_async(data, cat, budget, _existing, db)
+        async def risk(item):
+            return await item_risk_async(item, db, capital)
+        return await self._allocate_from_data_core(capital, existing, instruments_data, score, risk)
 
     def allocate(self, capital: float, db: Any = None) -> dict[str, Any]:
         should_close = db is None
@@ -416,19 +340,47 @@ class PortfolioAllocator:
                     )
                     div_yield = 25.0
 
-            result.append(
-                {
-                    "id": inst.id,
-                    "ticker": inst.ticker,
-                    "name": inst.full_name or inst.ticker,
-                    "type": inst.instrument_type,
-                    "sector": sector,
-                    "last_price": float(last_price) if last_price else None,
-                    "div_yield": round(div_yield, 2),
-                    "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "dividend",
-                    "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "growth",
-                }
+            fm = (
+                db.query(FundamentalMetric)
+                .filter_by(instrument_id=inst.id)
+                .order_by(FundamentalMetric.date.desc())
+                .first()
             )
+            upcoming_div = (
+                db.query(CorporateEvent)
+                .filter(
+                    CorporateEvent.instrument_id == inst.id,
+                    CorporateEvent.event_type == "dividend",
+                    CorporateEvent.announcement_date >= date.today(),
+                )
+                .order_by(CorporateEvent.announcement_date.asc())
+                .first()
+            )
+
+            entry: dict[str, Any] = {
+                "id": inst.id,
+                "ticker": inst.ticker,
+                "name": inst.full_name or inst.ticker,
+                "type": inst.instrument_type,
+                "sector": sector,
+                "last_price": float(last_price) if last_price else None,
+                "div_yield": round(div_yield, 2),
+                "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "dividend",
+                "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "growth",
+            }
+            if fm:
+                entry["pe_ratio"] = float(fm.pe_ratio) if fm.pe_ratio else None
+                entry["pb_ratio"] = float(fm.pb_ratio) if fm.pb_ratio else None
+                entry["roe"] = float(fm.roe) if fm.roe else None
+                entry["market_cap"] = float(fm.market_cap) if fm.market_cap else None
+                entry["debt_equity"] = float(fm.debt_equity) if fm.debt_equity else None
+                entry["eps"] = float(fm.eps) if fm.eps else None
+            if upcoming_div:
+                amt = upcoming_div.dividend_amount
+                entry["upcoming_dividend_amount"] = float(amt) if amt else None
+                ad = upcoming_div.announcement_date
+                entry["upcoming_dividend_date"] = ad.isoformat() if ad else None
+            result.append(entry)
         return result
 
     async def _load_instruments_async(self, db: AsyncSession) -> list[dict[str, Any]]:
@@ -586,6 +538,44 @@ class PortfolioAllocator:
                     score += 1.0
                     reason_parts.append("корпоративная облигация")
 
+            # Fundamental scoring
+            pe = c.get("pe_ratio")
+            roe = c.get("roe")
+            debt_eq = c.get("debt_equity")
+            mcap = c.get("market_cap")
+
+            if pe is not None:
+                if pe < 0:
+                    score -= 1.0
+                    reason_parts.append("отрицательная прибыль")
+                elif pe > 40:
+                    score -= 0.5
+                    reason_parts.append("высокий P/E")
+                elif 5 < pe < 15:
+                    score += 0.5
+                    reason_parts.append("привлекательный P/E")
+
+            if roe is not None:
+                if roe > 15:
+                    score += 0.5
+                    reason_parts.append("высокий ROE")
+                elif roe < 5:
+                    score -= 0.3
+                    reason_parts.append("низкий ROE")
+
+            if debt_eq is not None and debt_eq > 2:
+                score -= 0.5
+                reason_parts.append("высокая долговая нагрузка")
+
+            if mcap is not None and mcap < 1e9:
+                score -= 0.5
+                reason_parts.append("малая капитализация")
+
+            # Upcoming dividend bonus
+            if c.get("upcoming_dividend_amount"):
+                score += 1.0
+                reason_parts.append("ожидаемые дивиденды")
+
             c["score"] = max(score, 0.0)
             c["reason"] = "; ".join(reason_parts) if reason_parts else "диверсификация"
             c["yield"] = c["div_yield"]
@@ -668,6 +658,44 @@ class PortfolioAllocator:
                 else:
                     score += 1.0
                     reason_parts.append("корпоративная облигация")
+
+            # Fundamental scoring
+            pe = c.get("pe_ratio")
+            roe = c.get("roe")
+            debt_eq = c.get("debt_equity")
+            mcap = c.get("market_cap")
+
+            if pe is not None:
+                if pe < 0:
+                    score -= 1.0
+                    reason_parts.append("отрицательная прибыль")
+                elif pe > 40:
+                    score -= 0.5
+                    reason_parts.append("высокий P/E")
+                elif 5 < pe < 15:
+                    score += 0.5
+                    reason_parts.append("привлекательный P/E")
+
+            if roe is not None:
+                if roe > 15:
+                    score += 0.5
+                    reason_parts.append("высокий ROE")
+                elif roe < 5:
+                    score -= 0.3
+                    reason_parts.append("низкий ROE")
+
+            if debt_eq is not None and debt_eq > 2:
+                score -= 0.5
+                reason_parts.append("высокая долговая нагрузка")
+
+            if mcap is not None and mcap < 1e9:
+                score -= 0.5
+                reason_parts.append("малая капитализация")
+
+            # Upcoming dividend bonus
+            if c.get("upcoming_dividend_amount"):
+                score += 1.0
+                reason_parts.append("ожидаемые дивиденды")
 
             c["score"] = max(score, 0.0)
             c["reason"] = "; ".join(reason_parts) if reason_parts else "диверсификация"

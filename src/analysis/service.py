@@ -18,6 +18,7 @@ from src.db.models import (
     BondOffering,
     Dividend,
     FinancialReport,
+    FundamentalMetric,
     GeoRiskScore,
     Indicator,
     Instrument,
@@ -647,6 +648,33 @@ class AnalysisService:
         divs = div_result.scalars().all()
 
         fund_metrics = await self._load_fundamental_metrics(db, int(inst.id))
+        if fund_metrics and inst.sector:
+            avg_pe = (
+                await db.execute(
+                    select(func.avg(FundamentalMetric.pe_ratio))
+                    .join(Instrument, Instrument.id == FundamentalMetric.instrument_id)
+                    .where(
+                        Instrument.sector == inst.sector,
+                        FundamentalMetric.pe_ratio.isnot(None),
+                        FundamentalMetric.pe_ratio > 0,
+                    )
+                )
+            ).scalar()
+            if avg_pe is not None:
+                fund_metrics["sector_avg_pe"] = round(float(avg_pe), 2)
+            avg_pb = (
+                await db.execute(
+                    select(func.avg(FundamentalMetric.pb_ratio))
+                    .join(Instrument, Instrument.id == FundamentalMetric.instrument_id)
+                    .where(
+                        Instrument.sector == inst.sector,
+                        FundamentalMetric.pb_ratio.isnot(None),
+                        FundamentalMetric.pb_ratio > 0,
+                    )
+                )
+            ).scalar()
+            if avg_pb is not None:
+                fund_metrics["sector_avg_pb"] = round(float(avg_pb), 2)
         geo_score = (await self._load_geo(db)).get("score", 0.0)
         macro_context = await self._load_macro(db)
         sentiment = await self._load_sentiment(db)
@@ -751,6 +779,7 @@ class AnalysisService:
 
         divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
         fund_metrics = self._load_fundamental_metrics_sync(db, inst.id)
+        fund_metrics = self._augment_with_sector_avg(db, fund_metrics, inst)
 
         geo_val = self._compute_geo_from_events_sync(db)
         if geo_val is None:
@@ -825,6 +854,35 @@ class AnalysisService:
             "eps": row.eps,
             "debt_equity": row.debt_equity,
         }
+
+    @staticmethod
+    def _augment_with_sector_avg(
+        db: Any, fund_metrics: dict[str, Any] | None, inst: Instrument
+    ) -> dict[str, Any] | None:
+        if not fund_metrics:
+            return fund_metrics
+        sector = inst.sector
+        if not sector:
+            return fund_metrics
+        from src.db.models import FundamentalMetric
+
+        avg_pe = (
+            db.query(func.avg(FundamentalMetric.pe_ratio))
+            .join(Instrument, Instrument.id == FundamentalMetric.instrument_id)
+            .filter(Instrument.sector == sector, FundamentalMetric.pe_ratio.isnot(None), FundamentalMetric.pe_ratio > 0)
+            .scalar()
+        )
+        if avg_pe is not None:
+            fund_metrics["sector_avg_pe"] = round(float(avg_pe), 2)
+        avg_pb = (
+            db.query(func.avg(FundamentalMetric.pb_ratio))
+            .join(Instrument, Instrument.id == FundamentalMetric.instrument_id)
+            .filter(Instrument.sector == sector, FundamentalMetric.pb_ratio.isnot(None), FundamentalMetric.pb_ratio > 0)
+            .scalar()
+        )
+        if avg_pb is not None:
+            fund_metrics["sector_avg_pb"] = round(float(avg_pb), 2)
+        return fund_metrics
 
     def analyze_all_sync(
         self, db: Any, updated_ids: set[int] | None = None, with_ml: bool = True

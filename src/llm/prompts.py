@@ -7,9 +7,11 @@ SYSTEM_PROMPT = """Ты — финансовый ассистент FinAdvisor. 
 1. Прочитай JSON сигнал целиком. Определи тип инструмента (stock / bond / etf).
 2. Выпиши ключевые факты: действие, уверенность, цена, target price (если есть), основные причины.
 3. Оцени риски: volatility regime, geo_risk, anomalies, trend, event_risk.
-4. Если есть financial_report — включи ключевые цифры из отчётности в key_facts.
-5. Если есть bond_offering — извлеки параметры облигации (купон, рейтинг, YTM, мин. заявку) для анализа.
-6. Сформулируй вывод на основе фактов, а не предположений.
+4. Если есть company_profile — используй описание компании (сектор, позиция на рынке) для контекста.
+5. Если есть financial_report — включи ключевые цифры из отчётности в key_facts.
+6. Если есть bond_offering — извлеки параметры облигации (купон, рейтинг, YTM, мин. заявку) для анализа.
+7. Если есть corporate_events — учитывай предстоящие дивиденды, байбэки, сплиты в оценке рисков.
+8. Сформулируй вывод на основе фактов, а не предположений.
 7. Напиши ответ строго по схеме JSON (см. ниже).
 
 ## СТРОГИЕ ПРАВИЛА
@@ -200,7 +202,12 @@ FEW_SHOT_PREFIX = """
 
 
 def build_user_message(signal: dict[str, object]) -> str:
-    return FEW_SHOT_PREFIX + USER_TEMPLATE.format(signal_json=json.dumps(signal, ensure_ascii=False, indent=2))
+    data = {k: v for k, v in signal.items() if k != "enriched_context"}
+    enriched = signal.get("enriched_context")
+    msg = FEW_SHOT_PREFIX + USER_TEMPLATE.format(signal_json=json.dumps(data, ensure_ascii=False, indent=2))
+    if enriched:
+        msg += f"\n\n## Обогащённые данные по компании\n\n{enriched}"
+    return msg
 
 
 REPORT_SYSTEM_PROMPT = """Ты — аналитический редактор FinAdvisor. Твоя задача — на основе структурированного сигнала от аналитического движка написать инвестиционный обзор в жанре финансовой журналистики.
@@ -404,7 +411,12 @@ REPORT_FEW_SHOT = """
 
 
 def build_report_message(signal: dict[str, object]) -> str:
-    return REPORT_FEW_SHOT + REPORT_USER_TEMPLATE.format(signal_json=json.dumps(signal, ensure_ascii=False, indent=2))
+    data = {k: v for k, v in signal.items() if k != "enriched_context"}
+    enriched = signal.get("enriched_context")
+    msg = REPORT_FEW_SHOT + REPORT_USER_TEMPLATE.format(signal_json=json.dumps(data, ensure_ascii=False, indent=2))
+    if enriched:
+        msg += f"\n\n## Обогащённые данные по компании\n\n{enriched}"
+    return msg
 
 
 QUESTION_SYSTEM_PROMPT = """Ты — финансовый ассистент FinAdvisor. Отвечаешь на вопросы пользователей о российском фондовом рынке (MOEX).

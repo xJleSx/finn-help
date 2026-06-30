@@ -4,6 +4,8 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from src.interfaces.response_formatter import fmt_rub
+
 logger = logging.getLogger(__name__)
 
 MCAP_THRESHOLD_LOW = 1e9  # 1 млрд RUB — минимальная капитализация для blue chip
@@ -99,11 +101,13 @@ class FundamentalAnalyzer:
             roe = metrics.get("roe")
             eps = metrics.get("eps")
             debt_eq = metrics.get("debt_equity")
+            sector_avg_pe = metrics.get("sector_avg_pe")
+            sector_avg_pb = metrics.get("sector_avg_pb")
 
             if mcap is not None:
-                signals.append(f"капитализация: {_fmt_big(mcap)} ₽")
+                signals.append(f"капитализация: {fmt_rub(mcap)}")
                 if mcap < MCAP_THRESHOLD_LOW:
-                    anomalies.append(f"малая капитализация ({_fmt_big(mcap)} ₽)")
+                    anomalies.append(f"малая капитализация ({fmt_rub(mcap)})")
                     risk_score += 0.15
                 elif mcap < MCAP_THRESHOLD_HIGH:
                     signals.append("средняя капитализация")
@@ -111,7 +115,11 @@ class FundamentalAnalyzer:
                     signals.append("крупная капитализация (blue chip)")
 
             if pe is not None:
-                signals.append(f"P/E: {pe:.1f}")
+                pe_str = f"P/E: {pe:.1f}"
+                if sector_avg_pe and sector_avg_pe > 0:
+                    pe_diff = (pe / sector_avg_pe - 1) * 100
+                    pe_str += f" (vs сектор: {pe_diff:+.0f}%)"
+                signals.append(pe_str)
                 if pe < 0:
                     anomalies.append("отрицательная прибыль (P/E < 0)")
                     risk_score += 0.3
@@ -120,7 +128,11 @@ class FundamentalAnalyzer:
                     risk_score += 0.1
 
             if pb is not None:
-                signals.append(f"P/B: {pb:.1f}")
+                pb_str = f"P/B: {pb:.1f}"
+                if sector_avg_pb and sector_avg_pb > 0:
+                    pb_diff = (pb / sector_avg_pb - 1) * 100
+                    pb_str += f" (vs сектор: {pb_diff:+.0f}%)"
+                signals.append(pb_str)
                 if pb > 5:
                     anomalies.append(f"высокий P/B ({pb:.1f})")
                     risk_score += 0.1
@@ -161,75 +173,6 @@ class FundamentalAnalyzer:
         }
 
     def analyze_report(self, report: dict[str, Any]) -> list[str]:
-        """Анализ финансовой отчётности (МСФО/РСБУ) — возвращает список фактов для LLM."""
-        facts = []
-        period = report.get("period_type", "")
-        date_str = report.get("report_date", "")
+        from src.interfaces.response_formatter import format_financial_facts
 
-        np_val = report.get("net_profit")
-        if np_val is not None:
-            facts.append(f"Чистая прибыль ({period} {date_str}): {_fmt_big(np_val)} ₽")
-
-        rev = report.get("revenue")
-        if rev is not None:
-            facts.append(f"Выручка: {_fmt_big(rev)} ₽")
-
-        nii = report.get("net_interest_income")
-        if nii is not None:
-            facts.append(f"Чистые процентные доходы: {_fmt_big(nii)} ₽")
-
-        assets = report.get("total_assets")
-        if assets is not None:
-            facts.append(f"Активы: {_fmt_big(assets)} ₽")
-
-        liabilities = report.get("total_liabilities")
-        if liabilities is not None:
-            facts.append(f"Обязательства: {_fmt_big(liabilities)} ₽")
-
-        equity = report.get("total_equity")
-        if equity is not None:
-            facts.append(f"Собственный капитал: {_fmt_big(equity)} ₽")
-
-        loan = report.get("loan_portfolio")
-        if loan is not None:
-            facts.append(f"Кредитный портфель: {_fmt_big(loan)} ₽")
-
-        deposits = report.get("customer_deposits")
-        if deposits is not None:
-            facts.append(f"Средства клиентов: {_fmt_big(deposits)} ₽")
-
-        roe = report.get("roe")
-        if roe is not None:
-            facts.append(f"ROE: {roe:.1f}%")
-
-        roa = report.get("roa")
-        if roa is not None:
-            facts.append(f"ROA: {roa:.1f}%")
-
-        npl = report.get("npl_ratio")
-        if npl is not None:
-            facts.append(f"NPL (просрочка): {npl:.1f}%")
-
-        adequacy = report.get("capital_adequacy")
-        if adequacy is not None:
-            facts.append(f"Достаточность капитала: {adequacy:.1f}%")
-
-        cir = report.get("cost_income_ratio")
-        if cir is not None:
-            facts.append(f"CIR (расходы/доходы): {cir:.1f}%")
-
-        margin = report.get("net_margin")
-        if margin is not None:
-            facts.append(f"Чистая процентная маржа: {margin:.1f}%")
-
-        return facts
-
-
-def _fmt_big(val: float) -> str:
-    if val >= 1e12:
-        return f"{val / 1e12:.2f}трлн"
-    if val >= 1e9:
-        return f"{val / 1e9:.2f}млрд"
-    if val >= 1e6:
-        return f"{val / 1e6:.2f}млн"
-    return f"{val:.0f}"
+        return format_financial_facts(report)

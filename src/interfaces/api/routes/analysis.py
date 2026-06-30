@@ -186,3 +186,88 @@ async def refresh_alerts(
     except Exception as e:
         logger.exception("Alert refresh failed")
         raise HTTPException(500, f"Alert refresh failed: {e}")
+
+
+# ── Risk explorer endpoints ──────────────────────────────────────────────
+
+def _risk_portfolio_summary_sync(user_id: int) -> dict[str, Any]:
+    from src.analysis.risk_explorer import RiskExplorer
+
+    db = get_session()
+    try:
+        explorer = RiskExplorer()
+        return explorer.portfolio_risk_summary(db, user_id)
+    finally:
+        db.close()
+
+
+def _risk_ticker_deep_dive_sync(ticker: str, user_id: int) -> dict[str, Any]:
+    from src.analysis.risk_explorer import RiskExplorer
+
+    db = get_session()
+    try:
+        explorer = RiskExplorer()
+        return explorer.ticker_deep_dive(db, ticker, user_id)
+    finally:
+        db.close()
+
+
+@router.get("/api/risk/portfolio")
+async def risk_portfolio_summary(
+    user_id: int = Query(0),
+) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(None, _risk_portfolio_summary_sync, user_id)
+        return result
+    except Exception as e:
+        logger.exception("Risk portfolio summary failed for user_id=%s", user_id)
+        raise HTTPException(500, f"Risk portfolio summary failed: {e}")
+
+
+@router.get("/api/risk/deep-dive/{ticker}")
+async def risk_ticker_deep_dive(
+    ticker: str,
+    user_id: int = Query(0),
+) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(None, _risk_ticker_deep_dive_sync, ticker, user_id)
+        return result
+    except Exception as e:
+        logger.exception("Risk deep dive failed for %s", ticker)
+        raise HTTPException(500, f"Risk deep dive failed: {e}")
+
+
+# ── Causal inference endpoint ────────────────────────────────────────────
+
+def _causal_analysis_sync(ticker: str, target_ticker: str | None) -> dict[str, Any]:
+    from src.analysis.inference.causal import GrangerCausality, InstrumentCausalGraph
+
+    db = get_session()
+    try:
+        if target_ticker:
+            result = GrangerCausality().test_news_causality(db, ticker, target_ticker)
+            return {"ticker": ticker, "target": target_ticker, "result": result}
+        graph = InstrumentCausalGraph()
+        graph.build_from_sector(db, ticker)
+        return {
+            "ticker": ticker,
+            "influencers": graph.get_influencers(ticker, top_n=5),
+        }
+    finally:
+        db.close()
+
+
+@router.get("/api/analysis/causal/{ticker}")
+async def causal_analysis(
+    ticker: str,
+    target: str | None = Query(None, alias="target"),
+) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(None, _causal_analysis_sync, ticker, target)
+        return result
+    except Exception as e:
+        logger.exception("Causal analysis failed for %s", ticker)
+        raise HTTPException(500, f"Causal analysis failed: {e}")

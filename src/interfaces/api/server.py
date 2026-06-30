@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -147,6 +147,40 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
             components["models"] = models_summary
     except Exception:
         components["models"] = None
+
+    # Enrichment coverage
+    try:
+        total_inst = components.get("instruments") or 1
+        from src.db.models import AltDataPoint, BondOffering, CompanyProfile, CorporateEvent, FinancialReport
+
+        for table, label, model in [
+            (CompanyProfile, "profile_coverage", CompanyProfile),
+            (FinancialReport, "report_coverage", FinancialReport),
+            (BondOffering, "bond_coverage", BondOffering),
+            (CorporateEvent, "event_coverage", CorporateEvent),
+            (AltDataPoint, "alt_data_count", AltDataPoint),
+        ]:
+            cnt = await db.execute(select(sqlfunc.count(model.id)))
+            cval: Any = cnt.scalar()
+            if label.endswith("_coverage") and cval is not None:
+                pct = round(cval / total_inst * 100, 1) if total_inst > 0 else 0
+                components[label] = f"{cval}/{total_inst} ({pct}%)"
+            else:
+                components[label] = int(cval) if cval is not None else 0
+    except Exception:
+        pass
+
+    # Alert stats
+    try:
+        from src.db.models import AlertLog
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        alert_cnt = await db.execute(
+            select(sqlfunc.count(AlertLog.id)).where(AlertLog.created_at >= cutoff)
+        )
+        components["alerts_7d"] = int(alert_cnt.scalar() or 0)
+    except Exception:
+        components["alerts_7d"] = None
 
     status = "degraded" if checks and healthy else "unhealthy" if not healthy else "ok"
     return {

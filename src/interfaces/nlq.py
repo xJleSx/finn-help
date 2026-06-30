@@ -14,7 +14,6 @@ from sqlalchemy import select
 from src.analysis.ml.news_impact import NewsImpactModel
 from src.analysis.scenario.engine import ScenarioEngine
 from src.db.models import (
-    FundamentalMetric,
     Indicator,
     Instrument,
     MacroIndicator,
@@ -24,6 +23,14 @@ from src.db.models import (
     Price,
 )
 from src.db.models import Signal as SignalModel
+from src.interfaces.response_formatter import (
+    build_enriched_context_block,
+    build_financial_highlights,
+    load_bond_offering,
+    load_company_profile,
+    load_financial_report,
+    load_fundamental_metric,
+)
 from src.llm.router import llm as default_llm
 
 logger = logging.getLogger(__name__)
@@ -396,7 +403,7 @@ class NLQueryEngine:
     def _handle_top_picks(self, query: str, db: Any, user_id: int) -> dict[str, Any]:
         rows = (
             db.execute(
-                select(SignalModel, Instrument.ticker)
+                select(SignalModel, Instrument.ticker, Instrument.id)
                 .join(Instrument, Instrument.id == SignalModel.instrument_id)
                 .order_by(SignalModel.confidence.desc())
                 .limit(10)
@@ -404,13 +411,22 @@ class NLQueryEngine:
             .all()
         )
         signals = []
-        for signal, ticker in rows:
-            signals.append({
+        for signal, ticker, inst_id in rows:
+            entry: dict[str, Any] = {
                 "ticker": ticker,
                 "action": signal.action,
                 "confidence": signal.confidence,
                 "date": signal.date.isoformat() if signal.date else "",
-            })
+            }
+            profile = load_company_profile(db, inst_id)
+            if profile and profile.description:
+                entry["profile"] = profile.description[:150]
+            report = load_financial_report(db, inst_id)
+            if report:
+                fh = build_financial_highlights(report)
+                if fh:
+                    entry["financial_hl"] = fh[0]
+            signals.append(entry)
         return {
             "intent": "top_picks",
             "signals": signals,
@@ -495,24 +511,44 @@ class NLQueryEngine:
             inst, price = row if row else (None, None)
             if not inst:
                 continue
-            fm = (
-                db.execute(
-                    select(FundamentalMetric)
-                    .where(FundamentalMetric.instrument_id == inst.id)
-                    .order_by(FundamentalMetric.date.desc())
-                    .limit(1)
-                )
-                .scalar_one_or_none()
-            )
-            instruments.append({
+            fm = load_fundamental_metric(db, inst.id)
+            profile = load_company_profile(db, inst.id)
+            report = load_financial_report(db, inst.id)
+            bond_offering = load_bond_offering(db, inst.id)
+
+            entry: dict[str, Any] = {
                 "ticker": inst.ticker,
                 "name": inst.full_name,
                 "sector": inst.sector,
                 "price": float(price.close) if price and price.close else None,
-                "pe_ratio": float(fm.pe_ratio) if fm and fm.pe_ratio else None,
-                "market_cap": float(fm.market_cap) if fm and fm.market_cap else None,
-                "eps": float(fm.eps) if fm and fm.eps else None,
-            })
+            }
+            if fm:
+                entry.update({
+                    "pe_ratio": float(fm.pe_ratio) if fm.pe_ratio else None,
+                    "pb_ratio": float(fm.pb_ratio) if fm.pb_ratio else None,
+                    "market_cap": float(fm.market_cap) if fm.market_cap else None,
+                    "eps": float(fm.eps) if fm.eps else None,
+                    "roe": float(fm.roe) if fm.roe else None,
+                })
+            if profile:
+                try:
+                    entry["profile"] = build_enriched_context_block(db, inst)
+                except Exception:
+                    pass
+                if profile.description:
+                    entry["description"] = profile.description[:300]
+            if report:
+                try:
+                    entry["financial_highlights"] = build_financial_highlights(report)
+                except Exception:
+                    pass
+            if bond_offering:
+                try:
+                    from src.interfaces.response_formatter import build_bond_analysis
+                    entry["bond_analysis"] = build_bond_analysis(bond_offering)
+                except Exception:
+                    pass
+            instruments.append(entry)
         return {
             "intent": "instrument_info",
             "instruments": instruments,
@@ -576,14 +612,23 @@ class NLQueryEngine:
                 )
                 .scalar_one_or_none()
             )
-            instruments.append({
+            fm = load_fundamental_metric(db, inst.id)
+            entry: dict[str, Any] = {
                 "ticker": inst.ticker,
                 "name": inst.full_name,
                 "sector": inst.sector,
                 "price": float(price.close) if price and price.close else None,
                 "rsi": float(ind.rsi) if ind and ind.rsi else None,
                 "atr": float(ind.atr) if ind and ind.atr else None,
-            })
+            }
+            if fm:
+                entry.update({
+                    "pe_ratio": float(fm.pe_ratio) if fm.pe_ratio else None,
+                    "pb_ratio": float(fm.pb_ratio) if fm.pb_ratio else None,
+                    "market_cap": float(fm.market_cap) if fm.market_cap else None,
+                    "roe": float(fm.roe) if fm.roe else None,
+                })
+            instruments.append(entry)
         return {
             "intent": "compare",
             "instruments": instruments,
@@ -633,6 +678,10 @@ class NLQueryEngine:
         for s in data["signals"]:
             conf = s.get("confidence", 0) or 0
             lines.append(f"   • {s['ticker']} — {s['action']} ({conf * 100:.0f}%)")
+            if s.get("profile"):
+                lines.append(f"     {s['profile']}")
+            if s.get("financial_hl"):
+                lines.append(f"     {s['financial_hl']}")
         return "\n".join(lines)
 
     def _format_risk_metrics(self, data: dict[str, Any]) -> str:
@@ -663,14 +712,26 @@ class NLQueryEngine:
         lines = [f"ℹ️ Instrument Info ({data['count']} found):"]
         for inst in data["instruments"]:
             lines.append(f"   • {inst['ticker']} — {inst.get('name', '?')}")
+            if inst.get("description"):
+                lines.append(f"     {inst['description']}")
             if inst.get("sector"):
-                lines.append(f"     Sector: {inst['sector']}")
+                lines.append(f"     Отрасль: {inst['sector']}")
             if inst.get("price") is not None:
-                lines.append(f"     Price: {inst['price']:.2f} ₽")
+                lines.append(f"     Цена: {inst['price']:.2f} ₽")
+            if inst.get("market_cap") is not None:
+                lines.append(f"     Капитализация: {inst['market_cap']:,.0f} ₽")
             if inst.get("pe_ratio") is not None:
                 lines.append(f"     P/E: {inst['pe_ratio']:.2f}")
-            if inst.get("market_cap") is not None:
-                lines.append(f"     Market Cap: {inst['market_cap']:,.0f} ₽")
+            if inst.get("pb_ratio") is not None:
+                lines.append(f"     P/B: {inst['pb_ratio']:.2f}")
+            if inst.get("eps") is not None:
+                lines.append(f"     EPS: {inst['eps']:.2f} ₽")
+            if inst.get("roe") is not None:
+                lines.append(f"     ROE: {inst['roe']:.1f}%")
+            for hl in inst.get("financial_highlights", []):
+                lines.append(f"     {hl}")
+            for ba in inst.get("bond_analysis", []):
+                lines.append(f"     {ba}")
         return "\n".join(lines)
 
     def _format_macro_query(self, data: dict[str, Any]) -> str:
@@ -691,9 +752,17 @@ class NLQueryEngine:
         for inst in data.get("instruments", []):
             lines.append(f"   • {inst['ticker']} ({inst.get('name', '?')})")
             if inst.get("sector"):
-                lines.append(f"     Sector: {inst['sector']}")
+                lines.append(f"     Отрасль: {inst['sector']}")
             if inst.get("price") is not None:
-                lines.append(f"     Price: {inst['price']:.2f} ₽")
+                lines.append(f"     Цена: {inst['price']:.2f} ₽")
+            if inst.get("market_cap") is not None:
+                lines.append(f"     Капитализация: {inst['market_cap']:,.0f} ₽")
+            if inst.get("pe_ratio") is not None:
+                lines.append(f"     P/E: {inst['pe_ratio']:.2f}")
+            if inst.get("pb_ratio") is not None:
+                lines.append(f"     P/B: {inst['pb_ratio']:.2f}")
+            if inst.get("roe") is not None:
+                lines.append(f"     ROE: {inst['roe']:.1f}%")
             if inst.get("rsi") is not None:
                 lines.append(f"     RSI: {inst['rsi']:.1f}")
             if inst.get("atr") is not None:

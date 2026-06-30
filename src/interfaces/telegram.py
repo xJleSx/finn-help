@@ -3,6 +3,7 @@ import io
 import logging
 import time
 from collections import OrderedDict
+from functools import wraps
 from typing import Any, Optional, cast
 
 from telegram import Message, Update
@@ -148,6 +149,22 @@ async def _check_cooldown(update: Update) -> bool:
     return True
 
 
+def guard(with_cooldown: bool = False):
+    """Декоратор: проверка доступа, effective_message, опционально cooldown."""
+    def decorator(handler):
+        @wraps(handler)
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            if not await _check_access(update):
+                return
+            if not update.effective_message:
+                return
+            if with_cooldown and not await _check_cooldown(update):
+                return
+            return await handler(update, context)
+        return wrapper
+    return decorator
+
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
@@ -197,11 +214,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await export_portfolio(update, context)
 
 
+@guard()
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
     await update.effective_message.reply_text(
         "\U0001f916 FinAdvisor — финансовый ассистент\n\n"
         "Просто напишите вопрос про акцию:\n"
@@ -234,10 +248,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+@guard(with_cooldown=True)
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message or update.effective_user is None or update.effective_chat is None:
-        return
-    if not await _check_cooldown(update):
+    if update.effective_user is None or update.effective_chat is None:
         return
     uid = update.effective_user.id
     cid = update.effective_chat.id
@@ -252,10 +265,9 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(f"✅ Вы подписаны на {type_names.get(ntype, ntype)}")
 
 
+@guard(with_cooldown=True)
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message or update.effective_user is None:
-        return
-    if not await _check_cooldown(update):
+    if update.effective_user is None:
         return
     uid = update.effective_user.id
     args = context.args or []
@@ -268,11 +280,8 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.effective_message.reply_text("❌ Все подписки отменены")
 
 
+@guard()
 async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
     from src.db.connection import get_session
     from src.db.models import DailyReport
 
@@ -297,11 +306,8 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db.close()
 
 
+@guard()
 async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
     await update.effective_message.reply_text("📆 Формирую недельную сводку...")
     try:
         from src.scheduler.reporting import generate_weekly_report_text
@@ -313,13 +319,8 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text("Не удалось сформировать недельную сводку.")
 
 
+@guard(with_cooldown=True)
 async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
     if not context.args:
         await update.effective_message.reply_text("Укажите сумму: /allocate 100000")
         return
@@ -335,13 +336,8 @@ async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text("Укажите число: /allocate 100000")
 
 
+@guard(with_cooldown=True)
 async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
 
     amount = None
     if context.args:
@@ -394,11 +390,8 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_markdown(chunk)
 
 
+@guard(with_cooldown=True)
 async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
 
     amount: float = 100_000
     if context.args:
@@ -415,11 +408,8 @@ async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_markdown(result.summary())
 
 
+@guard(with_cooldown=True)
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
     args = context.args or []
     if not args:
         await update.effective_message.reply_text("Укажите тикер: /history SBER")
@@ -449,11 +439,8 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db.close()
 
 
+@guard()
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
     if not await _check_cooldown(update):
         return
     args = context.args or []
@@ -464,11 +451,8 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply_with_analysis(update, ticker)
 
 
+@guard()
 async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
     if not await _check_cooldown(update):
         return
 
@@ -490,11 +474,8 @@ async def sectors(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db.close()
 
 
+@guard()
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
     if not await _check_cooldown(update):
         return
     await update.effective_message.reply_text("🏆 Ищу лучшие возможности...")
@@ -504,24 +485,45 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.effective_message.reply_text("Нет данных. Запустите `finn update`.")
             return
 
-        categories: OrderedDict[str, list[Any]] = OrderedDict()
-        for p in picks:
-            cat = p.get("category", "Прочее")
-            if cat not in categories:
-                categories[cat] = []
-            if len(categories[cat]) < 5:
-                categories[cat].append(p)
+        from src.db.connection import get_session
+        from src.interfaces.response_formatter import (
+            build_financial_highlights,
+            load_company_profile,
+            load_financial_report,
+        )
 
-        text = "🏆 *Топ по категориям:*\n\n"
-        for cat, items in categories.items():
-            text += f"▫️ *{cat}*\n"
-            for i, p in enumerate(items, 1):
-                score = p.get("score", 0)
-                text += f"  {i}. *{p['ticker']}* — score {score:.2f}\n"
-                reason = p.get("reason", "")
-                if reason:
-                    text += f"     → {reason[:80]}\n"
-            text += "\n"
+        _db = get_session()
+        try:
+            categories: OrderedDict[str, list[Any]] = OrderedDict()
+            for p in picks:
+                cat = p.get("category", "Прочее")
+                if cat not in categories:
+                    categories[cat] = []
+                if len(categories[cat]) < 5:
+                    categories[cat].append(p)
+
+            text = "🏆 *Топ по категориям:*\n\n"
+            for cat, items in categories.items():
+                text += f"▫️ *{cat}*\n"
+                for i, p in enumerate(items, 1):
+                    score = p.get("score", 0)
+                    text += f"  {i}. *{p['ticker']}* — score {score:.2f}\n"
+                    reason = p.get("reason", "")
+                    if reason:
+                        text += f"     → {reason[:80]}\n"
+                    # enrichment
+                    inst = _db.query(Instrument).filter_by(ticker=p["ticker"]).first()
+                    if inst:
+                        profile = load_company_profile(_db, inst.id)
+                        if profile and profile.description:
+                            text += f"     {profile.description[:180]}\n"
+                        report = load_financial_report(_db, inst.id)
+                        fh = build_financial_highlights(report)
+                        if fh:
+                            text += f"     {fh[0]}\n"
+                text += "\n"
+        finally:
+            _db.close()
 
         await update.effective_message.reply_markdown(text, reply_markup=build_top_keyboard())
     except Exception:
@@ -531,11 +533,8 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+@guard(with_cooldown=True)
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
     try:
         db = get_session()
         try:
@@ -562,11 +561,8 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text("❌ Не удалось загрузить новости.")
 
 
+@guard(with_cooldown=True)
 async def export_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
 
     db = get_session()
     try:
@@ -585,11 +581,8 @@ async def export_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         db.close()
 
 
+@guard(with_cooldown=True)
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
     text = " ".join(context.args) if context.args else ""
     if not text:
         await update.effective_message.reply_text("Задайте вопрос, например: /ask Что думаешь про SBER?")
@@ -805,6 +798,42 @@ async def _reply_with_analysis(update: Update, ticker: str) -> None:
     text = f"{emoji} *{ticker}* — {label}\n"
     text += f"Уверенность: {confidence:.0%}\n"
 
+    # enrichment blocks
+    from src.db.connection import get_session
+    from src.interfaces.response_formatter import (
+        build_corporate_events_block,
+        build_financial_highlights,
+        build_profile_block,
+        load_company_profile,
+        load_financial_report,
+        load_upcoming_events,
+    )
+
+    _db = get_session()
+    try:
+        inst = _db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+        if inst:
+            profile = load_company_profile(_db, inst.id)
+            pb = build_profile_block(profile) if profile else ""
+            if pb:
+                text += f"\n🏢 *Профиль:*\n{pb}\n"
+
+            report = load_financial_report(_db, inst.id)
+            fh = build_financial_highlights(report)
+            if fh:
+                text += "\n📊 *Финансовые highlights:*\n"
+                for hl in fh:
+                    text += f"• {hl}\n"
+
+            events = load_upcoming_events(_db, inst.id, days=90)
+            ce = build_corporate_events_block(events)
+            if ce:
+                text += "\n📅 *Корпоративные события:*\n"
+                for ev in ce:
+                    text += f"• {ev}\n"
+    finally:
+        _db.close()
+
     data_advice = _format_data_advice(fused)
     if data_advice:
         text += f"\n{data_advice}"
@@ -902,11 +931,8 @@ async def _ask_llm_general(update: Update, text: str, ticker_context: str = "") 
         )
 
 
+@guard()
 async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
     if not await _check_cooldown(update):
         return
 
@@ -1121,11 +1147,8 @@ async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+@guard(with_cooldown=True)
 async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
     args = context.args or []
     if len(args) < 1:
         await update.effective_message.reply_text("Укажите тикер: /remove SBER")
@@ -1166,9 +1189,8 @@ async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         db.close()
 
 
+@guard()
 async def social_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
     args = context.args
     ticker = args[0].upper() if args else None
     if not ticker:
@@ -1192,9 +1214,8 @@ async def social_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+@guard()
 async def pulse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
     args = context.args
     author = args[0] if args else None
     if not author:
@@ -1225,11 +1246,8 @@ async def pulse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(f"Не удалось получить данные @{author}")
 
 
+@guard(with_cooldown=True)
 async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
 
     cbr = CBRCollector()
     try:
@@ -1245,11 +1263,8 @@ async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text("\u274c Не удалось получить курсы. Попробуйте позже.")
 
 
+@guard(with_cooldown=True)
 async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
 
     db = get_session()
     try:
@@ -1380,6 +1395,36 @@ async def broadcast_trade(
             logger.warning(f"Failed to send trade to {uid}: {e}")
 
 
+async def broadcast_enrichment_alerts() -> None:
+    if app is None:
+        logger.warning("Bot not running, skipping alert broadcast")
+        return
+
+    from src.alerts.generators import generate_all_alerts, store_alerts
+    from src.db.connection import get_session
+    from src.interfaces.telegram_alerter import AlertNotifier
+
+    db = get_session()
+    try:
+        alerts = generate_all_alerts(db)
+        stored = store_alerts(db, alerts)
+        if stored:
+            logger.info("Enrichment alerts broadcast: %d new", stored)
+
+        notifier = AlertNotifier(app.bot)
+        ns = NotificationService()
+        subscribers = ns.get_subscribers("signal")
+        if not subscribers:
+            return
+        for uid, cid in subscribers:
+            for a in alerts:
+                if a["severity"] < 0.4:
+                    continue
+                await notifier.send_alert(a, chat_id=uid)
+    finally:
+        db.close()
+
+
 app: Optional[Application[Any, Any, Any, Any, Any, Any]] = None
 _scheduler_task: Optional["asyncio.Task[None]"] = None
 
@@ -1390,22 +1435,16 @@ def _stop_scheduler() -> None:
     _sched_stop()
 
 
+@guard(with_cooldown=True)
 async def correlation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
     tickers = list(context.args) if context.args else None
     text = correlation_table(tickers)
     for chunk in _chunk_text(text, 4096):
         await update.effective_message.reply_markdown(chunk)
 
 
+@guard()
 async def whatif(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
     if not await _check_cooldown(update):
         return
     args = context.args or []
@@ -1439,11 +1478,8 @@ async def whatif(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_markdown(chunk)
 
 
+@guard()
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    if not update.effective_message:
-        return
     if not await _check_cooldown(update):
         return
 
@@ -1493,11 +1529,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db.close()
 
 
+@guard(with_cooldown=True)
 async def report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
     msg = await update.effective_message.reply_text("📄 Генерирую отчёт...")
     try:
         from src.reports.weekly_pdf import generate_weekly_report
@@ -1516,11 +1549,8 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await msg.edit_text("❌ Ошибка формирования отчёта.")
 
 
+@guard(with_cooldown=True)
 async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
-        return
-    if not await _check_cooldown(update):
-        return
     from src.trading.execution.audit import get_trade_history
     from src.trading.risk.guards import get_day_pnl
 

@@ -1,5 +1,5 @@
 import logging
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 from typing import Any
 
 import pandas as pd
@@ -446,6 +446,38 @@ async def collect_social_sentiment() -> None:
 
         count = await analyzer.process_new_posts()
         logger.info("Social sentiment: %d signals created", count)
+
+        # Compute social features for all tickers
+        from src.db.connection import get_session as gs2
+        from src.social.features import compute_social_features
+
+        db2 = gs2()
+        try:
+            from src.db.models import Instrument
+
+            tickers = [r.ticker for r in db2.query(Instrument.ticker).all()]
+            for ticker in tickers:
+                try:
+                    compute_social_features(db2, ticker)
+                except Exception:
+                    pass
+            db2.commit()
+        finally:
+            db2.close()
+
+        # Train sentiment evolution model
+        from src.analysis.ml.sentiment_evolution import SentimentEvolutionModel
+
+        try:
+            db3 = gs2()
+            try:
+                model = SentimentEvolutionModel(ticker="__all__")
+                model.train(db3)
+                logger.info("Sentiment evolution model trained")
+            finally:
+                db3.close()
+        except Exception as e:
+            logger.warning("Sentiment evolution training failed: %s", e)
     except Exception as e:
         logger.error("Social sentiment cycle failed: %s", e)
 
@@ -575,3 +607,85 @@ async def collect_corporate_events(db: Session) -> None:
         db.commit()
     finally:
         await collector.close()
+
+
+async def collect_alternative_data(db: Session) -> int:
+    """Collect alternative data (CBR rates, Rosstat, Google Trends)."""
+    from src.collectors.alternative import AlternativeDataCollector
+
+    collector = AlternativeDataCollector()
+    try:
+        data = await collector.fetch_all()
+        points = await collector.store_to_db(db, data)
+        if points:
+            logger.info("Alternative data: %d points stored", len(points))
+        return len(points)
+    finally:
+        await collector.close()
+
+
+async def run_news_summarizer(db: Session) -> str | None:
+    """Cluster and summarize today's news, save digest."""
+    from src.analysis.summarizer import NewsSummarizer
+
+    summarizer = NewsSummarizer()
+    try:
+        digest = summarizer.generate_daily_digest(db)
+        if digest and "No news clusters" not in digest:
+            logger.info("News digest generated (%d chars)", len(digest))
+            return digest
+    except Exception as e:
+        logger.error("News summarizer failed: %s", e)
+    return None
+
+
+async def run_sector_impact_analysis(db: Session) -> int:
+    """Calculate sector impacts from today's news and store sector risk."""
+    from datetime import datetime, timedelta
+
+    from src.data.impact_matrix import ImpactMatrix
+    from src.data.sector_impact_engine import SectorImpactEngine
+    from src.data.sector_mapper import SectorMapper
+
+    engine = SectorImpactEngine(impact_matrix=ImpactMatrix(), sector_mapper=SectorMapper())
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        articles = db.query(News).filter(News.published_at >= cutoff, News.is_relevant).all()
+        processed = 0
+        for article in articles:
+            impacts = engine.calculate_sector_impact_from_news(article, db)
+            if impacts:
+                engine.store_news_sector_impacts(article, impacts, db)
+                processed += 1
+        if processed:
+            engine.calculate_all_sectors_daily_risk(db)
+            logger.info("Sector impact: %d articles processed, risk updated", processed)
+        return processed
+    except Exception as e:
+        logger.error("Sector impact analysis failed: %s", e)
+        return 0
+
+
+async def collect_social_posts(db: Session) -> int:
+    """Collect social media posts (Telegram)."""
+    from src.collectors.social import SocialMediaCollector
+    from src.config import settings
+
+    api_id = getattr(settings, "tg_api_id", None)
+    api_hash = getattr(settings, "tg_api_hash", None)
+    channels = getattr(settings, "tg_channels", "https://t.me/s/imoex_talks")
+    if not api_id or not api_hash:
+        logger.warning("tg_api_id/tg_api_hash not configured, skipping social collection")
+        return 0
+
+    collector = SocialMediaCollector(api_id=api_id, api_hash=api_hash)
+    try:
+        for ch in channels.split(","):
+            ch = ch.strip()
+            msgs = await collector.collect_telegram(db, ch, limit=30)
+            if msgs:
+                logger.info("Social posts: %d from %s", len(msgs), ch)
+        return 0
+    except Exception as e:
+        logger.error("Social post collection failed: %s", e)
+        return 0
