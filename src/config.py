@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     ml_sentiment_horizons: str = "3,7"
     ml_sentiment_days_back: int = 365
 
+    ml_hpo_enabled: bool = False
+    ml_hpo_trials: int = 20
+
     ml_anomaly_volume_contamination: float = 0.1
     ml_anomaly_sentiment_contamination: float = 0.1
     ml_anomaly_autoencoder_contamination: float = 0.1
@@ -104,6 +107,13 @@ class Settings(BaseSettings):
     alert_cooldown_minutes: int = 60
     alert_min_impact_abs: float = 0.005
     alert_max_alerts_per_run: int = 20
+
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

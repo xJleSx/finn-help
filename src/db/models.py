@@ -373,6 +373,24 @@ class Notification(Base):
     )
 
 
+class ChannelPreference(Base):
+    __tablename__ = "channel_preferences"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    channel = Column(String(20), nullable=False)
+    enabled = Column(Boolean, default=True)
+    min_severity = Column(String(20), default="LOW")
+    quiet_hours_start = Column(String(5), nullable=True)
+    quiet_hours_end = Column(String(5), nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "channel", name="uq_user_channel"),
+    )
+
+
 class AlertLog(Base):
     __tablename__ = "alert_log"
 
