@@ -1,6 +1,6 @@
 import logging
-from dataclasses import dataclass
-from typing import Any, Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal, Optional
 
 import pandas as pd
 
@@ -15,6 +15,34 @@ PROFILES: dict[Profile, dict[str, Any]] = {
 }
 
 ENTRY_ATR_FACTOR = 0.3
+
+CONFIDENCE_TO_WIDTH: dict[float, float] = {
+    0.0: 0.50,
+    0.3: 0.30,
+    0.5: 0.20,
+    0.7: 0.10,
+    0.9: 0.05,
+}
+
+
+def _interval_width(confidence: float) -> float:
+    keys = sorted(CONFIDENCE_TO_WIDTH.keys())
+    if confidence <= keys[0]:
+        return CONFIDENCE_TO_WIDTH[keys[0]]
+    if confidence >= keys[-1]:
+        return CONFIDENCE_TO_WIDTH[keys[-1]]
+    for i in range(len(keys) - 1):
+        if keys[i] <= confidence <= keys[i + 1]:
+            ratio = (confidence - keys[i]) / (keys[i + 1] - keys[i])
+            return CONFIDENCE_TO_WIDTH[keys[i]] + ratio * (CONFIDENCE_TO_WIDTH[keys[i + 1]] - CONFIDENCE_TO_WIDTH[keys[i]])
+    return 0.20
+
+
+@dataclass
+class PredictionInterval:
+    lower: float
+    upper: float
+    confidence: float
 
 
 @dataclass
@@ -39,6 +67,7 @@ class TradePlan:
     stop_loss: float
     trailing_after: float
     risk_reward: float
+    prediction_interval: Optional[PredictionInterval] = None
 
 
 def compute_entry_zone(close: float, sma20: float, atr: float) -> EntryZone:
@@ -125,6 +154,7 @@ def build_trade_plan(
     df: pd.DataFrame,
     side: Literal["buy", "sell"] = "buy",
     profile: Profile = "balanced",
+    confidence: Optional[float] = None,
 ) -> TradePlan:
     entry_zone = compute_entry_zone(close, sma20, atr)
     support, resistance = compute_support_resistance(df)
@@ -145,20 +175,39 @@ def build_trade_plan(
     )
     risk_reward = compute_risk_reward(entry_price, targets, stop_loss)
 
+    prediction_interval = None
+    if confidence is not None and targets:
+        width = _interval_width(confidence)
+        mid = targets[0].level
+        interval = PredictionInterval(
+            lower=round(mid * (1 - width), 2),
+            upper=round(mid * (1 + width), 2),
+            confidence=round(confidence, 2),
+        )
+        prediction_interval = interval
+
     return TradePlan(
         entry_zone=entry_zone,
         targets=targets,
         stop_loss=stop_loss,
         trailing_after=trailing_after,
         risk_reward=risk_reward,
+        prediction_interval=prediction_interval,
     )
 
 
 def to_dict(plan: TradePlan) -> dict[str, Any]:
-    return {
+    result: dict[str, Any] = {
         "entry_zone": {"low": plan.entry_zone.low, "high": plan.entry_zone.high, "current": plan.entry_zone.current},
         "targets": [{"level": t.level, "type": t.type, "return_pct": t.return_pct, "rr": t.rr} for t in plan.targets],
         "stop_loss": plan.stop_loss,
         "trailing_after": plan.trailing_after,
         "risk_reward": plan.risk_reward,
     }
+    if plan.prediction_interval is not None:
+        result["prediction_interval"] = {
+            "lower": plan.prediction_interval.lower,
+            "upper": plan.prediction_interval.upper,
+            "confidence": plan.prediction_interval.confidence,
+        }
+    return result

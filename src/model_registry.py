@@ -183,6 +183,52 @@ def delete_model(name: str, version: Optional[str] = None) -> None:
     logger.info("Model %s version %s deleted", name, version or "all")
 
 
+def tag_version(name: str, version: str, tags: list[str]) -> None:
+    registry = _load_registry()
+    if name not in registry:
+        raise ValueError(f"Model '{name}' not found in registry")
+    meta = next((v for v in registry[name]["versions"] if v["version"] == version), None)
+    if not meta:
+        raise ValueError(f"Version '{version}' not found for model '{name}'")
+    existing = meta.get("tags", [])
+    meta["tags"] = list(set(existing + tags))
+    _save_registry(registry)
+    logger.info("Model %s version %s tagged: %s", name, version, tags)
+
+
+def set_ab_test_meta(name: str, version: str, test_id: str, variant: str, metrics: Optional[dict[str, Any]] = None) -> None:
+    registry = _load_registry()
+    if name not in registry:
+        raise ValueError(f"Model '{name}' not found in registry")
+    meta = next((v for v in registry[name]["versions"] if v["version"] == version), None)
+    if not meta:
+        raise ValueError(f"Version '{version}' not found for model '{name}'")
+    meta["ab_test"] = {
+        "test_id": test_id,
+        "variant": variant,
+        "metrics": metrics or {},
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _save_registry(registry)
+    logger.info("Model %s version %s AB test set: %s/%s", name, version, test_id, variant)
+
+
+def rollback(name: str, n_versions: int = 1) -> str | None:
+    registry = _load_registry()
+    if name not in registry:
+        raise ValueError(f"Model '{name}' not found in registry")
+    versions = sorted(registry[name]["versions"], key=lambda v: v["version"], reverse=True)
+    if len(versions) <= 1:
+        logger.warning("Cannot rollback %s: only %d version(s)", name, len(versions))
+        return None
+    target_idx = min(n_versions, len(versions) - 1)
+    target = versions[target_idx]
+    registry[name]["latest"] = target["version"]
+    _save_registry(registry)
+    logger.info("Rolled back %s from %s to %s", name, versions[0]["version"], target["version"])
+    return target["version"]
+
+
 def cleanup_old_versions(name: str, keep: int = 3) -> None:
     registry = _load_registry()
     if name not in registry:
