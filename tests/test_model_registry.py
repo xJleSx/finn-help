@@ -10,7 +10,10 @@ from src.model_registry import (
     get_model_metrics,
     list_models,
     load_model,
+    rollback,
     save_model,
+    set_ab_test_meta,
+    tag_version,
 )
 
 
@@ -96,3 +99,43 @@ class TestModelRegistry:
         save_model(model, "hash_model")
         loaded = load_model("hash_model")
         assert loaded["secret"] == 42
+
+    def test_tag_version(self):
+        v = save_model({"x": 1}, "tag_model")
+        tag_version("tag_model", v, ["production"])
+        meta = list_models()
+        m = next(m for m in meta if m["name"] == "tag_model")
+        assert m["latest_version"] == v
+
+    def test_tag_version_nonexistent_model(self):
+        with pytest.raises(ValueError, match="not found"):
+            tag_version("no_model", "v1", ["staging"])
+
+    def test_tag_version_nonexistent_version(self):
+        save_model({"x": 1}, "tag_ver_model")
+        with pytest.raises(ValueError, match="not found"):
+            tag_version("tag_ver_model", "bad_version", ["staging"])
+
+    def test_set_ab_test_meta(self):
+        v = save_model({"x": 1}, "ab_model", metrics={"acc": 0.9})
+        set_ab_test_meta("ab_model", v, test_id="test_001", variant="A", metrics={"lift": 0.02})
+        metrics = get_model_metrics("ab_model")
+        assert metrics["acc"] == 0.9
+
+    def test_rollback_basic(self):
+        v1 = save_model({"v": 1}, "rb_model")
+        save_model({"v": 2}, "rb_model")
+        rolled = rollback("rb_model", n_versions=1)
+        assert rolled == v1
+
+        loaded = load_model("rb_model")
+        assert loaded["v"] == 1
+
+    def test_rollback_only_one_version(self):
+        save_model({"v": 1}, "rb_one_model")
+        result = rollback("rb_one_model")
+        assert result is None
+
+    def test_rollback_nonexistent_model(self):
+        with pytest.raises(ValueError, match="not found"):
+            rollback("no_model")

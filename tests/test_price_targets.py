@@ -9,8 +9,10 @@ from src.analysis.ml.price_targets import (
     ENTRY_ATR_FACTOR,
     PROFILES,
     EntryZone,
+    PredictionInterval,
     TakeProfit,
     TradePlan,
+    _interval_width,
     build_trade_plan,
     compute_entry_zone,
     compute_risk_reward,
@@ -218,3 +220,52 @@ class TestProfilesConfig:
     def test_conservative_least_aggressive(self):
         assert PROFILES["conservative"]["stop_atr"] > PROFILES["aggressive"]["stop_atr"]
         assert len(PROFILES["conservative"]["tp_levels"]) < len(PROFILES["aggressive"]["tp_levels"])
+
+
+class TestPredictionInterval:
+    def test_interval_width_high_confidence(self):
+        width = _interval_width(0.9)
+        assert width == 0.05
+
+    def test_interval_width_low_confidence(self):
+        width = _interval_width(0.0)
+        assert width == 0.50
+
+    def test_interval_width_mid_confidence(self):
+        width = _interval_width(0.5)
+        assert 0.15 <= width <= 0.25
+
+    def test_interval_width_interpolates(self):
+        width = _interval_width(0.6)
+        assert 0.10 <= width <= 0.20
+
+    def test_build_trade_plan_with_confidence(self):
+        df = pd.DataFrame({
+            "close": [100, 102, 101, 103, 105],
+            "low": [99, 100, 100, 102, 104],
+            "high": [101, 103, 102, 104, 106],
+        })
+        plan = build_trade_plan(close=105.0, sma20=103.0, atr=2.0, df=df, confidence=0.85)
+        assert plan.prediction_interval is not None
+        assert plan.prediction_interval.confidence == 0.85
+        assert plan.prediction_interval.lower < plan.prediction_interval.upper
+
+    def test_build_trade_plan_without_confidence(self):
+        df = pd.DataFrame({
+            "close": [100, 102, 101, 103, 105],
+            "low": [99, 100, 100, 102, 104],
+            "high": [101, 103, 102, 104, 106],
+        })
+        plan = build_trade_plan(close=105.0, sma20=103.0, atr=2.0, df=df)
+        assert plan.prediction_interval is None
+
+    def test_to_dict_includes_prediction_interval(self):
+        df = pd.DataFrame({
+            "close": [100, 102, 101, 103, 105],
+            "low": [99, 100, 100, 102, 104],
+            "high": [101, 103, 102, 104, 106],
+        })
+        plan = build_trade_plan(close=105.0, sma20=103.0, atr=2.0, df=df, confidence=0.85)
+        d = to_dict(plan)
+        assert "prediction_interval" in d
+        assert d["prediction_interval"]["confidence"] == 0.85

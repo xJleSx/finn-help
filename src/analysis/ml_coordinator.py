@@ -153,12 +153,23 @@ class MLCoordinator:
             prophet = self.get_prophet(sym)
             prophet_ok = prophet.train(df)
 
+            news_ok = False
+            try:
+                from src.analysis.ml.news_impact import NewsImpactModel
+
+                nim = NewsImpactModel(ticker=sym)
+                nim_result = nim.train(db, sym)
+                news_ok = nim_result.get("trained", False)
+            except Exception as e:
+                logger.warning("NewsImpact training for %s failed: %s", sym, e)
+
             all_results[sym] = all(ensemble_ok.values()) and prophet_ok
             logger.info(
-                "Model training for %s: ensemble=%s prophet=%s",
+                "Model training for %s: ensemble=%s prophet=%s news=%s",
                 sym,
                 "OK" if all(ensemble_ok.values()) else "partial",
                 "OK" if prophet_ok else "FAIL",
+                "OK" if news_ok else "SKIP",
             )
         return all_results
 
