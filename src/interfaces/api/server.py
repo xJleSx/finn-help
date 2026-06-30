@@ -1,12 +1,13 @@
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Optional
 
+import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import Counter, Histogram, generate_latest
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -16,14 +17,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.core.logging import setup_logging
+from src.interfaces.api.dependencies import get_auth_service
 from src.db.models import Instrument, Price, Signal, User
-from src.interfaces.api.auth import (
-    create_token,
-    get_db,
-    hash_password,
-    require_user,
-    verify_password,
-)
+from src.interfaces.api.auth import get_db, require_user
 from src.interfaces.api.routes.analysis import router as analysis_router
 from src.interfaces.api.routes_instruments import router as instruments_router
 from src.interfaces.api.routes_market import router as market_router
@@ -32,20 +29,25 @@ from src.interfaces.api.schemas import AuthTokenResponse, HealthResponse, UserRe
 from src.scheduler.service import run_forever
 from src.scheduler.service import stop as stop_scheduler
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
+
+HTTP_REQUESTS = Counter("http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"])
+HTTP_LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency", ["method", "endpoint"])
 
 limiter = Limiter(key_func=get_remote_address)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    setup_logging()
     from src.db.connection import init_db
 
     try:
         init_db()
     except Exception as e:
-        logger.warning("DB migration failed (may be OK if tables exist): %s", e)
-    logger.info("Trade mode: DRY_RUN (set ENABLE_TRADING=true to enable AUTO)")
+        log = structlog.get_logger("finn-help")
+        log.warning("db_migration_failed", error=str(e))
+    logger.info("startup.trade_mode", mode="DRY_RUN" if not settings.enable_trading else "AUTO")
     scheduler_task = asyncio.create_task(run_forever())
     yield
     stop_scheduler()
@@ -63,7 +65,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    logger.exception("unhandled_exception", method=request.method, path=request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
@@ -82,10 +84,26 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
+
+@app.middleware("http")
+async def prometheus_middleware(request: Request, call_next: Any) -> Response:
+    with HTTP_LATENCY.labels(method=request.method, endpoint=request.url.path).time():
+        response = await call_next(request)
+    HTTP_REQUESTS.labels(method=request.method, endpoint=request.url.path, status=response.status_code).inc()
+    return response
+
+
 app.include_router(analysis_router)
 app.include_router(instruments_router)
 app.include_router(portfolio_router)
 app.include_router(market_router)
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    from fastapi.responses import PlainTextResponse
+
+    return PlainTextResponse(generate_latest().decode("utf-8"), media_type="text/plain")
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -206,23 +224,17 @@ class RegisterBody(BaseModel):
 
 @app.post("/api/auth/register", response_model=AuthTokenResponse)
 @limiter.limit("5/minute")
-async def register(request: Request, body: RegisterBody, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    result = await db.execute(
-        select(User).where((User.username == body.username) | ((body.email is not None) & (User.email == body.email)))  # type: ignore[operator]
-    )
-    if result.scalar_one_or_none():
-        raise HTTPException(400, "Username or email already taken")
-    user = User(
+async def register(
+    request: Request,
+    body: RegisterBody,
+    svc = Depends(get_auth_service),
+) -> dict[str, Any]:
+    return await svc.register(
         username=body.username,
+        password=body.password,
         email=body.email,
-        hashed_password=hash_password(body.password),
-        risk_profile=body.risk_profile or "balanced",
+        risk_profile=body.risk_profile,
     )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    token = create_token(int(user.id), str(user.username))
-    return {"access_token": token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
 
 
 class LoginBody(BaseModel):
@@ -232,22 +244,17 @@ class LoginBody(BaseModel):
 
 @app.post("/api/auth/login", response_model=AuthTokenResponse)
 @limiter.limit("10/minute")
-async def login(request: Request, body: LoginBody, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    result = await db.execute(select(User).where(User.username == body.username))
-    user = result.scalar_one_or_none()
-    if not user or not verify_password(body.password, str(user.hashed_password)):
-        raise HTTPException(401, "Invalid credentials")
-    token = create_token(int(user.id), str(user.username))
-    return {"access_token": token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
+async def login(
+    request: Request,
+    body: LoginBody,
+    svc = Depends(get_auth_service),
+) -> dict[str, Any]:
+    return await svc.login(username=body.username, password=body.password)
 
 
 @app.get("/api/auth/me", response_model=UserResponse)
-async def get_me(user: User = Depends(require_user)) -> dict[str, Any]:
-    return {
-        "id": int(user.id),
-        "username": str(user.username),
-        "email": str(user.email) if user.email is not None else None,
-        "role": str(user.role),
-        "risk_profile": str(user.risk_profile),
-        "is_active": bool(user.is_active),
-    }
+async def get_me(
+    user: User = Depends(require_user),
+    svc = Depends(get_auth_service),
+) -> dict[str, Any]:
+    return await svc.get_me(user)

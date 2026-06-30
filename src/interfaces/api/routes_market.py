@@ -1,18 +1,18 @@
+from __future__ import annotations
+
 import asyncio
 import json
-import logging
 from collections.abc import AsyncGenerator
-from datetime import date, timedelta
-from typing import Any, cast
+from datetime import date
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+import structlog
+from fastapi import APIRouter, Depends, Query
 from sse_starlette.sse import EventSourceResponse
 
 from src.db.connection import get_session
-from src.db.models import GeoRiskScore, Indicator, Instrument, News, Price, Signal
-from src.interfaces.api.auth import get_db
+from src.db.models import Instrument, Signal
+from src.interfaces.api.dependencies import get_market_service
 from src.interfaces.api.schemas import (
     DivergenceAlert,
     GeoRiskItem,
@@ -20,131 +20,79 @@ from src.interfaces.api.schemas import (
     PriceTargetAlert,
     RebalanceAlert,
 )
-from src.notifications.service import NotificationService
+from src.market.service import MarketService
 
-notification_service = NotificationService()
-
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["market"])
 
 
 @router.get("/api/news", response_model=list[NewsItem])
-async def get_news(limit: int = Query(20, le=100), db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
-    result = await db.execute(select(News).order_by(News.published_at.desc()).limit(limit))
-    news_list = result.scalars().all()
-    return [
-        {
-            "id": n.id,
-            "title": n.title,
-            "summary": n.summary[:300] if n.summary else "",
-            "source": n.source_name,
-            "url": n.url,
-            "published_at": n.published_at.isoformat() if n.published_at else None,
-        }
-        for n in news_list
-    ]
+async def get_news(
+    limit: int = Query(20, le=100),
+    svc: MarketService = Depends(get_market_service),
+) -> list[dict[str, Any]]:
+    return await svc.get_news(limit)
 
 
 @router.get("/api/geo-risk", response_model=list[GeoRiskItem])
-async def get_geo_risk(days: int = Query(30), db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
-    cutoff = date.today() - timedelta(days=days)
-    result = await db.execute(select(GeoRiskScore).where(GeoRiskScore.date >= cutoff).order_by(GeoRiskScore.date))
-    scores = result.scalars().all()
-    return [
-        {
-            "date": s.date.isoformat(),
-            "score": s.score,
-            "components": s.components_json,
-        }
-        for s in scores
-    ]
+async def get_geo_risk(
+    days: int = Query(30),
+    svc: MarketService = Depends(get_market_service),
+) -> list[dict[str, Any]]:
+    return await svc.get_geo_risk(days)
 
 
 @router.get("/api/macro")
-async def get_macro(db: AsyncSession = Depends(get_db)) -> Any:
-    from src.collectors.macro import MacroCollector
-
-    return await MacroCollector.latest_values_async(db)
+async def get_macro(
+    svc: MarketService = Depends(get_market_service),
+) -> Any:
+    return await svc.get_macro()
 
 
 @router.get("/api/sectors/performance")
-async def get_sector_performance(days: int = Query(30, le=365), db: AsyncSession = Depends(get_db)) -> Any:
-    from src.analysis.sector import sector_analyzer
-
-    return await sector_analyzer.compute_sector_performance_async(db, days=days)
+async def get_sector_performance(
+    days: int = Query(30, le=365),
+    svc: MarketService = Depends(get_market_service),
+) -> Any:
+    return await svc.get_sector_performance(days)
 
 
 @router.get("/api/sectors/correlation")
-async def get_sector_correlation(days: int = Query(90, le=365), db: AsyncSession = Depends(get_db)) -> Any:
-    from src.analysis.sector import sector_analyzer
-
-    return await sector_analyzer.compute_sector_correlation_async(db, days=days)
+async def get_sector_correlation(
+    days: int = Query(90, le=365),
+    svc: MarketService = Depends(get_market_service),
+) -> Any:
+    return await svc.get_sector_correlation(days)
 
 
 @router.get("/api/sectors/volatility")
-async def get_sector_volatility(days: int = Query(30, le=365), db: AsyncSession = Depends(get_db)) -> Any:
-    from src.analysis.sector import sector_analyzer
-
-    return await sector_analyzer.compute_sector_volatility_async(db, days=days)
+async def get_sector_volatility(
+    days: int = Query(30, le=365),
+    svc: MarketService = Depends(get_market_service),
+) -> Any:
+    return await svc.get_sector_volatility(days)
 
 
 @router.get("/api/alerts/price-targets", response_model=list[PriceTargetAlert])
-async def get_price_target_alerts() -> list[dict[str, Any]]:
-    alerts = []
-    for a in notification_service.check_price_targets():
-        alerts.append(
-            {
-                "ticker": a.ticker,
-                "current_price": a.current_price,
-                "target_price": a.target_price,
-                "target_type": a.target_type,
-                "triggered_pct": a.triggered_pct,
-            }
-        )
-    return alerts
+async def get_price_target_alerts(
+    svc: MarketService = Depends(get_market_service),
+) -> list[dict[str, Any]]:
+    return await svc.get_price_target_alerts()
 
 
 @router.get("/api/alerts/divergence/{ticker}", response_model=list[DivergenceAlert])
-async def get_divergence_alerts(ticker: str, db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
-    result = await db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
-    inst = result.scalar_one_or_none()
-    if not inst:
-        raise HTTPException(404, "Instrument not found")
-
-    cutoff = date.today() - timedelta(days=90)
-    price_result = await db.execute(
-        select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date)
-    )
-    prices = price_result.scalars().all()
-    closes = [cast(float, p.close) for p in prices if p.close]
-
-    ind_result = await db.execute(
-        select(Indicator).where(Indicator.instrument_id == inst.id, Indicator.date >= cutoff).order_by(Indicator.date)
-    )
-    indicators = ind_result.scalars().all()
-    rsi_vals = [cast(float, i.rsi) for i in indicators if i.rsi is not None]
-    macd_vals = [cast(float, i.macd_hist) for i in indicators if i.macd_hist is not None]
-
-    alerts = notification_service.check_divergence(ticker, closes, rsi_vals, macd_vals)
-    return [
-        {"ticker": a.ticker, "divergence_type": a.divergence_type, "indicator": a.indicator, "strength": a.strength}
-        for a in alerts
-    ]
+async def get_divergence_alerts(
+    ticker: str,
+    svc: MarketService = Depends(get_market_service),
+) -> list[dict[str, Any]]:
+    return await svc.get_divergence_alerts(ticker)
 
 
 @router.get("/api/alerts/rebalance", response_model=list[RebalanceAlert])
-async def get_rebalance_alerts(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
-    alerts = await notification_service.check_rebalance_async()
-    return [
-        {
-            "ticker": a.ticker,
-            "current_pct": a.current_pct,
-            "target_pct": a.target_pct,
-            "deviation_pct": a.deviation_pct,
-            "reason": a.reason,
-        }
-        for a in alerts
-    ]
+async def get_rebalance_alerts(
+    svc: MarketService = Depends(get_market_service),
+) -> list[dict[str, Any]]:
+    return await svc.get_rebalance_alerts()
 
 
 @router.get("/api/events")
@@ -172,7 +120,7 @@ async def event_stream() -> EventSourceResponse:
                 data = await loop.run_in_executor(None, _query_stats)
                 yield {"data": json.dumps(data)}
             except Exception:
-                logger.exception("SSE event error")
+                logger.exception("sse_event_error")
             await asyncio.sleep(60)
 
     return EventSourceResponse(generate())

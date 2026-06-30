@@ -59,8 +59,12 @@ def async_in_memory_db():
     )
     import asyncio
 
+    async def _init() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
     loop = asyncio.new_event_loop()
-    loop.run_until_complete(engine.run_sync(Base.metadata.create_all))
+    loop.run_until_complete(_init())
     yield engine
     loop.run_until_complete(engine.dispose())
     loop.close()
