@@ -9,7 +9,7 @@ from src.alerts.history import AlertHistory
 from src.alerts.preferences import UserAlertPreferences
 from src.alerts.prioritizer import AlertAggregator
 from src.alerts.push import AlertPushService
-from src.db.models import AlertLog
+from src.db.models import AlertLog, MutedAlert
 
 
 class TestAlertHistory:
@@ -246,6 +246,88 @@ class TestUserAlertPreferences:
         assert 1 in prefs._db_preferences
         prefs.clear_cache(user_id=1)
         assert 1 not in prefs._db_preferences
+
+
+class TestMutedAlert:
+    def test_mute_ticker_adds_to_db(self, db_session):
+        prefs = UserAlertPreferences()
+        ok = prefs.mute_ticker(1, "SBER", db_session=db_session)
+        assert ok is True
+        row = db_session.query(MutedAlert).filter_by(user_id=1, ticker="SBER").first()
+        assert row is not None
+
+    def test_mute_ticker_idempotent(self, db_session):
+        prefs = UserAlertPreferences()
+        prefs.mute_ticker(1, "SBER", db_session=db_session)
+        ok = prefs.mute_ticker(1, "SBER", db_session=db_session)
+        assert ok is False
+
+    def test_mute_ticker_uppercases(self, db_session):
+        prefs = UserAlertPreferences()
+        prefs.mute_ticker(1, "sber", db_session=db_session)
+        row = db_session.query(MutedAlert).filter_by(user_id=1, ticker="SBER").first()
+        assert row is not None
+
+    def test_unmute_ticker_removes(self, db_session):
+        prefs = UserAlertPreferences()
+        prefs.mute_ticker(1, "SBER", db_session=db_session)
+        ok = prefs.unmute_ticker(1, "SBER", db_session=db_session)
+        assert ok is True
+        row = db_session.query(MutedAlert).filter_by(user_id=1, ticker="SBER").first()
+        assert row is None
+
+    def test_unmute_nonexistent_returns_false(self, db_session):
+        prefs = UserAlertPreferences()
+        ok = prefs.unmute_ticker(1, "SBER", db_session=db_session)
+        assert ok is False
+
+    def test_get_muted_tickers(self, db_session):
+        prefs = UserAlertPreferences()
+        prefs.mute_ticker(1, "SBER", db_session=db_session)
+        prefs.mute_ticker(1, "GAZP", db_session=db_session)
+        tickers = prefs.get_muted_tickers(1, db_session=db_session)
+        assert sorted(tickers) == ["GAZP", "SBER"]
+
+    def test_get_muted_tickers_empty(self, db_session):
+        prefs = UserAlertPreferences()
+        tickers = prefs.get_muted_tickers(999, db_session=db_session)
+        assert tickers == []
+
+    def test_muted_tickers_appear_in_preferences(self, db_session):
+        prefs = UserAlertPreferences()
+        prefs.mute_ticker(1, "SBER", db_session=db_session)
+        p = prefs.get_preferences(1, db_session=db_session)
+        assert "SBER" in p["muted_tickers"]
+
+    def test_set_preferences_persists(self, db_session):
+        prefs = UserAlertPreferences()
+        prefs.set_preferences(1, db_session=db_session, min_severity="HIGH")
+        p = prefs.get_preferences(1, db_session=db_session)
+        assert p["min_severity"] == "HIGH"
+
+    def test_set_preferences_quiet_hours(self, db_session):
+        prefs = UserAlertPreferences()
+        prefs.set_preferences(1, db_session=db_session, quiet_hours_start="22:00", quiet_hours_end="08:00")
+        p = prefs.get_preferences(1, db_session=db_session)
+        assert p["quiet_hours_start"] == "22:00"
+        assert p["quiet_hours_end"] == "08:00"
+
+    def test_set_preferences_clear_quiet_hours(self, db_session):
+        prefs = UserAlertPreferences()
+        prefs.set_preferences(1, db_session=db_session, quiet_hours_start="22:00", quiet_hours_end="08:00")
+        prefs.set_preferences(1, db_session=db_session, quiet_hours_start=None, quiet_hours_end=None)
+        p = prefs.get_preferences(1, db_session=db_session)
+        assert p["quiet_hours_start"] is None
+        assert p["quiet_hours_end"] is None
+
+    def test_mute_without_db_session_returns_false(self):
+        prefs = UserAlertPreferences()
+        ok = prefs.mute_ticker(1, "SBER")
+        assert ok is False
+
+    def test_set_preferences_without_db_does_not_crash(self):
+        prefs = UserAlertPreferences()
+        prefs.set_preferences(1, min_severity="HIGH")
 
 
 class TestAlertPushService:

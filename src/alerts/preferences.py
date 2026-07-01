@@ -5,6 +5,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from src.db.models import MutedAlert, UserSetting
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,8 +31,6 @@ class UserAlertPreferences:
 
         if db_session is not None:
             try:
-                from src.db.models import UserSetting
-
                 rows = db_session.query(UserSetting).filter(
                     UserSetting.key.like(f"alert_prefs_{user_id}_%")
                 ).all()
@@ -44,11 +44,85 @@ class UserAlertPreferences:
                         prefs["quiet_hours_start"] = row.value
                     elif key == "quiet_hours_end":
                         prefs["quiet_hours_end"] = row.value
+
+                muted_rows = (
+                    db_session.query(MutedAlert.ticker)
+                    .filter_by(user_id=user_id)
+                    .all()
+                )
+                for row in muted_rows:
+                    if row.ticker not in prefs["muted_tickers"]:
+                        prefs["muted_tickers"].append(row.ticker)
             except Exception:
                 logger.warning("Failed to load alert prefs for user %d", user_id)
 
         self._db_preferences[user_id] = prefs
         return prefs
+
+    def set_preferences(
+        self, user_id: int, db_session: Any | None = None, **kwargs: Any,
+    ) -> None:
+        if db_session is None:
+            logger.warning("set_preferences: no db_session provided")
+            return
+        for key, value in kwargs.items():
+            if key not in ("min_severity", "quiet_hours_start", "quiet_hours_end"):
+                continue
+            setting_key = f"alert_prefs_{user_id}_{key}"
+            row = db_session.query(UserSetting).filter_by(key=setting_key).first()
+            if value is not None:
+                if row:
+                    row.value = str(value)
+                else:
+                    db_session.add(UserSetting(key=setting_key, value=str(value)))
+            else:
+                if row:
+                    db_session.delete(row)
+        db_session.commit()
+        self.clear_cache(user_id)
+
+    def mute_ticker(self, user_id: int, ticker: str, db_session: Any | None = None) -> bool:
+        if db_session is None:
+            return False
+        ticker = ticker.upper()
+        existing = (
+            db_session.query(MutedAlert)
+            .filter_by(user_id=user_id, ticker=ticker, alert_type=None)
+            .first()
+        )
+        if existing:
+            return False
+        db_session.add(MutedAlert(user_id=user_id, ticker=ticker, alert_type=None))
+        db_session.commit()
+        self.clear_cache(user_id)
+        return True
+
+    def unmute_ticker(self, user_id: int, ticker: str, db_session: Any | None = None) -> bool:
+        if db_session is None:
+            return False
+        ticker = ticker.upper()
+        rows = (
+            db_session.query(MutedAlert)
+            .filter_by(user_id=user_id, ticker=ticker)
+            .all()
+        )
+        if not rows:
+            return False
+        for row in rows:
+            db_session.delete(row)
+        db_session.commit()
+        self.clear_cache(user_id)
+        return True
+
+    def get_muted_tickers(self, user_id: int, db_session: Any | None = None) -> list[str]:
+        if db_session is None:
+            return []
+        rows = (
+            db_session.query(MutedAlert.ticker)
+            .filter_by(user_id=user_id)
+            .all()
+        )
+        return list({r.ticker for r in rows})
 
     def filter_alerts(
         self, alerts: list[dict[str, Any]], preferences: dict[str, Any],
