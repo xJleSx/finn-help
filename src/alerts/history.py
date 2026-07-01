@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func as sa_func
+from sqlalchemy import func as sa_func, cast, Date
 
 from src.db.models import AlertLog
 
@@ -131,6 +131,127 @@ class AlertHistory:
             "by_type": dict(by_type),
             "by_severity": dict(by_severity),
         }
+
+    def get_analytics(self, days: int = 30, user_id: int | None = None) -> dict[str, Any]:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        result: dict[str, Any] = {
+            "total": 0,
+            "by_type": {},
+            "by_severity": {},
+            "by_day": {},
+            "top_tickers": [],
+            "read_count": 0,
+            "unread_count": 0,
+            "avg_severity": 0.0,
+        }
+        if self._db is not None:
+            base = self._db.query(AlertLog).filter(AlertLog.created_at >= cutoff)
+            if user_id is not None:
+                base = base.filter(AlertLog.user_id == user_id)
+
+            total = base.count()
+            if total == 0:
+                return result
+
+            type_rows = (
+                base.with_entities(AlertLog.alert_type, sa_func.count(AlertLog.id))
+                .group_by(AlertLog.alert_type)
+                .all()
+            )
+
+            severity_agg = (
+                base.with_entities(
+                    sa_func.avg(AlertLog.severity),
+                    sa_func.count(AlertLog.id),
+                )
+                .first()
+            )
+
+            read_count = base.filter(AlertLog.read.is_(True)).count()
+            unread_count = total - read_count
+
+            day_rows = (
+                base.with_entities(cast(AlertLog.created_at, Date), sa_func.count(AlertLog.id))
+                .group_by(cast(AlertLog.created_at, Date))
+                .order_by(cast(AlertLog.created_at, Date))
+                .all()
+            )
+
+            ticker_rows = (
+                base.with_entities(AlertLog.ticker, sa_func.count(AlertLog.id))
+                .group_by(AlertLog.ticker)
+                .order_by(sa_func.count(AlertLog.id).desc())
+                .limit(10)
+                .all()
+            )
+
+            severity_buckets: dict[str, int] = defaultdict(int)
+            all_severity = base.with_entities(AlertLog.severity).all()
+            for (sev,) in all_severity:
+                if sev < 0.4:
+                    severity_buckets["low"] += 1
+                elif sev < 0.7:
+                    severity_buckets["medium"] += 1
+                else:
+                    severity_buckets["high"] += 1
+
+            result = {
+                "total": total,
+                "by_type": dict(type_rows),
+                "by_severity": dict(severity_buckets),
+                "by_day": {str(r[0]): r[1] for r in day_rows},
+                "top_tickers": [{"ticker": r[0], "count": r[1]} for r in ticker_rows],
+                "read_count": read_count,
+                "unread_count": unread_count,
+                "avg_severity": round(float(severity_agg[0] or 0.0), 2),
+            }
+        else:
+            cutoff_str = cutoff.isoformat()
+            recent = [e for e in self._memory if e.get("timestamp", "") >= cutoff_str]
+            if user_id is not None:
+                recent = [e for e in recent if e.get("user_id") == user_id]
+
+            if not recent:
+                return result
+
+            by_type: dict[str, int] = defaultdict(int)
+            by_day: dict[str, int] = defaultdict(int)
+            ticker_counts: dict[str, int] = defaultdict(int)
+            read_count = sum(1 for e in recent if e.get("read"))
+            severity_buckets = defaultdict(int)
+            severity_sum = 0.0
+
+            for e in recent:
+                by_type[e.get("type", "UNKNOWN")] += 1
+                day = e.get("timestamp", "")[:10]
+                if day:
+                    by_day[day] += 1
+                ticker = e.get("ticker", "")
+                if ticker:
+                    ticker_counts[ticker] += 1
+                sev = e.get("severity", 0)
+                if isinstance(sev, (int, float)):
+                    severity_sum += sev
+                    if sev < 0.4:
+                        severity_buckets["low"] += 1
+                    elif sev < 0.7:
+                        severity_buckets["medium"] += 1
+                    else:
+                        severity_buckets["high"] += 1
+
+            top_tickers = sorted(ticker_counts.items(), key=lambda x: -x[1])[:10]
+
+            result = {
+                "total": len(recent),
+                "by_type": dict(by_type),
+                "by_severity": dict(severity_buckets),
+                "by_day": dict(by_day),
+                "top_tickers": [{"ticker": t, "count": c} for t, c in top_tickers],
+                "read_count": read_count,
+                "unread_count": len(recent) - read_count,
+                "avg_severity": round(severity_sum / len(recent), 2) if recent else 0.0,
+            }
+        return result
 
     def _flush_json(self) -> None:
         if self._json_path:
