@@ -83,7 +83,7 @@ class TestGetCached:
             mock_db.close.assert_called_once()
 
     def test_returns_stale(self):
-        from datetime import date, timedelta, datetime
+        from datetime import date, timedelta, datetime, timezone
 
         with (
             patch("src.analysis.feature_store._mem") as mock_mem,
@@ -96,7 +96,7 @@ class TestGetCached:
             row.value_json = {"old": True}
             row.version = 1
             row.ttl_hours = None
-            row.created_at = datetime.utcnow()
+            row.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
             mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = row
             mock_get_session.return_value = mock_db
 
@@ -105,7 +105,7 @@ class TestGetCached:
             mock_db.close.assert_called_once()
 
     def test_returns_fresh(self):
-        from datetime import date, datetime
+        from datetime import date, datetime, timezone
 
         with (
             patch("src.analysis.feature_store._mem") as mock_mem,
@@ -118,7 +118,7 @@ class TestGetCached:
             row.value_json = {"fresh": True}
             row.version = 1
             row.ttl_hours = None
-            row.created_at = datetime.utcnow()
+            row.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
             mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = row
             mock_get_session.return_value = mock_db
 

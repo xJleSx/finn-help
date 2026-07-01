@@ -12,7 +12,7 @@ SYSTEM_PROMPT = """Ты — финансовый ассистент FinAdvisor. 
 6. Если есть bond_offering — извлеки параметры облигации (купон, рейтинг, YTM, мин. заявку) для анализа.
 7. Если есть corporate_events — учитывай предстоящие дивиденды, байбэки, сплиты в оценке рисков.
 8. Сформулируй вывод на основе фактов, а не предположений.
-7. Напиши ответ строго по схеме JSON (см. ниже).
+9. Напиши ответ строго по схеме JSON (см. ниже).
 
 ## СТРОГИЕ ПРАВИЛА
 1. НЕ выдумывай цифры, проценты, цены или даты — используй ТОЛЬКО данные из сигнала.
@@ -125,7 +125,7 @@ USER_TEMPLATE = """Сигнал (JSON):
 
 Ответь строго в формате JSON, как указано в system prompt. Никакого текста вне JSON."""
 
-FEW_SHOT_PREFIX = """
+FEW_SHOT_SUFFIX = """
 ## ПРИМЕРЫ
 
 ### Пример 1: BUY с высокой уверенностью (баланс)
@@ -204,7 +204,7 @@ FEW_SHOT_PREFIX = """
 def build_user_message(signal: dict[str, object]) -> str:
     data = {k: v for k, v in signal.items() if k != "enriched_context"}
     enriched = signal.get("enriched_context")
-    msg = FEW_SHOT_PREFIX + USER_TEMPLATE.format(signal_json=json.dumps(data, ensure_ascii=False, indent=2))
+    msg = FEW_SHOT_SUFFIX + USER_TEMPLATE.format(signal_json=json.dumps(data, ensure_ascii=False, indent=2))
     if enriched:
         msg += f"\n\n## Обогащённые данные по компании\n\n{enriched}"
     return msg

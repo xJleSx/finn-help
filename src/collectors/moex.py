@@ -1,17 +1,11 @@
-import asyncio
 import logging
 from datetime import date, timedelta
-from typing import Any, Optional, Self
+from typing import Any, Optional
 
-import httpx
-
+from src.collectors.base import BaseCollector
 from src.config import settings
 
 logger = logging.getLogger(__name__)
-
-MAX_RETRIES = 3
-RETRY_DELAY = 2.0
-
 
 BOARD_MAP = {
     "stock": "/history/engines/stock/markets/shares/boards/TQBR/securities/{ticker}.json",
@@ -23,45 +17,11 @@ BOARD_MAP = {
 BOND_BOARDS = ["TQCB", "TQBD", "TQOB"]
 
 
-class MOEXCollector:
+class MOEXCollector(BaseCollector):
     BASE = settings.moex_iss_url
 
-    def __init__(self) -> None:
-        self._client: Optional[httpx.AsyncClient] = None
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=30.0)
-        return self._client
-
     async def _fetch_json(self, path: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        url = f"{self.BASE}{path}"
-        client = await self._get_client()
-        last_exc = None
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                resp = await client.get(url, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-                if not isinstance(data, dict):
-                    raise ValueError(f"MOEX API returned non-dict response for {path}: {type(data).__name__}")
-                return data
-            except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as exc:
-                last_exc = exc
-                if attempt < MAX_RETRIES:
-                    delay = RETRY_DELAY * (2 ** (attempt - 1))
-                    logger.warning(
-                        "MOEX API attempt %d/%d failed for %s: %s — retrying in %.1fs",
-                        attempt,
-                        MAX_RETRIES,
-                        path,
-                        exc,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("MOEX API failed after %d attempts for %s: %s", MAX_RETRIES, path, exc)
-        raise last_exc  # type: ignore[misc]
+        return await super()._fetch_json(f"{self.BASE}{path}", params)
 
     @staticmethod
     def _parse_table(data: dict[str, Any], table_name: str) -> list[dict[str, Any]]:
@@ -232,14 +192,3 @@ class MOEXCollector:
             {"iss.meta": "off"},
         )
         return self._parse_table(data, "description")
-
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(self, *args: Any) -> None:
-        await self.close()
-
-    async def close(self) -> None:
-        if self._client:
-            await self._client.aclose()
-            self._client = None

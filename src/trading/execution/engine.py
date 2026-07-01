@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def _notify_trade(record: "OrderRecord", reason: str = "") -> None:
     try:
-        from src.interfaces.telegram import broadcast_trade
+        from src.interfaces.telegram_broadcaster import broadcast_trade
 
         asyncio.ensure_future(
             broadcast_trade(

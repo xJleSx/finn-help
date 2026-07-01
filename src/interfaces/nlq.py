@@ -24,6 +24,7 @@ from src.db.models import (
 )
 from src.db.models import Signal as SignalModel
 from src.interfaces.response_formatter import (
+    build_bond_analysis,
     build_enriched_context_block,
     build_financial_highlights,
     load_bond_offering,
@@ -544,7 +545,6 @@ class NLQueryEngine:
                     pass
             if bond_offering:
                 try:
-                    from src.interfaces.response_formatter import build_bond_analysis
                     entry["bond_analysis"] = build_bond_analysis(bond_offering)
                 except Exception:
                     pass

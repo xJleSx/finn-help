@@ -6,8 +6,7 @@ from collections import OrderedDict
 from typing import Any, Optional, cast
 
 import structlog
-from sqlalchemy import func
-from telegram import BotCommand, Message, ReplyKeyboardMarkup, Update
+from telegram import BotCommand, Message, Update
 from telegram.error import NetworkError
 from telegram.ext import (
     Application,
@@ -30,14 +29,13 @@ from src.analysis.whatif import whatif_macro, whatif_scenario
 from src.cli import run_analysis
 from src.collectors.cbr import CBRCollector
 from src.config import personal, settings
-from src.constants import CACHE_TTL, COOLDOWN_SECONDS, MAX_CACHE_SIZE
+from src.constants import CACHE_TTL, MAX_CACHE_SIZE
 from src.db.connection import get_session
 from src.db.models import GeoRiskScore, Instrument, News, Price, UserSetting
 from src.db.models import Portfolio as PortModel
 from src.db.models import Signal as SignalModel
 from src.interfaces.telegram_helpers import (
     ACTION_EMOJI,
-    PAGES,
     TOTAL_PAGES,
     _chunk_text,
     _extract_allocation_amount,
@@ -45,8 +43,6 @@ from src.interfaces.telegram_helpers import (
     _find_tickers,
     _format_allocation_plan,
     build_analyze_keyboard,
-    build_help_keyboard,
-    build_main_keyboard,
     build_main_reply_keyboard,
     build_reply_keyboard,
     build_top_keyboard,
@@ -56,12 +52,10 @@ from src.interfaces.telegram_helpers import (
 )
 from src.notifications.channels import (
     ALL_CHANNELS,
-    PushMessage,
-    PushManager,
     load_preferences,
     set_preference,
 )
-from src.notifications.service import NotificationService, format_daily_summary_text, format_signal_text
+from src.notifications.service import NotificationService
 from src.portfolio.allocator import allocator
 from src.reports import generate_portfolio_csv
 
@@ -71,7 +65,6 @@ from src.interfaces.telegram_guard import (
     analysis_cache,
     _check_access,
     _check_cooldown,
-    _load_allowed_ids,
     guard,
 )
 
@@ -1410,17 +1403,6 @@ async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.effective_message.reply_text("Нет данных. Запустите daily update.")
     finally:
         db.close()
-
-
-from src.interfaces.telegram_broadcaster import (
-    broadcast_signal,
-    broadcast_dividends,
-    broadcast_daily_summary,
-    broadcast_trade,
-    broadcast_enrichment_alerts,
-    broadcast_author_posts,
-    broadcast_today_signals,
-)
 
 
 app: Optional[Application[Any, Any, Any, Any, Any, Any]] = None

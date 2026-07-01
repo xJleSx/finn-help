@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional, cast
 
 from sqlalchemy import delete, func, select
@@ -112,7 +112,7 @@ def _is_stale(row: FeatureCache, max_age_days: int, version: int) -> bool:
     if row.version != version:
         return True
     if row.ttl_hours is not None:
-        if row.created_at and (datetime.utcnow() - row.created_at).total_seconds() > row.ttl_hours * 3600:
+        if row.created_at and (datetime.now(timezone.utc).replace(tzinfo=None) - row.created_at).total_seconds() > row.ttl_hours * 3600:
             return True
     age = (date.today() - row.date).days
     if age > max_age_days:
