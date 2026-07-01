@@ -391,6 +391,20 @@ class ChannelPreference(Base):
     )
 
 
+class MutedAlert(Base):
+    __tablename__ = "muted_alerts"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    ticker = Column(String(20), nullable=False)
+    alert_type = Column(String(20), nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "ticker", "alert_type", name="uq_user_muted_alert"),
+    )
+
+
 class AlertLog(Base):
     __tablename__ = "alert_log"
 
