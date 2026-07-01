@@ -2,7 +2,7 @@ import asyncio
 import io
 import time
 from collections import OrderedDict
-from functools import wraps
+
 from typing import Any, Optional, cast
 
 import structlog
@@ -67,9 +67,13 @@ from src.reports import generate_portfolio_csv
 
 logger = structlog.get_logger(__name__)
 
-analysis_cache: OrderedDict[str, tuple[float, dict[str, Any] | None, str]] = OrderedDict()
-
-_user_cooldowns: dict[int, float] = {}
+from src.interfaces.telegram_guard import (
+    analysis_cache,
+    _check_access,
+    _check_cooldown,
+    _load_allowed_ids,
+    guard,
+)
 
 DETAILED_KEYWORDS = {
     "анализ",
@@ -122,62 +126,7 @@ DETAILED_KEYWORDS = {
 TICKER, QUANTITY, PRICE = range(3)
 
 
-def _load_allowed_ids() -> set[int]:
-    raw = settings.telegram_allowed_ids
-    if not raw:
-        return set()
-    ids: set[int] = set()
-    for part in raw.split(","):
-        part = part.strip()
-        if part.isdigit():
-            ids.add(int(part))
-    return ids
 
-
-async def _check_access(update: Update) -> bool:
-    allowed = _load_allowed_ids()
-    if not allowed:
-        return True
-    uid = update.effective_user.id if update.effective_user else 0
-    if uid in allowed:
-        return True
-    if update.effective_message:
-        await update.effective_message.reply_text("⛔ Доступ запрещён. Ваш Telegram ID не в списке разрешённых.")
-    return False
-
-
-async def _check_cooldown(update: Update) -> bool:
-    uid = update.effective_user.id if update.effective_user else 0
-    now = time.time()
-    # periodic cleanup: remove entries older than 1 hour
-    if len(_user_cooldowns) > 1000:
-        cutoff = now - 3600
-        stale = [k for k, v in _user_cooldowns.items() if v < cutoff]
-        for k in stale:
-            del _user_cooldowns[k]
-    last = _user_cooldowns.get(uid, 0)
-    if now - last < COOLDOWN_SECONDS:
-        if update.effective_message:
-            await update.effective_message.reply_text("⏳ Подождите немного перед следующим запросом.")
-        return False
-    _user_cooldowns[uid] = now
-    return True
-
-
-def guard(with_cooldown: bool = False):
-    """Декоратор: проверка доступа, effective_message, опционально cooldown."""
-    def decorator(handler):
-        @wraps(handler)
-        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-            if not await _check_access(update):
-                return
-            if not update.effective_message:
-                return
-            if with_cooldown and not await _check_cooldown(update):
-                return
-            return await handler(update, context)
-        return wrapper
-    return decorator
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1949,6 +1898,146 @@ async def quiet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @guard(with_cooldown=True)
+async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user is None:
+        return
+    uid = update.effective_user.id
+    args = context.args or []
+    db = get_session()
+    try:
+        from src.db.models import SmartAlertRule
+
+        if not args or args[0] == "list":
+            rules = (
+                db.query(SmartAlertRule)
+                .filter(
+                    SmartAlertRule.user_id == uid,
+                    SmartAlertRule.rule_type == "price",
+                )
+                .all()
+            )
+            if rules:
+                lines = ["<b>💰 Price alerts</b>"]
+                for r in rules:
+                    direction = ">" if r.condition == "gt" else "<" if r.condition == "lt" else r.condition
+                    status = "✅" if r.enabled else "❌"
+                    name = f" ({html_escape(r.name)})" if r.name else ""
+                    lines.append(f"{status} <b>{html_escape(r.ticker)}</b> {direction} {r.threshold}{name}")
+                await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
+            else:
+                await update.effective_message.reply_text("Нет price-алертов. Создайте: /price add TICKER > 250")
+            return
+
+        if args[0] == "add":
+            if len(args) < 4:
+                await update.effective_message.reply_text(
+                    "Использование: /price add TICKER > 250 [название]\n"
+                    "Например: /price add SBER > 300"
+                )
+                return
+            ticker = args[1].upper()
+            condition = "gt" if args[2] == ">" else "lt" if args[2] == "<" else "gte" if args[2] == ">=" else "lte" if args[2] == "<=" else "eq"
+            try:
+                threshold = float(args[3])
+            except ValueError:
+                await update.effective_message.reply_text("Порог должен быть числом")
+                return
+            name = " ".join(args[4:]) if len(args) > 4 else None
+            existing = (
+                db.query(SmartAlertRule)
+                .filter(
+                    SmartAlertRule.user_id == uid,
+                    SmartAlertRule.ticker == ticker,
+                    SmartAlertRule.rule_type == "price",
+                    SmartAlertRule.condition == condition,
+                    SmartAlertRule.threshold == threshold,
+                )
+                .first()
+            )
+            if existing:
+                await update.effective_message.reply_text(f"ℹ️ Такой price-алерт уже существует (id={existing.id})")
+                return
+            rule = SmartAlertRule(
+                user_id=uid, name=name, rule_type="price",
+                ticker=ticker, condition=condition, threshold=threshold, enabled=True,
+            )
+            db.add(rule)
+            db.commit()
+            direction = ">" if condition == "gt" else "<" if condition == "lt" else condition
+            await update.effective_message.reply_text(
+                f"✅ Price-алерт: <b>{html_escape(ticker)}</b> {direction} {threshold}",
+                parse_mode="HTML",
+            )
+            return
+
+        if args[0] == "remove":
+            if len(args) < 2:
+                await update.effective_message.reply_text("Использование: /price remove <id>")
+                return
+            try:
+                rule_id = int(args[1])
+            except ValueError:
+                await update.effective_message.reply_text("ID должен быть числом")
+                return
+            rule = (
+                db.query(SmartAlertRule)
+                .filter(
+                    SmartAlertRule.id == rule_id,
+                    SmartAlertRule.user_id == uid,
+                    SmartAlertRule.rule_type == "price",
+                )
+                .first()
+            )
+            if not rule:
+                await update.effective_message.reply_text("Price-алерт не найден")
+                return
+            db.delete(rule)
+            db.commit()
+            await update.effective_message.reply_text(f"✅ Price-алерт #{rule_id} удалён")
+            return
+
+        if args[0] == "toggle":
+            if len(args) < 2:
+                await update.effective_message.reply_text("Использование: /price toggle <id>")
+                return
+            try:
+                rule_id = int(args[1])
+            except ValueError:
+                await update.effective_message.reply_text("ID должен быть числом")
+                return
+            rule = (
+                db.query(SmartAlertRule)
+                .filter(
+                    SmartAlertRule.id == rule_id,
+                    SmartAlertRule.user_id == uid,
+                    SmartAlertRule.rule_type == "price",
+                )
+                .first()
+            )
+            if not rule:
+                await update.effective_message.reply_text("Price-алерт не найден")
+                return
+            rule.enabled = not rule.enabled
+            db.commit()
+            status = "включён" if rule.enabled else "отключён"
+            await update.effective_message.reply_text(f"✅ Price-алерт #{rule_id} {status}")
+            return
+
+        await update.effective_message.reply_text(
+            "Команды:\n"
+            "/price list — список price-алертов\n"
+            "/price add TICKER > 250 [название] — создать\n"
+            "/price remove <id> — удалить\n"
+            "/price toggle <id> — вкл/выкл"
+        )
+    except Exception:
+        logger.exception("price_cmd_failed", user_id=uid)
+        await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
+    finally:
+        db.close()
+
+
+@guard(with_cooldown=True)
 async def favorite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user is None:
         return
@@ -2190,6 +2279,7 @@ async def run_bot() -> None:
     app.add_handler(CommandHandler("unmute", unmute_cmd))
     app.add_handler(CommandHandler("muted", muted_cmd))
     app.add_handler(CommandHandler("quiet", quiet_cmd))
+    app.add_handler(CommandHandler("price", price_cmd))
     app.add_handler(CommandHandler("subscribe_author", subscribe_author))
     app.add_handler(CommandHandler("unsubscribe_author", unsubscribe_author))
     app.add_handler(CommandHandler("authors", my_authors))
