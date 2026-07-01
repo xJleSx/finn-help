@@ -23,6 +23,43 @@ def _msk_now() -> datetime:
     return datetime.fromtimestamp(ts, tz=timezone.utc)
 
 
+def _retry_failed_receipts() -> None:
+    from src.db.connection import get_session
+    db = get_session()
+    try:
+        from src.notifications.retry import ReceiptManager
+        mgr = ReceiptManager(db)
+        pending = mgr.get_pending_retries(limit=20)
+        if not pending:
+            return
+        logger.info("Retrying %d failed receipts", len(pending))
+        for receipt in pending:
+            try:
+                if receipt.channel == "email" and receipt.title:
+                    from src.notifications.channels import EmailPushChannel
+                    from src.notifications.channels import PushMessage
+                    channel = EmailPushChannel(db=db)
+                    msg = PushMessage(
+                        title=receipt.title or "",
+                        body=receipt.message or "",
+                        ticker="",
+                        priority=0,
+                        alert_type=receipt.notification_type or "general",
+                    )
+                    success = channel.send("", msg)
+                    if success:
+                        mgr.mark_sent(receipt.id)
+                    else:
+                        mgr.mark_failed(receipt.id, "send returned False")
+            except Exception as exc:
+                logger.exception("receipt_retry_failed", receipt_id=receipt.id)
+                mgr.mark_failed(receipt.id, str(exc)[:500], schedule_retry=True)
+    except Exception:
+        logger.exception("retry_failed_receipts_crashed")
+    finally:
+        db.close()
+
+
 def _check_smart_rules() -> None:
     from src.db.connection import get_session
     db = get_session()
@@ -84,6 +121,10 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
                     await loop.run_in_executor(None, _check_smart_rules)
                 except Exception as e:
                     logger.error("Smart rule check failed: %s", e)
+                try:
+                    await loop.run_in_executor(None, _retry_failed_receipts)
+                except Exception as e:
+                    logger.error("Receipt retry failed: %s", e)
         except Exception as e:
             logger.error("Update cycle failed: %s", e, exc_info=True)
 
