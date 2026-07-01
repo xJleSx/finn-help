@@ -1,0 +1,20 @@
+{% extends "email/base.html.j2" %}
+{% block header %}
+<h1 style="color: #1a73e8; font-size: 20px; margin: 0 0 8px;">📊 Ежедневная сводка — {{ date }}</h1>
+{% endblock %}
+{% block body %}
+<table role="presentation" width="100%" cellpadding="8" cellspacing="0" style="background: #f8f9fa; border-radius: 6px;">
+<tr><td style="color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;">Сигналов</td><td style="font-size: 13px; text-align: right;">{{ total_signals }}</td></tr>
+<tr><td style="color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;">🟢 К покупке</td><td style="font-size: 13px; text-align: right; color: green;">{{ buy_signals }}</td></tr>
+<tr><td style="color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;">🔴 К продаже</td><td style="font-size: 13px; text-align: right; color: red;">{{ sell_signals }}</td></tr>
+<tr><td style="color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;">🌍 GeoRisk</td><td style="font-size: 13px; text-align: right;">{{ geo_risk }}/10</td></tr>
+{% if portfolio_value %}
+<tr><td style="color: #666; font-size: 13px;">💵 Портфель</td><td style="font-size: 13px; text-align: right;">{{ "{:,.0f}".format(portfolio_value).replace(",", " ") }} ₽</td></tr>
+{% endif %}
+</table>
+{% if top_picks %}
+<p style="margin: 12px 0 0; font-size: 13px; color: #555;">
+🏆 Лучшие: {{ top_picks | join(", ") }}
+</p>
+{% endif %}
+{% endblock %}

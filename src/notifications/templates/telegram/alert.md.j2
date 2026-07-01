@@ -1,0 +1,6 @@
+{{ emoji }} <b>{{ ticker }}</b>{% if in_portfolio %} 💰{% endif %}
+{{ title }}
+• Priority: {{ priority }} ({{ "%.2f"|format(priority_score) }})
+• Anomaly: {{ "%.2f"|format(anomaly_score) }}
+• Prediction: {{ "%+.2f%%"|format(predicted_return*100) }}
+{% if reason %}• {{ reason }}{% endif %}

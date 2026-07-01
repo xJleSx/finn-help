@@ -9,10 +9,10 @@ from email.mime.text import MIMEText
 from typing import Any
 
 import structlog
-from jinja2 import Environment, BaseLoader
 
 from src.config import settings
 from src.db.models import ChannelPreference
+from src.notifications.templates.renderer import AlertTemplateRenderer
 
 logger = structlog.get_logger(__name__)
 
@@ -35,26 +35,7 @@ class PushMessage:
     data: dict[str, Any] = field(default_factory=dict)
 
 
-EMAIL_TEMPLATE = """\
-<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-<div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
-<h2 style="color: #1a73e8;">{{ title }}</h2>
-<p>{{ body }}</p>
-{% if ticker %}
-<p style="color: #666; font-size: 0.9em;">Тикер: <strong>{{ ticker }}</strong></p>
-{% endif %}
-<p style="color: #999; font-size: 0.8em; margin-top: 20px;">
-  Finn Advisors — уведомление {{ alert_type }}
-</p>
-</div>
-</body>
-</html>"""
-
-
-_jinja_env = Environment(loader=BaseLoader(), autoescape=True)
-_email_template = _jinja_env.from_string(EMAIL_TEMPLATE)
+_renderer = AlertTemplateRenderer()
 
 
 def _severity_level(priority: str | float) -> int:
@@ -131,17 +112,26 @@ class EmailPushChannel:
     def available(self) -> bool:
         return bool(self._host and self._user and self._password)
 
+    @staticmethod
+    def _resolve_email_template(msg: PushMessage) -> str:
+        alert_type_templates = {
+            "signal": "signal.html.j2",
+            "daily": "daily.html.j2",
+            "dividend": "alert.html.j2",
+            "rebalance": "alert.html.j2",
+            "divergence": "alert.html.j2",
+            "price_target": "alert.html.j2",
+            "general": "alert.html.j2",
+        }
+        return alert_type_templates.get(msg.alert_type, "alert.html.j2")
+
     def send(self, to_email: str, msg: PushMessage) -> bool:
         if not self.available:
             logger.warning("email_channel_not_configured")
             return False
         try:
-            html = _email_template.render(
-                title=msg.title,
-                body=msg.body,
-                ticker=msg.ticker,
-                alert_type=msg.alert_type,
-            )
+            email_template_name = self._resolve_email_template(msg)
+            html = _renderer.render_email(email_template_name, **msg.data, title=msg.title, body=msg.body, ticker=msg.ticker, alert_type=msg.alert_type, priority=msg.priority)
             mime = MIMEMultipart("alternative")
             mime["Subject"] = f"[Finn] {msg.title}"
             mime["From"] = self._from_email
