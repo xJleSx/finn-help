@@ -405,6 +405,22 @@ class MutedAlert(Base):
     )
 
 
+class SmartAlertRule(Base):
+    __tablename__ = "smart_alert_rules"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    name = Column(String(100), nullable=True)
+    rule_type = Column(String(20), nullable=False)
+    ticker = Column(String(20), nullable=False)
+    condition = Column(String(10), nullable=False)
+    threshold = Column(Float, nullable=False)
+    schedule = Column(String(50), nullable=True)
+    enabled = Column(Boolean, default=True)
+    last_triggered = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+
 class AlertLog(Base):
     __tablename__ = "alert_log"
 

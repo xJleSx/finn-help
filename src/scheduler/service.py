@@ -6,6 +6,8 @@ import structlog
 from src.scheduler.reporting import generate_daily_report, take_snapshot
 from src.scheduler.tasks import daily_update, weekly_update
 
+_SMART_RULES_CYCLE = 0
+
 logger = structlog.get_logger(__name__)
 
 UPDATE_INTERVAL = 300  # 5 min (aggressive 24h mode)
@@ -19,6 +21,25 @@ def _msk_now() -> datetime:
     now = datetime.now(timezone.utc)
     ts = now.timestamp() + _MSK_OFFSET
     return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+
+def _check_smart_rules() -> None:
+    from src.db.connection import get_session
+    db = get_session()
+    try:
+        from src.alerts.smart import SmartAlertEngine
+        from src.alerts.history import AlertHistory
+        engine = SmartAlertEngine()
+        triggered = engine.evaluate_rules(db)
+        if triggered:
+            history = AlertHistory(db=db)
+            for alert in triggered:
+                history.log_alert(alert)
+            logger.info("Smart rules triggered %d alerts", len(triggered))
+    except Exception:
+        logger.exception("smart_rules_check_failed")
+    finally:
+        db.close()
 
 
 def _is_time(hour: int, minute: int) -> bool:
@@ -54,6 +75,15 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
             await daily_update()
             elapsed = (datetime.now(timezone.utc) - start).total_seconds()
             logger.info("Update cycle finished in %.0fs", elapsed)
+
+            global _SMART_RULES_CYCLE
+            _SMART_RULES_CYCLE += 1
+            if _SMART_RULES_CYCLE % 6 == 0:
+                try:
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, _check_smart_rules)
+                except Exception as e:
+                    logger.error("Smart rule check failed: %s", e)
         except Exception as e:
             logger.error("Update cycle failed: %s", e, exc_info=True)
 
