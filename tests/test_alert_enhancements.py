@@ -12,6 +12,61 @@ from src.alerts.push import AlertPushService
 from src.db.models import AlertLog, MutedAlert
 
 
+class TestAlertAnalytics:
+    def test_analytics_empty(self):
+        history = AlertHistory()
+        result = history.get_analytics(days=30)
+        assert result["total"] == 0
+        assert result["by_type"] == {}
+        assert result["top_tickers"] == []
+
+    def test_analytics_with_data(self):
+        history = AlertHistory()
+        history._memory = [
+            {"timestamp": "2026-06-30T10:00:00", "type": "HIGH", "ticker": "SBER", "severity": 0.8, "user_id": 1, "read": False, "title": "a", "message": "a"},
+            {"timestamp": "2026-06-29T10:00:00", "type": "MEDIUM", "ticker": "GAZP", "severity": 0.5, "user_id": 1, "read": True, "title": "b", "message": "b"},
+            {"timestamp": "2026-06-28T10:00:00", "type": "LOW", "ticker": "SBER", "severity": 0.2, "user_id": 1, "read": False, "title": "c", "message": "c"},
+        ]
+        result = history.get_analytics(days=30)
+        assert result["total"] == 3
+        assert result["by_type"] == {"HIGH": 1, "MEDIUM": 1, "LOW": 1}
+        assert result["by_severity"] == {"low": 1, "medium": 1, "high": 1}
+        assert result["read_count"] == 1
+        assert result["unread_count"] == 2
+        assert result["by_day"] == {"2026-06-30": 1, "2026-06-29": 1, "2026-06-28": 1}
+        assert len(result["top_tickers"]) == 2
+        assert result["top_tickers"][0]["ticker"] == "SBER"
+
+    def test_analytics_filter_older_than_days(self):
+        history = AlertHistory()
+        history._memory = [
+            {"timestamp": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat(), "type": "HIGH", "ticker": "SBER", "severity": 0.8, "user_id": 1, "read": False, "title": "a", "message": "a"},
+            {"timestamp": (datetime.now(timezone.utc) - timedelta(days=40)).isoformat(), "type": "LOW", "ticker": "GAZP", "severity": 0.2, "user_id": 1, "read": False, "title": "b", "message": "b"},
+        ]
+        result = history.get_analytics(days=30)
+        assert result["total"] == 1
+        assert result["top_tickers"][0]["ticker"] == "SBER"
+
+    def test_analytics_filter_by_user_id(self):
+        history = AlertHistory()
+        history._memory = [
+            {"timestamp": "2026-06-30T10:00:00", "type": "HIGH", "ticker": "SBER", "severity": 0.8, "user_id": 1, "read": False, "title": "a", "message": "a"},
+            {"timestamp": "2026-06-29T10:00:00", "type": "MEDIUM", "ticker": "GAZP", "severity": 0.5, "user_id": 2, "read": True, "title": "b", "message": "b"},
+        ]
+        result = history.get_analytics(days=30, user_id=1)
+        assert result["total"] == 1
+        assert result["top_tickers"][0]["ticker"] == "SBER"
+
+    def test_analytics_avg_severity(self):
+        history = AlertHistory()
+        history._memory = [
+            {"timestamp": "2026-06-30T10:00:00", "type": "LOW", "ticker": "SBER", "severity": 0.2, "user_id": 1, "read": False, "title": "a", "message": "a"},
+            {"timestamp": "2026-06-29T10:00:00", "type": "HIGH", "ticker": "GAZP", "severity": 0.8, "user_id": 1, "read": False, "title": "b", "message": "b"},
+        ]
+        result = history.get_analytics(days=30)
+        assert result["avg_severity"] == 0.5
+
+
 class TestAlertHistory:
     def test_log_alert_memory(self):
         hist = AlertHistory()

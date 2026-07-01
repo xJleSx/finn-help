@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.alerts.engine import AlertEngine
+from src.alerts.history import AlertHistory
 from src.analysis.ml.news_impact import NewsImpactModel
 from src.analysis.scenario.engine import ScenarioEngine
 from src.db.connection import get_session
@@ -189,6 +190,28 @@ async def refresh_alerts(
         logger.exception("alert_refresh_failed")
         raise HTTPException(500, f"Alert refresh failed: {e}")
 
+
+def _get_alert_analytics_sync(days: int, user_id: int | None) -> dict[str, Any]:
+    db = get_session()
+    try:
+        history = AlertHistory(db=db)
+        return history.get_analytics(days=days, user_id=user_id)
+    finally:
+        db.close()
+
+
+@router.get("/api/alerts/analytics")
+async def get_alert_analytics(
+    days: int = Query(30, ge=1, le=365),
+    user_id: int | None = Query(None),
+) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(None, _get_alert_analytics_sync, days, user_id)
+        return result
+    except Exception as e:
+        logger.exception("alert_analytics_failed")
+        raise HTTPException(500, f"Alert analytics failed: {e}")
 
 
 # ── Risk explorer endpoints ──────────────────────────────────────────────
