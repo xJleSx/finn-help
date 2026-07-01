@@ -1,0 +1,10 @@
+📊 <b>Ежедневная сводка — {{ date }}</b>
+
+Сигналов обработано: {{ total_signals }}
+🟢 К покупке: {{ buy_signals }}
+🔴 К продаже: {{ sell_signals }}
+🌍 GeoRisk: {{ geo_risk }}/10
+{% if portfolio_value %}💵 Портфель: {{ "{:,.0f}".format(portfolio_value).replace(",", " ") }} ₽{% endif %}
+{% if top_picks %}
+🏆 Лучшие: {{ top_picks | join(", ") }}
+{% endif %}

@@ -1,0 +1,7 @@
+{{ emoji }} <b>{{ ticker }}</b> — {{ action }} (уверенность: {{ "%.0f"|format(confidence*100) }}%)
+{% if prev_action and prev_action != action %}🔄 Было: {{ prev_action }} → Стало: {{ action }}{% endif %}
+{% for r in reasons[:4] %}
+  • {{ r }}
+{% endfor %}
+
+💡 Доля: до {{ max_portfolio_pct }}% портфеля

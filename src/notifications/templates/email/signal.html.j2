@@ -1,0 +1,22 @@
+{% extends "email/base.html.j2" %}
+{% block header %}
+<h1 style="color: #1a73e8; font-size: 20px; margin: 0 0 8px;">📊 Сигнал: {{ ticker }}</h1>
+{% endblock %}
+{% block body %}
+<table role="presentation" width="100%" cellpadding="8" cellspacing="0" style="background: #f8f9fa; border-radius: 6px;">
+<tr><td style="color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;">Тикер</td><td style="font-size: 13px; text-align: right;"><strong>{{ ticker }}</strong></td></tr>
+<tr><td style="color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;">Действие</td><td style="font-size: 13px; text-align: right; color: {{ 'green' if action in ('BUY','CAUTIOUS_BUY') else 'red' }};"><strong>{{ action }}</strong></td></tr>
+<tr><td style="color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;">Уверенность</td><td style="font-size: 13px; text-align: right;">{{ "%.0f"|format(confidence*100) }}%</td></tr>
+{% if prev_action %}
+<tr><td style="color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;">Было</td><td style="font-size: 13px; text-align: right;">{{ prev_action }}</td></tr>
+{% endif %}
+<tr><td style="color: #666; font-size: 13px;">Макс. доля</td><td style="font-size: 13px; text-align: right;">до {{ max_portfolio_pct }}%</td></tr>
+</table>
+{% if reasons %}
+<p style="margin: 12px 0 0; font-size: 13px; color: #555;">
+{% for r in reasons[:4] %}
+• {{ r }}<br>
+{% endfor %}
+</p>
+{% endif %}
+{% endblock %}

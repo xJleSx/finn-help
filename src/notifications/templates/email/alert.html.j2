@@ -1,0 +1,24 @@
+{% extends "email/base.html.j2" %}
+{% block header %}
+<h1 style="color: {{ severity_color }}; font-size: 20px; margin: 0 0 8px;">{{ severity_emoji }} {{ title }}</h1>
+{% endblock %}
+{% block body %}
+{% if ticker %}
+<p style="font-size: 16px; margin: 0 0 12px;"><strong>{{ ticker }}</strong></p>
+{% endif %}
+<p style="margin: 0 0 12px;">{{ body }}</p>
+{% if reason %}
+<p style="color: #666; font-size: 13px; margin: 0 0 12px; font-style: italic;">{{ reason }}</p>
+{% endif %}
+<table role="presentation" width="100%" cellpadding="8" cellspacing="0" style="background: #f8f9fa; border-radius: 6px; margin: 12px 0;">
+{% if anomaly_score is defined and anomaly_score is not none %}
+<tr><td style="color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;">Аномалия</td><td style="font-size: 13px; text-align: right;">{{ "%.2f"|format(anomaly_score) }}</td></tr>
+{% endif %}
+{% if predicted_return is defined and predicted_return is not none %}
+<tr><td style="color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;">Прогноз</td><td style="font-size: 13px; text-align: right; color: {{ 'green' if predicted_return >= 0 else 'red' }};">{{ "%+.2f%%"|format(predicted_return*100) }}</td></tr>
+{% endif %}
+{% if priority_score is defined and priority_score is not none %}
+<tr><td style="color: #666; font-size: 13px;">Приоритет</td><td style="font-size: 13px; text-align: right;">{{ "%.2f"|format(priority_score) }}</td></tr>
+{% endif %}
+</table>
+{% endblock %}
