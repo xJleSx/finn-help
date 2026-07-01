@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from datetime import date, datetime, timezone
 
 import structlog
@@ -158,22 +157,22 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
                             logger.info("Daily report:\n%s", report.report_text)
 
                     # Broadcast fresh signals to subscribers
-                    from src.interfaces.telegram import broadcast_today_signals
+                    from src.interfaces.telegram_broadcaster import broadcast_today_signals
 
                     await broadcast_today_signals()
 
                     # Broadcast upcoming dividends
-                    from src.interfaces.telegram import broadcast_dividends
+                    from src.interfaces.telegram_broadcaster import broadcast_dividends
 
                     await broadcast_dividends()
 
                     # Broadcast enrichment alerts
-                    from src.interfaces.telegram import broadcast_enrichment_alerts
+                    from src.interfaces.telegram_broadcaster import broadcast_enrichment_alerts
 
                     await broadcast_enrichment_alerts()
 
                     # Broadcast new posts from subscribed Pulse authors
-                    from src.interfaces.telegram import broadcast_author_posts
+                    from src.interfaces.telegram_broadcaster import broadcast_author_posts
 
                     await broadcast_author_posts()
                 except Exception as e:

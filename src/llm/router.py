@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from src.config import settings
 from src.llm import prompts
+from src.llm.rate_limiter import throttled_groq_call
 from src.llm.tools.wolfram import WolframAlphaClient
 
 logger = logging.getLogger(__name__)
@@ -14,7 +15,6 @@ LLM_TEMPERATURE = 0.15
 
 class LLMRouter:
     def __init__(self) -> None:
-        self._groq_client: object | None = None
         self._use_groq = bool(settings.groq_api_key)
         self._groq_model = settings.groq_model
         self._ollama_model = settings.ollama_model
@@ -269,14 +269,17 @@ class LLMRouter:
     ) -> str:
         from groq import AsyncGroq
 
-        client = AsyncGroq(api_key=settings.groq_api_key)
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content or ""
+        async def _do_call() -> str:
+            client = AsyncGroq(api_key=settings.groq_api_key)
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return response.choices[0].message.content or ""
+
+        return await throttled_groq_call(_do_call)
 
     async def _ollama_call(
         self,
@@ -301,38 +304,46 @@ class LLMRouter:
             data: Any = resp.json()
             return cast(str, data.get("message", {}).get("content", ""))
 
-    async def _groq_question(self, system: str, user: str) -> str:
-        return await self._groq_call(
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            model=self._groq_model,
-            temperature=0.3,
-            max_tokens=1024,
+    async def _call(
+        self,
+        system: str,
+        user: str,
+        backend: str,
+        temperature: float = LLM_TEMPERATURE,
+        max_tokens: int = 768,
+        timeout: float = 60.0,
+        model: str | None = None,
+    ) -> str:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        if backend == "groq":
+            return await self._groq_call(
+                messages=messages,
+                model=model or self._groq_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        return await self._ollama_call(
+            messages=messages,
+            model=model or self._ollama_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
         )
 
+    async def _groq_question(self, system: str, user: str) -> str:
+        return await self._call(system, user, backend="groq", temperature=0.3, max_tokens=1024)
+
     async def _ollama_question(self, system: str, user: str) -> str:
-        return await self._ollama_call(
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            model=self._ollama_model,
-            temperature=0.3,
-            max_tokens=1024,
-        )
+        return await self._call(system, user, backend="ollama", temperature=0.3, max_tokens=1024)
 
     async def _groq_advise(self, signal: dict[str, object]) -> str:
         try:
-            result = await self._groq_call(
-                messages=[
-                    {"role": "system", "content": prompts.SYSTEM_PROMPT},
-                    {"role": "user", "content": prompts.build_user_message(signal)},
-                ],
-                model=self._groq_model,
-                temperature=LLM_TEMPERATURE,
-                max_tokens=768,
+            result = await self._call(
+                prompts.SYSTEM_PROMPT, prompts.build_user_message(signal),
+                backend="groq", temperature=LLM_TEMPERATURE, max_tokens=768,
             )
             return result or self._fallback_text(signal)
         except ImportError:
@@ -341,15 +352,9 @@ class LLMRouter:
 
     async def _ollama_advise(self, signal: dict[str, object]) -> str:
         try:
-            result = await self._ollama_call(
-                messages=[
-                    {"role": "system", "content": prompts.SYSTEM_PROMPT},
-                    {"role": "user", "content": prompts.build_user_message(signal)},
-                ],
-                model=self._ollama_model,
-                temperature=LLM_TEMPERATURE,
-                max_tokens=768,
-                timeout=60.0,
+            result = await self._call(
+                prompts.SYSTEM_PROMPT, prompts.build_user_message(signal),
+                backend="ollama", temperature=LLM_TEMPERATURE, max_tokens=768, timeout=60.0,
             )
             return result or self._fallback_text(signal)
         except Exception as e:
@@ -358,14 +363,9 @@ class LLMRouter:
 
     async def _groq_report(self, signal: dict[str, object]) -> str:
         try:
-            result = await self._groq_call(
-                messages=[
-                    {"role": "system", "content": prompts.REPORT_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompts.build_report_message(signal)},
-                ],
-                model=self._groq_model,
-                temperature=0.2,
-                max_tokens=1024,
+            result = await self._call(
+                prompts.REPORT_SYSTEM_PROMPT, prompts.build_report_message(signal),
+                backend="groq", temperature=0.2, max_tokens=1024,
             )
             return result or self._fallback_report(signal)
         except ImportError:
@@ -374,15 +374,9 @@ class LLMRouter:
 
     async def _ollama_report(self, signal: dict[str, object]) -> str:
         try:
-            result = await self._ollama_call(
-                messages=[
-                    {"role": "system", "content": prompts.REPORT_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompts.build_report_message(signal)},
-                ],
-                model=self._ollama_model,
-                temperature=0.2,
-                max_tokens=1024,
-                timeout=60.0,
+            result = await self._call(
+                prompts.REPORT_SYSTEM_PROMPT, prompts.build_report_message(signal),
+                backend="ollama", temperature=0.2, max_tokens=1024, timeout=60.0,
             )
             return result or self._fallback_report(signal)
         except Exception as e:
@@ -627,27 +621,17 @@ class LLMRouter:
         return await self._ollama_social(prompt)
 
     async def _groq_social(self, prompt: str) -> str:
-        result = await self._groq_call(
-            messages=[
-                {"role": "system", "content": "Отвечай JSON-массивом. Компактно."},
-                {"role": "user", "content": prompt},
-            ],
-            model=settings.social_groq_model,
-            temperature=0.05,
-            max_tokens=2048,
+        result = await self._call(
+            "Отвечай JSON-массивом. Компактно.", prompt,
+            backend="groq", model=settings.social_groq_model,
+            temperature=0.05, max_tokens=2048,
         )
         return result or "[]"
 
     async def _ollama_social(self, prompt: str) -> str:
-        result = await self._ollama_call(
-            messages=[
-                {"role": "system", "content": "Отвечай JSON-массивом. Компактно."},
-                {"role": "user", "content": prompt},
-            ],
-            model=self._ollama_model,
-            temperature=0.05,
-            max_tokens=2048,
-            timeout=300.0,
+        result = await self._call(
+            "Отвечай JSON-массивом. Компактно.", prompt,
+            backend="ollama", temperature=0.05, max_tokens=2048, timeout=300.0,
         )
         return result or "[]"
 
