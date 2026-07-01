@@ -421,6 +421,24 @@ class SmartAlertRule(Base):
     created_at = Column(DateTime, default=func.now())
 
 
+class NotificationReceipt(Base):
+    __tablename__ = "notification_receipts"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    channel = Column(String(20), nullable=False)
+    notification_type = Column(String(50), nullable=True)
+    title = Column(String(200), nullable=True)
+    message = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    retry_count = Column(Integer, default=0)
+    max_retries = Column(Integer, default=3)
+    last_error = Column(Text, nullable=True)
+    next_retry_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    delivered_at = Column(DateTime, nullable=True)
+
+
 class AlertLog(Base):
     __tablename__ = "alert_log"
 

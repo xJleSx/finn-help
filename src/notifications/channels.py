@@ -12,6 +12,7 @@ import structlog
 
 from src.config import settings
 from src.db.models import ChannelPreference
+from src.notifications.retry import retry_sync
 from src.notifications.templates.renderer import AlertTemplateRenderer
 
 logger = structlog.get_logger(__name__)
@@ -101,12 +102,13 @@ def should_send(channel_prefs: dict[str, Any], msg: PushMessage) -> bool:
 
 
 class EmailPushChannel:
-    def __init__(self) -> None:
+    def __init__(self, db: Any | None = None) -> None:
         self._host = settings.smtp_host
         self._port = settings.smtp_port
         self._user = settings.smtp_user
         self._password = settings.smtp_password
         self._from_email = settings.smtp_from_email
+        self._db = db
 
     @property
     def available(self) -> bool:
@@ -130,27 +132,31 @@ class EmailPushChannel:
             logger.warning("email_channel_not_configured")
             return False
         try:
-            email_template_name = self._resolve_email_template(msg)
-            html = _renderer.render_email(email_template_name, **msg.data, title=msg.title, body=msg.body, ticker=msg.ticker, alert_type=msg.alert_type, priority=msg.priority)
-            mime = MIMEMultipart("alternative")
-            mime["Subject"] = f"[Finn] {msg.title}"
-            mime["From"] = self._from_email
-            mime["To"] = to_email
-            mime.attach(MIMEText(msg.body, "plain", "utf-8"))
-            mime.attach(MIMEText(html, "html", "utf-8"))
-
-            with smtplib.SMTP(self._host, self._port, timeout=15) as server:
-                if settings.smtp_use_tls:
-                    server.starttls()
-                if self._user:
-                    server.login(self._user, self._password)
-                server.sendmail(self._from_email, [to_email], mime.as_string())
-
-            logger.info("email_sent", to=to_email, subject=msg.title)
+            self._do_send_email(to_email, msg)
             return True
         except Exception as e:
             logger.error("email_failed", to=to_email, error=str(e))
             return False
+
+    @retry_sync(max_attempts=3, base_delay=5.0, backoff=2.0)
+    def _do_send_email(self, to_email: str, msg: PushMessage) -> None:
+        email_template_name = self._resolve_email_template(msg)
+        html = _renderer.render_email(email_template_name, **msg.data, title=msg.title, body=msg.body, ticker=msg.ticker, alert_type=msg.alert_type, priority=msg.priority)
+        mime = MIMEMultipart("alternative")
+        mime["Subject"] = f"[Finn] {msg.title}"
+        mime["From"] = self._from_email
+        mime["To"] = to_email
+        mime.attach(MIMEText(msg.body, "plain", "utf-8"))
+        mime.attach(MIMEText(html, "html", "utf-8"))
+
+        with smtplib.SMTP(self._host, self._port, timeout=15) as server:
+            if settings.smtp_use_tls:
+                server.starttls()
+            if self._user:
+                server.login(self._user, self._password)
+            server.sendmail(self._from_email, [to_email], mime.as_string())
+
+        logger.info("email_sent", to=to_email, subject=msg.title)
 
 
 class WebPushChannel:

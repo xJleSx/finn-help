@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.notifications.retry import ReceiptManager, retry_async
 from src.notifications.service import NotificationService
 from src.notifications.templates.renderer import AlertTemplateRenderer
 
@@ -12,9 +13,10 @@ _renderer = AlertTemplateRenderer()
 
 
 class AlertNotifier:
-    def __init__(self, bot: Any) -> None:
+    def __init__(self, bot: Any, db: Any | None = None) -> None:
         self.bot = bot
         self._notifier = NotificationService()
+        self._receipt_mgr = ReceiptManager(db) if db else None
 
     async def send_alert(self, alert: dict[str, Any], chat_id: int) -> bool:
         text = _renderer.render_telegram(
@@ -24,12 +26,21 @@ class AlertNotifier:
                 "anomaly_score", "predicted_return", "reason", "in_portfolio",
             )},
         )
+        receipt_id = self._create_receipt(alert, "telegram", text)
         try:
-            await self.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+            await self._do_send_telegram(chat_id, text)
+            if receipt_id:
+                self._receipt_mgr.mark_sent(receipt_id)
             return True
         except Exception as e:
             logger.error("Failed to send alert to %s: %s", chat_id, e)
+            if receipt_id:
+                self._receipt_mgr.mark_failed(receipt_id, str(e))
             return False
+
+    @retry_async(max_attempts=3, base_delay=2.0, backoff=2.0)
+    async def _do_send_telegram(self, chat_id: int, text: str) -> None:
+        await self.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
 
     async def send_digest(self, clusters: list[dict[str, Any]], chat_id: int) -> bool:
         if not clusters:
@@ -80,3 +91,15 @@ class AlertNotifier:
         except Exception as e:
             logger.error("Failed to send scenario to %s: %s", chat_id, e)
             return False
+
+    def _create_receipt(self, alert: dict[str, Any], channel: str, message: str) -> int | None:
+        if self._receipt_mgr is None:
+            return None
+        receipt = self._receipt_mgr.create_receipt(
+            user_id=alert.get("user_id", 0),
+            channel=channel,
+            notification_type=alert.get("alert_type", "alert"),
+            title=alert.get("title", ""),
+            message=message[:500],
+        )
+        return receipt.id
