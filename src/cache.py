@@ -16,8 +16,13 @@ def get_redis() -> Any:
         try:
             import redis as redis_mod
 
+            from src.config import settings
+
+            redis_password = getattr(settings, "redis_password", "") or None
             _redis = redis_mod.Redis(
-                host="localhost", port=6379, db=0, decode_responses=True, socket_connect_timeout=2, socket_timeout=2
+                host="localhost", port=6379, db=0,
+                password=redis_password,
+                decode_responses=True, socket_connect_timeout=2, socket_timeout=2,
             )
             _redis.ping()
             logger.info("Redis connected at localhost:6379")

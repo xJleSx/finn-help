@@ -426,8 +426,7 @@ class TestCheckStopLosses:
 
         mock_db = MagicMock()
         order = MagicMock(ticker="SBER")
-        mock_db.query.return_value.filter.return_value.all.return_value = [order]
-        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_db.query.return_value.filter.return_value.all.side_effect = [[order], []]
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             await loop._check_stop_losses()
@@ -439,9 +438,7 @@ class TestCheckStopLosses:
         mock_db = MagicMock()
         order = MagicMock(ticker="SBER")
         inst = MagicMock(id=1)
-        mock_db.query.return_value.filter.return_value.all.return_value = [order]
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [inst]
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = None
+        mock_db.query.return_value.filter.return_value.all.side_effect = [[order], [inst]]
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             await loop._check_stop_losses()
@@ -452,11 +449,13 @@ class TestCheckStopLosses:
 
         mock_db = MagicMock()
         order = MagicMock(ticker="SBER")
-        inst = MagicMock(id=1)
-        price = MagicMock(close=250.0)
-        mock_db.query.return_value.filter.return_value.all.return_value = [order]
-        mock_db.query.return_value.filter_by.return_value.first.side_effect = [inst]
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = price
+        inst = MagicMock(id=1, ticker="SBER")
+        price_row = MagicMock(instrument_id=1, close=250.0)
+        mock_db.query.return_value.filter.return_value.all.side_effect = [
+            [order],
+            [inst],
+        ]
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [price_row]
 
         tracker = MagicMock()
         tracker.execute_triggers = AsyncMock()
@@ -498,9 +497,12 @@ class TestCheckDailyPnl:
         pos2 = MagicMock(instrument_id=20, quantity=3, avg_price=100.0)
         mock_db.query.return_value.all.return_value = [pos1, pos2]
 
-        price_row1 = (250.0,)
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = price_row1
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.side_effect = [price_row1, None]
+        price_row1 = MagicMock(instrument_id=10, close=250.0)
+        price_row2 = MagicMock(instrument_id=20, close=None)
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
+            price_row1,
+            price_row2,
+        ]
 
         with (
             patch("src.trading.execution.loop.get_session", return_value=mock_db),
@@ -510,7 +512,7 @@ class TestCheckDailyPnl:
             patch("src.trading.execution.loop.async_check_daily_loss") as mock_check_loss,
         ):
             await loop._check_daily_pnl()
-            # pos1: 5 * 250 = 1250; pos2: no latest price, uses avg_price 100, 3 * 100 = 300; total 1550
+            # pos1: 5 * 250 = 1250; pos2: no close, uses avg_price 100, 3 * 100 = 300; total 1550
             mock_update_val.assert_called_once_with(1550.0)
             mock_update_dd.assert_called_once_with(1550.0)
             mock_check_loss.assert_called_once_with(0.05)

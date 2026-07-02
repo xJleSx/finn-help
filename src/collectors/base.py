@@ -6,6 +6,20 @@ from abc import ABC
 from typing import Any, Optional, Self
 
 import httpx
+from tenacity import (
+    AsyncRetrying,
+    before_log,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+from src.core.resilience import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerOpenError,
+    get_circuit_breaker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,38 +32,54 @@ class BaseCollector(ABC):
 
     def __init__(self) -> None:
         self._client: Optional[httpx.AsyncClient] = None
+        self._circuit_breaker: CircuitBreaker = get_circuit_breaker(self.__class__.__name__)
 
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
+        if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=self.TIMEOUT)
         return self._client
 
     async def _fetch_json(self, url: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        client = await self._get_client()
-        last_exc = None
-        for attempt in range(1, self.MAX_RETRIES + 1):
-            try:
-                resp = await client.get(url, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-                if not isinstance(data, dict):
-                    raise ValueError(f"Expected dict response, got {type(data).__name__}")
-                return data
-            except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as exc:
-                last_exc = exc
-                if attempt < self.MAX_RETRIES:
-                    delay = self.RETRY_DELAY * (2 ** (attempt - 1))
-                    logger.warning(
-                        "Attempt %d/%d failed for %s: %s — retrying in %.1fs",
-                        attempt, self.MAX_RETRIES, url, exc, delay,
+        async def _do_fetch() -> dict[str, Any]:
+            client = await self._get_client()
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise ValueError(f"Expected dict response, got {type(data).__name__}")
+            return data
+
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(self.MAX_RETRIES),
+            wait=wait_exponential(multiplier=self.RETRY_DELAY, max=30.0),
+            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError, ValueError)),
+            before=before_log(logger, logging.DEBUG),
+            reraise=True,
+        ):
+            with attempt:
+                try:
+                    return await self._circuit_breaker.call(_do_fetch)
+                except CircuitBreakerOpenError:
+                    if attempt.retry_state.attempt_number < self.MAX_RETRIES:
+                        delay = self.RETRY_DELAY * (2 ** (attempt.retry_state.attempt_number - 1))
+                        logger.warning(
+                            "circuit_breaker.open.%s attempt %d/%d, retrying in %.1fs",
+                            self.__class__.__name__,
+                            attempt.retry_state.attempt_number,
+                            self.MAX_RETRIES,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        raise
+                    logger.error(
+                        "circuit_breaker.open.%s exhausted after %d attempts",
+                        self.__class__.__name__,
+                        self.MAX_RETRIES,
                     )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("Failed after %d attempts for %s: %s", self.MAX_RETRIES, url, exc)
-        raise last_exc  # type: ignore[misc]
+                    raise
 
     async def close(self) -> None:
-        if self._client:
+        if self._client and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
 

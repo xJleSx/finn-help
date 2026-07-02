@@ -1,8 +1,24 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
+
+import httpx
+from tenacity import (
+    AsyncRetrying,
+    before_log,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from src.config import settings
+from src.core.resilience import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerOpenError,
+    get_circuit_breaker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +37,7 @@ except ImportError:
     HAS_SDK = False
     logger.warning("t-tech-investments SDK not installed. Install with: uv pip install t-tech-investments --index-url https://opensource.tbank.ru/api/v4/projects/238/packages/pypi/simple")
 
-SANDBOX_TARGET = "sandbox"  # sandbox target identifier
+SANDBOX_TARGET = "sandbox"
 
 
 class TBankClient:
@@ -32,6 +48,7 @@ class TBankClient:
         self._use_sandbox = use_sandbox
         self._client: Optional[AsyncClient] = None
         self._raw_client: Optional[AsyncClient] = None
+        self._circuit_breaker: CircuitBreaker = get_circuit_breaker("tbank")
 
     def _target(self) -> str:
         return str(INVEST_GRPC_API_SANDBOX if self._use_sandbox else INVEST_GRPC_API)
@@ -47,10 +64,30 @@ class TBankClient:
             self._client = None
             self._raw_client = None
 
+    async def _call_with_retry(self, fn_name: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
+        async def _do_call() -> Any:
+            return await fn(*args, **kwargs)
+
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1.0, max=10.0),
+            retry=retry_if_exception_type((httpx.TimeoutException, httpx.HTTPStatusError, ConnectionError)),
+            before=before_log(logger, logging.DEBUG),
+            reraise=True,
+        ):
+            with attempt:
+                try:
+                    return await self._circuit_breaker.call(_do_call)
+                except CircuitBreakerOpenError:
+                    logger.warning("tbank.circuit_breaker.open.%s", fn_name)
+                    if not HAS_SDK:
+                        raise RuntimeError("T-Bank SDK not installed")
+                    raise
+
     async def get_accounts(self) -> list[dict[str, object]]:
         if not self._client:
             raise RuntimeError("Client not initialized. Use 'async with'")
-        resp = await self._client.users.get_accounts()
+        resp = await self._call_with_retry("get_accounts", self._client.users.get_accounts)
         return [
             {
                 "id": a.id,
@@ -65,7 +102,7 @@ class TBankClient:
     async def get_portfolio(self, account_id: str) -> list[dict[str, object]]:
         if not self._client:
             raise RuntimeError("Client not initialized")
-        resp = await self._client.operations.get_portfolio(account_id=account_id)
+        resp = await self._call_with_retry("get_portfolio", self._client.operations.get_portfolio, account_id=account_id)
         allowed_types = {
             InstrumentType.INSTRUMENT_TYPE_SHARE,
             InstrumentType.INSTRUMENT_TYPE_BOND,
@@ -92,7 +129,7 @@ class TBankClient:
     async def get_account_balance(self, account_id: str) -> float:
         if not self._client:
             raise RuntimeError("Client not initialized")
-        resp = await self._client.operations.get_portfolio(account_id=account_id)
+        resp = await self._call_with_retry("get_account_balance", self._client.operations.get_portfolio, account_id=account_id)
         total = 0.0
         for p in resp.positions:
             if p.instrument_type == "currency":
@@ -116,7 +153,7 @@ class TBankClient:
         }
         ci = interval_map.get(interval, CandleInterval.CANDLE_INTERVAL_HOUR)
         now = datetime.now(timezone.utc)
-        resp = await self._client.market_data.get_candles(
+        resp = await self._call_with_retry("get_candles", self._client.market_data.get_candles,
             figi=figi,
             from_=now - timedelta(days=days),
             to=now,
@@ -138,10 +175,11 @@ class TBankClient:
         self,
         figi: str,
         quantity: int,
-        direction: str,  # BUY or SELL
-        order_type: str = "market",  # market or limit
+        direction: str,
+        order_type: str = "market",
         price: Optional[float] = None,
         account_id: str = "",
+        idempotency_key: Optional[str] = None,
     ) -> dict[str, object]:
         if not self._client:
             raise RuntimeError("Client not initialized")
@@ -155,6 +193,9 @@ class TBankClient:
         if price is not None:
             price_quotation = self._to_quotation(price)
 
+        if idempotency_key:
+            logger.info("Placing order figi=%s with idempotency_key=%s", figi, idempotency_key)
+
         resp = await self._client.orders.post_order(
             figi=figi,
             quantity=quantity,
@@ -162,6 +203,7 @@ class TBankClient:
             order_type=type_enum,
             price=price_quotation,
             account_id=account_id,
+            idempotency_key=idempotency_key or "",
         )
         return {
             "order_id": resp.order_id,
@@ -172,6 +214,7 @@ class TBankClient:
             "total_commission": self._money(resp.executed_commission),
             "executed_quantity": resp.lots_executed,
             "status": str(resp.execution_report_status),
+            "idempotency_key": idempotency_key or "",
         }
 
     async def sandbox_pay_in(self, account_id: str, amount: float, currency: str = "RUB") -> dict[str, object]:

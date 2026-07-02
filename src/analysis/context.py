@@ -8,7 +8,7 @@ from src.analysis.fundamental import FundamentalAnalyzer
 from src.collectors.news import NewsCollector
 from src.constants import NEWS_STALE_HOURS
 from src.db.models import Dividend, Indicator, Instrument, News, NewsInstrument, Price
-from src.signal.engine import compute_risk_metrics
+from src.signals.engine import compute_risk_metrics
 
 logger = logging.getLogger(__name__)
 

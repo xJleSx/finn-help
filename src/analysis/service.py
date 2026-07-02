@@ -33,7 +33,7 @@ from src.db.models import (
     Signal,
 )
 from src.llm.router import llm
-from src.signal.engine import SignalFusionEngine, compute_risk_metrics
+from src.signals.engine import SignalFusionEngine, compute_risk_metrics
 
 logger = logging.getLogger(__name__)
 

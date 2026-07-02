@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import cast, Date, func
 
 from src.db.models import AlertLog, BondOffering, CorporateEvent, FinancialReport, Instrument, Signal
 
@@ -181,13 +181,17 @@ def generate_signal_drop_alerts(db: Any, drop_threshold: float = 0.2) -> list[di
 def store_alerts(db: Any, alerts: list[dict[str, Any]]) -> int:
     count = 0
     for a in alerts:
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = today_start + timedelta(days=1)
         exists = (
             db.query(AlertLog)
             .filter(
                 AlertLog.ticker == a["ticker"],
                 AlertLog.alert_type == a["alert_type"],
                 AlertLog.title == a["title"],
-                func.date(AlertLog.created_at) == date.today(),
+                AlertLog.created_at >= today_start,
+                AlertLog.created_at < today_end,
             )
             .first()
         )

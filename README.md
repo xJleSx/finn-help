@@ -206,4 +206,5 @@ uv run pytest -v
 
 ## Лицензия
 
-MIT
+BUSL-1.1 (Business Source License) — см. LICENSE. Для некоммерческого использования до 50 000 руб.
+Через 4 года после публикации — Apache 2.0.

@@ -3,11 +3,12 @@ from __future__ import annotations
 from typing import Any, Optional
 
 import structlog
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from src.db.models import User
 from src.interfaces.api.auth import get_current_user
+from src.interfaces.api.rate_limiter import limiter
 from src.interfaces.api.dependencies import get_market_service
 from src.interfaces.api.schemas import (
     AdviceResponse,
@@ -90,7 +91,9 @@ async def get_advice(
 
 
 @router.post("/api/ask", response_model=AskResponse)
+@limiter.limit("30/minute")
 async def ask_question(
+    request: Request,
     body: AskBody,
     user: Optional[User] = Depends(get_current_user),
     svc: MarketService = Depends(get_market_service),

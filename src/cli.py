@@ -504,20 +504,18 @@ def financials(
             report_date=report_date,
             period_type=period,
         )
-        if net_profit is not None:
-            report.net_profit = net_profit  # type: ignore[assignment]
-        if revenue is not None:
-            report.revenue = revenue  # type: ignore[assignment]
-        if net_interest_income is not None:
-            report.net_interest_income = net_interest_income  # type: ignore[assignment]
-        if total_assets is not None:
-            report.total_assets = total_assets  # type: ignore[assignment]
-        if total_liabilities is not None:
-            report.total_liabilities = total_liabilities  # type: ignore[assignment]
-        if total_equity is not None:
-            report.total_equity = total_equity  # type: ignore[assignment]
-        if loan_portfolio is not None:
-            report.loan_portfolio = loan_portfolio  # type: ignore[assignment]
+        field_map = {
+            "net_profit": net_profit,
+            "revenue": revenue,
+            "net_interest_income": net_interest_income,
+            "total_assets": total_assets,
+            "total_liabilities": total_liabilities,
+            "total_equity": total_equity,
+            "loan_portfolio": loan_portfolio,
+        }
+        for field_name, val in field_map.items():
+            if val is not None:
+                setattr(report, field_name, val)
 
         db.add(report)
         db.commit()
@@ -713,7 +711,8 @@ def full_cycle() -> None:
 
     async def _update() -> None:
         async with MOEXCollector() as moex:
-            tickers: list[str] = personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP", "YNDX", "TATN"])  # type: ignore[assignment]
+            raw = personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP", "YNDX", "TATN"])
+            tickers = [str(t) for t in raw] if isinstance(raw, list) else ["SBER", "LKOH", "GAZP", "YNDX", "TATN"]
             for t in tickers:
                 await moex.get_history(t)
                 console.print(f"  ✓ {t}")
@@ -758,8 +757,8 @@ def full_cycle() -> None:
                 w.writeheader()
                 w.writerows(ec)
             console.print(f"  📄 Equity curve saved → {csv_path}")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to save equity curve: %s", e)
 
 
 @app.command()

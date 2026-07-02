@@ -40,6 +40,7 @@ def reset_guards():
     g._position_limit_pct = None
     g._max_drawdown_pct = 0.20
     g._peak_value = None
+    g._current_portfolio_value = None
     g._day_start_value = None
     g._current_day_value = None
     yield
@@ -307,6 +308,44 @@ def test_news_sentiment_warning():
 def test_drawdown_negative_peak():
     dd = update_drawdown(-1000)
     assert dd == 0.0
+
+
+def test_current_drawdown_with_peak():
+    from src.trading.risk.guards import current_drawdown
+
+    # No peak set yet
+    assert current_drawdown() == 0.0
+
+    # After first update — establishes peak at 100000
+    update_drawdown(100000)
+    assert current_drawdown() == 0.0
+
+    # Drop to 90k
+    update_drawdown(90000)
+    assert current_drawdown() == -0.10
+
+    # Further drop to 75k
+    update_drawdown(75000)
+    assert current_drawdown() == -0.25
+
+    # Partial recovery — still below peak
+    update_drawdown(80000)
+    assert current_drawdown() == -0.20
+
+    # New peak — drawdown resets to 0
+    update_drawdown(120000)
+    assert current_drawdown() == 0.0
+
+
+def test_current_drawdown_peak_zero():
+    from src.trading.risk.guards import current_drawdown, reset_peak, update_drawdown
+
+    update_drawdown(100000)
+    update_drawdown(80000)
+    assert current_drawdown() < 0
+
+    reset_peak(0)
+    assert current_drawdown() == 0.0
 
 
 class TestAsyncGuards:

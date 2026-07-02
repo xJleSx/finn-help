@@ -6,11 +6,14 @@ from enum import Enum
 from typing import Any, Optional, cast
 
 from src.config import personal, settings
+from src.core.context import (
+    generate_id,
+    get_request_id,
+    set_request_id,
+)
 from src.trading.brokers.tbank import TBankClient
 from src.trading.execution.audit import log_trade, save_order
 from src.trading.execution.stoploss import position_tracker
-
-_TRADING_ENABLED: bool | None = None
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,8 @@ class OrderRecord:
         self.order_id: Optional[str] = None
         self.status = "pending"
         self.db_id: int = 0
+        self.request_id: str = get_request_id() or generate_id("req", 12)
+        self.idempotency_key: str = generate_id("idem", 24)
 
 
 _execution_log: "deque[OrderRecord]" = deque(maxlen=1000)
@@ -91,6 +96,8 @@ def get_log(limit: int = 20) -> list[dict[str, object]]:
             "status": r.status,
             "order_id": r.order_id,
             "time": r.created_at.isoformat(),
+            "request_id": r.request_id,
+            "idempotency_key": r.idempotency_key,
         }
         for r in entries
     ]
@@ -103,19 +110,25 @@ async def execute_order(
     price: Optional[float] = None,
     figi: Optional[str] = None,
     reason: str = "",
+    mode_override: Optional[TradeMode] = None,
 ) -> OrderRecord:
     global _mode
+    effective_mode = mode_override if mode_override is not None else _mode
+
+    rid = get_request_id()
+    if not rid:
+        set_request_id(generate_id("req", 12))
 
     record = OrderRecord(
         ticker=ticker,
         direction=direction,
         quantity=quantity,
         price=price or 0.0,
-        mode=_mode,
+        mode=effective_mode,
         reason=reason,
     )
 
-    if _mode == TradeMode.DRY_RUN:
+    if effective_mode == TradeMode.DRY_RUN:
         record.status = "simulated"
         record.order_id = f"dry_{datetime.now(timezone.utc).timestamp()}"
         logger.info(
@@ -132,151 +145,160 @@ async def execute_order(
         _notify_trade(record, reason)
         return record
 
-    if _mode == TradeMode.AUTO:
+    if effective_mode == TradeMode.AUTO:
         if not settings.enable_trading:
             record.status = "failed"
             logger.error("Trading disabled — set ENABLE_TRADING=true to use AUTO mode")
             _execution_log.append(record)
             record.db_id = save_order(record)
+            _notify_trade(record, reason)
             return record
         if not settings.tinkoff_token:
             record.status = "failed"
             logger.error("No TINKOFF_TOKEN set — cannot execute AUTO mode order")
             _execution_log.append(record)
             record.db_id = save_order(record)
+            _notify_trade(record, reason)
             return record
 
-    if _mode == TradeMode.MANUAL:
+        # AUTO mode execution
+        try:
+            from src.db.connection import get_session as _get_db
+            from src.db.models import Instrument as _InstModel
+
+            resolved_figi = figi
+            lot_size = 1
+            _db = _get_db()
+            try:
+                inst = _db.query(_InstModel).filter_by(ticker=ticker).first()
+                if inst:
+                    if not resolved_figi and inst.figi:
+                        resolved_figi = str(inst.figi)
+                    lot_size = int(inst.lot_size or 1)
+            finally:
+                _db.close()
+
+            if not resolved_figi:
+                record.status = "failed"
+                logger.warning("No FIGI found for %s, cannot place order", ticker)
+                _execution_log.append(record)
+                record.db_id = save_order(record)
+                _notify_trade(record, reason)
+                return record
+
+            quantity_lots = quantity // lot_size
+            if quantity_lots < 1:
+                record.status = "failed"
+                logger.warning("Quantity %d is less than one lot (%d) for %s", quantity, lot_size, ticker)
+                _execution_log.append(record)
+                record.db_id = save_order(record)
+                _notify_trade(record, reason)
+                return record
+
+            exec_cfg = personal.get("execution", {})
+            delay = cast("dict[str, Any]", exec_cfg).get("delay_ms", 500) if isinstance(exec_cfg, dict) else 500
+            if delay > 0:
+                await asyncio.sleep(delay / 1000)
+
+            use_sandbox = settings.tinkoff_sandbox
+            requested_price = record.price
+            async with TBankClient(use_sandbox=use_sandbox) as client:
+                accounts = await client.get_accounts()
+                if not accounts:
+                    record.status = "failed"
+                    logger.warning("No accounts found")
+                    _execution_log.append(record)
+                    record.db_id = save_order(record)
+                    _notify_trade(record, reason)
+                    return record
+
+                account_id = str(accounts[0]["id"])
+
+                result = await client.place_order(
+                    figi=resolved_figi,
+                    quantity=quantity_lots,
+                    direction=direction,
+                    account_id=account_id,
+                    idempotency_key=record.idempotency_key,
+                )
+                _order_id = result.get("order_id")
+                record.order_id = str(_order_id) if _order_id is not None else None
+                record.status = str(result.get("status", "unknown"))
+                executed_lots = cast(int, result.get("executed_quantity", 0))
+                executed_shares = executed_lots * lot_size
+                executed_price = result.get("executed_price")
+                if executed_price is not None:
+                    record.price = cast(float, executed_price)
+
+                slippage = 0.0
+                if requested_price and requested_price > 0 and executed_price is not None:
+                    slippage = abs(cast(float, executed_price) - requested_price) / requested_price
+                logger.info(
+                    "ORDER FILLED: %s %d lots (%d shares) %s at %.2f (id=%s)",
+                    direction,
+                    executed_lots,
+                    executed_shares,
+                    ticker,
+                    record.price,
+                    record.order_id,
+                )
+
+                if record.status in ("filled", "partial") and executed_shares > 0:
+                    position_tracker.update(ticker, direction, executed_shares, record.price)
+                    sl_pct = cast(float, personal.get("stop_loss_pct", 0.05))
+                    tp_pct = cast(float, personal.get("take_profit_pct", 0.10))
+                    _sl_db = _get_db()
+                    try:
+                        from src.db.models import Indicator as _IndicatorModel
+
+                        latest = (
+                            _sl_db.query(_IndicatorModel)
+                            .filter_by(instrument_id=(inst.id if inst else 0))
+                            .order_by(_IndicatorModel.date.desc())
+                            .first()
+                        )
+                        if latest and latest.atr and float(latest.atr) > 0 and record.price > 0:
+                            from src.trading.risk.manager import compute_stop_loss as _compute_sl
+
+                            atr_result = _compute_sl(record.price, float(latest.atr), multiplier=2.0)
+                            if atr_result and atr_result["stop_loss_pct"]:
+                                sl_pct = abs(atr_result["stop_loss_pct"]) / 100
+                    except Exception as e:
+                        logger.warning("Failed to compute stop loss for %s: %s", ticker, e)
+                    finally:
+                        _sl_db.close()
+                    rr_ratio = cast(float, personal.get("rr_ratio", 2.0))
+                    tp_pct = max(tp_pct, sl_pct * rr_ratio)
+                    position_tracker.set_sl_tp(ticker, sl_pct=sl_pct, tp_pct=tp_pct)
+
+                if slippage > 0 and record.db_id:
+                    log_trade(
+                        ticker=ticker,
+                        direction=direction,
+                        quantity=executed_shares,
+                        price=record.price,
+                        slippage=slippage,
+                        reason=record.reason,
+                        order_id=record.db_id,
+                    )
+        except Exception as e:
+            record.status = "failed"
+            logger.error("Order failed: %s %d %s: %s", direction, quantity, ticker, e, exc_info=True)
+
+        _execution_log.append(record)
+        record.db_id = save_order(record)
+        _notify_trade(record, reason)
+        return record
+
+    if effective_mode == TradeMode.MANUAL:
         record.status = "pending_approval"
         _execution_log.append(record)
         record.db_id = save_order(record)
         logger.info("MANUAL: %s %d %s at %.2f — awaiting approval", direction, quantity, ticker, record.price)
         return record
 
-    # AUTO mode
-    try:
-        from src.db.connection import get_session as _get_db
-        from src.db.models import Instrument as _InstModel
-
-        resolved_figi = figi
-        lot_size = 1
-        _db = _get_db()
-        try:
-            inst = _db.query(_InstModel).filter_by(ticker=ticker).first()
-            if inst:
-                if not resolved_figi and inst.figi:
-                    resolved_figi = str(inst.figi)
-                lot_size = int(inst.lot_size or 1)
-        finally:
-            _db.close()
-
-        if not resolved_figi:
-            record.status = "failed"
-            logger.warning("No FIGI found for %s, cannot place order", ticker)
-            _execution_log.append(record)
-            record.db_id = save_order(record)
-            return record
-
-        quantity_lots = quantity // lot_size
-        if quantity_lots < 1:
-            record.status = "failed"
-            logger.warning("Quantity %d is less than one lot (%d) for %s", quantity, lot_size, ticker)
-            _execution_log.append(record)
-            record.db_id = save_order(record)
-            return record
-
-        exec_cfg = personal.get("execution", {})
-        delay = cast("dict[str, Any]", exec_cfg).get("delay_ms", 500) if isinstance(exec_cfg, dict) else 500
-        if delay > 0:
-            await asyncio.sleep(delay / 1000)
-
-        use_sandbox = settings.tinkoff_sandbox
-        requested_price = record.price
-        async with TBankClient(use_sandbox=use_sandbox) as client:
-            accounts = await client.get_accounts()
-            if not accounts:
-                record.status = "failed"
-                logger.warning("No accounts found")
-                _execution_log.append(record)
-                record.db_id = save_order(record)
-                return record
-
-            account_id = str(accounts[0]["id"])
-
-            result = await client.place_order(
-                figi=resolved_figi,
-                quantity=quantity_lots,
-                direction=direction,
-                account_id=account_id,
-            )
-            _order_id = result.get("order_id")
-            record.order_id = str(_order_id) if _order_id is not None else None
-            record.status = str(result.get("status", "unknown"))
-            executed_lots = cast(int, result.get("executed_quantity", 0))
-            executed_shares = executed_lots * lot_size
-            executed_price = result.get("executed_price")
-            if executed_price is not None:
-                record.price = cast(float, executed_price)
-
-            slippage = 0.0
-            if requested_price and requested_price > 0 and executed_price is not None:
-                slippage = abs(cast(float, executed_price) - requested_price) / requested_price
-            logger.info(
-                "ORDER FILLED: %s %d lots (%d shares) %s at %.2f (id=%s)",
-                direction,
-                executed_lots,
-                executed_shares,
-                ticker,
-                record.price,
-                record.order_id,
-            )
-
-            if record.status in ("filled", "partial") and executed_shares > 0:
-                position_tracker.update(ticker, direction, executed_shares, record.price)
-                sl_pct = cast(float, personal.get("stop_loss_pct", 0.05))
-                tp_pct = cast(float, personal.get("take_profit_pct", 0.10))
-                _sl_db = _get_db()
-                try:
-                    from src.db.models import Indicator as _IndicatorModel
-
-                    latest = (
-                        _sl_db.query(_IndicatorModel)
-                        .filter_by(instrument_id=(inst.id if inst else 0))
-                        .order_by(_IndicatorModel.date.desc())
-                        .first()
-                    )
-                    if latest and latest.atr and float(latest.atr) > 0 and record.price > 0:
-                        from src.trading.risk.manager import compute_stop_loss as _compute_sl
-
-                        atr_result = _compute_sl(record.price, float(latest.atr), multiplier=2.0)
-                        if atr_result and atr_result["stop_loss_pct"]:
-                            sl_pct = abs(atr_result["stop_loss_pct"]) / 100
-                except Exception:
-                    pass
-                finally:
-                    _sl_db.close()
-                rr_ratio = cast(float, personal.get("rr_ratio", 2.0))
-                tp_pct = max(tp_pct, sl_pct * rr_ratio)
-                position_tracker.set_sl_tp(ticker, sl_pct=sl_pct, tp_pct=tp_pct)
-
-            # log slippage
-            if slippage > 0 and record.db_id:
-                log_trade(
-                    ticker=ticker,
-                    direction=direction,
-                    quantity=executed_shares,
-                    price=record.price,
-                    slippage=slippage,
-                    reason=record.reason,
-                    order_id=record.db_id,
-                )
-    except Exception as e:
-        record.status = "failed"
-        logger.error("Order failed: %s %d %s: %s", direction, quantity, ticker, e, exc_info=True)
-
     _execution_log.append(record)
     record.db_id = save_order(record)
-
     _notify_trade(record, reason)
     return record
 
@@ -293,19 +315,14 @@ async def approve_order(ticker: str, direction: str, quantity: int) -> Optional[
                 and r.quantity == quantity
                 and r.status == "pending_approval"
             ):
-                global _mode
-                saved_mode = _mode
-                _mode = TradeMode.AUTO
-                try:
-                    result = await execute_order(
-                        ticker=r.ticker,
-                        direction=r.direction,
-                        quantity=r.quantity,
-                        price=r.price,
-                        reason=r.reason,
-                    )
-                finally:
-                    _mode = saved_mode
+                result = await execute_order(
+                    ticker=r.ticker,
+                    direction=r.direction,
+                    quantity=r.quantity,
+                    price=r.price,
+                    reason=r.reason,
+                    mode_override=TradeMode.AUTO,
+                )
                 return result
     return None
 

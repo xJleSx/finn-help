@@ -25,6 +25,8 @@ class EnsemblePredictor:
         self._lgb: Any = None
         self._cat: Any = None
         self._meta: Any = None
+        self._scaler: Any = None
+        self._meta_model: Any = None
         self._ticker = ticker
 
     @property
@@ -173,12 +175,16 @@ class EnsemblePredictor:
         meta_data = {
             "meta": self._meta,
             "ticker": self._ticker,
+            "scaler": self._scaler,
+            "meta_model": self._meta_model,
         }
         return save_model(meta_data, self.model_name, metrics=metrics)
 
     def load_meta(self, version: Optional[str] = None) -> Any:
         data = load_from_registry(self.model_name, version=version)
         self._meta = data.get("meta")
+        self._scaler = data.get("scaler")
+        self._meta_model = data.get("meta_model")
         return self._meta
 
     def save_all(self) -> dict[str, str]:
@@ -214,6 +220,15 @@ class EnsemblePredictor:
 
             if not all(c in df.columns for c in FEATURE_COLS):
                 return None
+
+            if self._scaler is not None and self._meta_model is not None:
+                features = prepare_features(df)
+                if len(features) == 0:
+                    return None
+                latest = self._scaler.transform(features.iloc[-1:].values)
+                prob = float(self._meta_model.predict_proba(latest)[0, 1])
+                return prob
+
             lookahead = 5
             threshold = 0.03
 
@@ -240,20 +255,22 @@ class EnsemblePredictor:
             if len(x_train) < 30 or len(x_test) < 10:
                 return None
 
-            scaler = StandardScaler()
-            x_train_scaled = scaler.fit_transform(x_train)
-            x_test_scaled = scaler.transform(x_test)
+            self._scaler = StandardScaler()
+            x_train_scaled = self._scaler.fit_transform(x_train)
+            x_test_scaled = self._scaler.transform(x_test)
 
-            meta_model = LogisticRegression(max_iter=2000, random_state=42, C=0.5)
-            meta_model.fit(x_train_scaled, y_train)
+            self._meta_model = LogisticRegression(max_iter=2000, random_state=42, C=0.5)
+            self._meta_model.fit(x_train_scaled, y_train)
 
-            test_acc = float(np.mean(meta_model.predict(x_test_scaled) == y_test))
+            test_acc = float(np.mean(self._meta_model.predict(x_test_scaled) == y_test))
             if test_acc < 0.52:
                 logger.debug("Stacking meta-learner test acc %.3f < 0.52, falling back", test_acc)
+                self._scaler = None
+                self._meta_model = None
                 return None
 
-            latest = scaler.transform(features.iloc[-1:].values)
-            prob = float(meta_model.predict_proba(latest)[0, 1])
+            latest = self._scaler.transform(features.iloc[-1:].values)
+            prob = float(self._meta_model.predict_proba(latest)[0, 1])
             return prob
         except Exception as e:
             logger.warning(f"Stacking meta-learner failed: {e}")

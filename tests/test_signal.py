@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.signal.engine import SignalFusionEngine, compute_risk_metrics
+from src.signals.engine import SignalFusionEngine, compute_risk_metrics
 
 
 @pytest.fixture

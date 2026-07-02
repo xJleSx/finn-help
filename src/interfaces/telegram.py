@@ -1058,7 +1058,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         from src.trading.brokers.sync import sync_portfolio_from_broker
 
-        sync_result = await sync_portfolio_from_broker()
+        sync_result = await sync_portfolio_from_broker(user_id=1)
         if sync_result.get("status") == "no_token":
             await msg.edit_text("❌ TINKOFF_TOKEN не настроен")
             return

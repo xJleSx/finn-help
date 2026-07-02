@@ -4,9 +4,8 @@ set -e
 # Wait for PostgreSQL if DATABASE_URL contains postgres
 if echo "$DATABASE_URL" | grep -q "postgres"; then
   echo "Waiting for PostgreSQL..."
-  host=$(echo "$DATABASE_URL" | sed -n 's/.*@\([^:]*\).*/\1/p')
-  port=$(echo "$DATABASE_URL" | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
-  : "${host:=db}" "${port:=5432}"
+  host=$(python -c "from urllib.parse import urlparse; p=urlparse('$DATABASE_URL'); print(p.hostname or 'db')")
+  port=$(python -c "from urllib.parse import urlparse; p=urlparse('$DATABASE_URL'); print(p.port or 5432)")
   for i in $(seq 1 30); do
     python -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('$host', $port)); s.close()" 2>/dev/null && break
     echo "  waiting for postgres... ($i)"
@@ -19,4 +18,6 @@ echo "Running database migrations..."
 alembic upgrade head
 
 echo "Starting server..."
-exec uvicorn src.interfaces.api.server:app --host 0.0.0.0 --port 8000
+UVICORN_HOST="${UVICORN_HOST:-0.0.0.0}"
+UVICORN_PORT="${UVICORN_PORT:-8000}"
+exec uvicorn src.interfaces.api.server:app --host "$UVICORN_HOST" --port "$UVICORN_PORT"

@@ -11,7 +11,6 @@ from src.trading.execution.engine import (
 from src.trading.execution.stoploss import PositionTracker, position_tracker
 from src.trading.risk.guards import (
     RISK_PROFILE_MAP,
-    _load_risk_params,  # noqa: F401
     activate_kill_switch,
     async_activate_kill_switch,
     async_check_daily_loss,

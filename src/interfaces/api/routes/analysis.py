@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,8 +13,9 @@ from src.alerts.history import AlertHistory
 from src.analysis.ml.news_impact import NewsImpactModel
 from src.analysis.scenario.engine import ScenarioEngine
 from src.db.connection import get_session
-from src.db.models import Instrument, News, NewsInstrument
-from src.interfaces.api.auth import get_db
+from src.db.models import Instrument, News, NewsInstrument, User
+from src.interfaces.api.auth import get_db, require_user
+from src.interfaces.api.rate_limiter import limiter
 from src.interfaces.api.schemas import (
     AlertResponse,
     ImpactAttributionResponse,
@@ -38,14 +39,14 @@ def _run_scenario_sync(user_id: int) -> dict[str, Any]:
 
 @router.get("/api/analysis/scenario", response_model=ScenarioResponse)
 async def run_scenario_analysis(
-    user_id: int = Query(0),
+    user: User = Depends(require_user),
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(None, _run_scenario_sync, user_id)
+        result = await loop.run_in_executor(None, _run_scenario_sync, user.id)
         return result
     except Exception as e:
-        logger.exception("scenario_failed", user_id=user_id)
+        logger.exception("scenario_failed", user_id=user.id)
         raise HTTPException(500, f"Scenario analysis failed: {e}")
 
 
@@ -75,11 +76,11 @@ def _custom_scenario_sync(ticker: str, shock_pct: float, user_id: int) -> dict[s
 async def custom_scenario(
     ticker: str = Query(...),
     shock_pct: float = Query(...),
-    user_id: int = Query(0),
+    user: User = Depends(require_user),
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(None, _custom_scenario_sync, ticker, shock_pct, user_id)
+        result = await loop.run_in_executor(None, _custom_scenario_sync, ticker, shock_pct, user.id)
         return result
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -151,15 +152,15 @@ def _get_alerts_sync(user_id: int, limit: int) -> list[dict[str, Any]]:
 
 @router.get("/api/alerts", response_model=AlertResponse)
 async def get_alerts(
-    user_id: int = Query(...),
+    user: User = Depends(require_user),
     limit: int = Query(20, ge=1, le=100),
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        alerts = await loop.run_in_executor(None, _get_alerts_sync, user_id, limit)
+        alerts = await loop.run_in_executor(None, _get_alerts_sync, user.id, limit)
         return {"alerts": alerts}
     except Exception as e:
-        logger.exception("alerts_get_failed", user_id=user_id)
+        logger.exception("alerts_get_failed", user_id=user.id)
         raise HTTPException(500, f"Failed to get alerts: {e}")
 
 
@@ -179,12 +180,14 @@ def _refresh_alerts_sync(user_id: int) -> int:
 
 
 @router.post("/api/alerts/refresh")
+@limiter.limit("6/minute")
 async def refresh_alerts(
-    user_id: int = Query(0),
+    request: Request,
+    user: User = Depends(require_user),
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        count = await loop.run_in_executor(None, _refresh_alerts_sync, user_id)
+        count = await loop.run_in_executor(None, _refresh_alerts_sync, user.id)
         return {"new_alerts": count}
     except Exception as e:
         logger.exception("alert_refresh_failed")
@@ -203,11 +206,11 @@ def _get_alert_analytics_sync(days: int, user_id: int | None) -> dict[str, Any]:
 @router.get("/api/alerts/analytics")
 async def get_alert_analytics(
     days: int = Query(30, ge=1, le=365),
-    user_id: int | None = Query(None),
+    user: User = Depends(require_user),
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(None, _get_alert_analytics_sync, days, user_id)
+        result = await loop.run_in_executor(None, _get_alert_analytics_sync, days, user.id)
         return result
     except Exception as e:
         logger.exception("alert_analytics_failed")
@@ -240,14 +243,14 @@ def _risk_ticker_deep_dive_sync(ticker: str, user_id: int) -> dict[str, Any]:
 
 @router.get("/api/risk/portfolio")
 async def risk_portfolio_summary(
-    user_id: int = Query(0),
+    user: User = Depends(require_user),
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(None, _risk_portfolio_summary_sync, user_id)
+        result = await loop.run_in_executor(None, _risk_portfolio_summary_sync, user.id)
         return result
     except Exception as e:
-        logger.exception("risk_portfolio_summary_failed", user_id=user_id)
+        logger.exception("risk_portfolio_summary_failed", user_id=user.id)
         raise HTTPException(500, f"Risk portfolio summary failed: {e}")
 
 
@@ -255,11 +258,11 @@ async def risk_portfolio_summary(
 @router.get("/api/risk/deep-dive/{ticker}")
 async def risk_ticker_deep_dive(
     ticker: str,
-    user_id: int = Query(0),
+    user: User = Depends(require_user),
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(None, _risk_ticker_deep_dive_sync, ticker, user_id)
+        result = await loop.run_in_executor(None, _risk_ticker_deep_dive_sync, ticker, user.id)
         return result
     except Exception as e:
         logger.exception("risk_deep_dive_failed", ticker=ticker)

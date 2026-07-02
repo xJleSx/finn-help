@@ -1,7 +1,3 @@
-import sys
-
-sys.path.insert(0, ".")
-
 from datetime import datetime, timedelta
 
 from src.db.connection import get_session

@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from src.config import settings
+from src.config import personal, settings
 from src.db.connection import get_session
 from src.db.models import Instrument
 from src.db.models import Portfolio as PortModel
@@ -11,7 +11,7 @@ from src.trading.brokers.tbank import TBankClient
 logger = logging.getLogger(__name__)
 
 
-async def sync_portfolio_from_broker(account_id: str = "") -> dict[str, Any]:
+async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> dict[str, Any]:
     if not settings.tinkoff_token:
         return {"status": "no_token", "positions_synced": 0}
 
@@ -66,12 +66,12 @@ async def sync_portfolio_from_broker(account_id: str = "") -> dict[str, Any]:
                 qty = pos["quantity"]
                 avg_price = pos["average_price"]
 
-                existing = db.query(PortModel).filter_by(user_id=1, instrument_id=inst.id).first()
+                existing = db.query(PortModel).filter_by(user_id=user_id, instrument_id=inst.id).first()
                 if existing:
                     existing.quantity = qty
                     existing.avg_price = avg_price
                 else:
-                    db.add(PortModel(user_id=1, instrument_id=inst.id, quantity=qty, avg_price=avg_price))
+                    db.add(PortModel(user_id=user_id, instrument_id=inst.id, quantity=qty, avg_price=avg_price))
                 synced_instrument_ids.add(int(inst.id))
                 stats["positions_synced"] += 1
                 db.commit()
@@ -80,21 +80,40 @@ async def sync_portfolio_from_broker(account_id: str = "") -> dict[str, Any]:
                 stats["errors"].append(str(e))
                 logger.warning("Sync error for position: %s", e)
 
-        # Удаляем позиции, которых больше нет в портфеле брокера
+        # Орфанные позиции — больше не в портфеле брокера
         orphaned = (
             db.query(PortModel)
             .filter(
-                PortModel.user_id == 1,
+                PortModel.user_id == user_id,
                 PortModel.instrument_id.notin_(synced_instrument_ids),
             )
             .all()
         )
+        sync_cfg = personal.get("sync", {})
+        auto_remove = bool(sync_cfg.get("auto_remove_orphans", False)) if isinstance(sync_cfg, dict) else False
+
         for orphan in orphaned:
             ticker = orphan.instrument.ticker if orphan.instrument else "?"
-            logger.info("Removing %s from local portfolio (no longer in broker)", ticker)
-            db.delete(orphan)
-            stats.setdefault("removed", 0)
-            stats["removed"] += 1
+            qty = orphan.quantity or 0
+            price = orphan.avg_price or 0
+            value = qty * price
+
+            if auto_remove:
+                logger.warning(
+                    "Removing orphaned position %s (%d shares, ~%.0f RUB) — auto_remove_orphans=true",
+                    ticker, qty, value,
+                )
+                db.delete(orphan)
+                stats.setdefault("removed", 0)
+                stats["removed"] += 1
+            else:
+                logger.warning(
+                    "Orphaned position detected: %s (%d shares, ~%.0f RUB) — NOT removed. "
+                    "Set sync.auto_remove_orphans=true in personal_settings.yaml to auto-remove.",
+                    ticker, qty, value,
+                )
+                stats.setdefault("orphans_skipped", 0)
+                stats["orphans_skipped"] += 1
 
         db.commit()
     finally:

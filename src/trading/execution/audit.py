@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from src.core.context import context_extra
 from src.db.connection import get_session
 from src.db.models import Order as OrderModel
 
@@ -32,6 +33,7 @@ def audit_log_order(entry: dict[str, object]) -> None:
     file_path = _audit_log_file()
     entry["_timestamp"] = datetime.now(timezone.utc).isoformat()
     entry["_id"] = f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}_{os.urandom(4).hex()}"
+    entry.update(context_extra())
     try:
         with open(file_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")

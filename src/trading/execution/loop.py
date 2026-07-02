@@ -124,6 +124,8 @@ async def _check_var() -> tuple[bool, str]:
         positions = db.query(Portfolio).all()
         all_returns = []
         for p in positions:
+            if not p.instrument_id:
+                continue
             prices = (
                 db.query(Price.close)
                 .filter_by(instrument_id=p.instrument_id)
@@ -152,7 +154,7 @@ async def _check_liquidity(ticker: str) -> tuple[bool, str]:
         from src.db.models import Instrument, Price
 
         inst = db.query(Instrument).filter_by(ticker=ticker).first()
-        if not inst:
+        if not inst or not inst.id:
             return True, "ok"
         prices = (
             db.query(Price.close, Price.volume)
@@ -165,7 +167,7 @@ async def _check_liquidity(ticker: str) -> tuple[bool, str]:
         if len(volumes) < 5:
             return True, "ok"
         avg_vol = sum(volumes) / len(volumes)
-        last_price = prices[0].close if prices else 0
+        last_price = prices[0].close if prices and prices[0] else 0
         order_value = last_price * 10 if last_price else 0
         return check_liquidity(avg_vol, order_value)
     finally:
@@ -210,24 +212,96 @@ async def _process_signals() -> None:
             .all()
         )
 
+        if not signals:
+            return
+
+        if not await market_hours_check():
+            logger.info("Market closed, skipping signal processing")
+            return
+
+        can, reason = await can_trade()
+        if not can:
+            logger.warning("Cannot trade: %s", reason)
+            return
+
+        var_ok, var_msg = await _check_var()
+        if not var_ok:
+            logger.warning("VaR limit exceeded: %s", var_msg)
+            return
+
+        db2 = get_session()
+        try:
+            from src.db.models import Portfolio as PortModel
+            from src.db.models import Price as PriceModel
+
+            port_rows = db2.query(PortModel).all()
+            if port_rows:
+                inst_ids = [p.instrument_id for p in port_rows if p.instrument_id]
+                if inst_ids:
+                    from sqlalchemy import func as sqlfunc
+
+                    latest_prices_sub = (
+                        db2.query(
+                            PriceModel.instrument_id,
+                            PriceModel.close,
+                            sqlfunc.row_number()
+                            .over(partition_by=PriceModel.instrument_id, order_by=PriceModel.date.desc())
+                            .label("rn"),
+                        )
+                        .filter(PriceModel.instrument_id.in_(inst_ids))
+                        .subquery()
+                    )
+                    latest_prices = {
+                        pid: float(close)
+                        for pid, close in db2.query(latest_prices_sub.c.instrument_id, latest_prices_sub.c.close)
+                        .filter(latest_prices_sub.c.rn == 1)
+                        .all()
+                    }
+                else:
+                    latest_prices = {}
+
+                total_value = (
+                    sum(
+                        (p.quantity or 0) * (latest_prices.get(p.instrument_id) or p.avg_price or 0)
+                        for p in port_rows
+                    )
+                    or 100000
+                )
+            else:
+                total_value = 100000
+
+            signal_inst_ids = [s.instrument_id for s in signals if s.instrument]
+            last_price_rows = {}
+            if signal_inst_ids:
+                latest_signal_prices_sub = (
+                    db2.query(
+                        PriceModel.instrument_id,
+                        PriceModel.close,
+                        sqlfunc.row_number()
+                        .over(partition_by=PriceModel.instrument_id, order_by=PriceModel.date.desc())
+                        .label("rn"),
+                    )
+                    .filter(PriceModel.instrument_id.in_(signal_inst_ids))
+                    .subquery()
+                )
+                last_price_rows = {
+                    pid: float(close)
+                    for pid, close in db2.query(
+                        latest_signal_prices_sub.c.instrument_id, latest_signal_prices_sub.c.close
+                    )
+                    .filter(latest_signal_prices_sub.c.rn == 1)
+                    .all()
+                }
+        except Exception:
+            total_value = 100000
+            last_price_rows = {}
+        finally:
+            db2.close()
+
         for s in signals:
             if not s.instrument:
                 continue
             ticker = s.instrument.ticker
-
-            if not await market_hours_check():
-                logger.info("Market closed, skipping signal processing")
-                return
-
-            can, reason = await can_trade()
-            if not can:
-                logger.warning("Cannot trade: %s", reason)
-                return
-
-            var_ok, var_msg = await _check_var()
-            if not var_ok:
-                logger.warning("VaR limit exceeded: %s", var_msg)
-                return
 
             lq_ok, lq_msg = await _check_liquidity(ticker)
             if not lq_ok:
@@ -240,43 +314,8 @@ async def _process_signals() -> None:
                 continue
 
             max_pos_pct = s.fused_json.get("max_portfolio_pct", 10) if isinstance(s.fused_json, dict) else 10
-            db2 = get_session()
-            try:
-                from src.db.models import Portfolio as PortModel
-                from src.db.models import Price as PriceModel
 
-                port_value = db2.query(PortModel).all()
-                total_value = (
-                    sum(
-                        (p.quantity or 0)
-                        * (
-                            (
-                                db2.query(PriceModel.close)
-                                .filter_by(instrument_id=p.instrument_id)
-                                .order_by(PriceModel.date.desc())
-                                .first()
-                                or (0,)
-                            )[0]
-                            or p.avg_price
-                            or 0
-                        )
-                        for p in port_value
-                    )
-                    or 100000
-                )
-
-                last_price_row = (
-                    db2.query(PriceModel)
-                    .filter_by(instrument_id=s.instrument_id)
-                    .order_by(PriceModel.date.desc())
-                    .first()
-                )
-                last_price = last_price_row.close if last_price_row else 100
-            except Exception:
-                total_value = 100000
-                last_price = 100
-            finally:
-                db2.close()
+            last_price = last_price_rows.get(s.instrument_id, 100)
 
             max_position_value = total_value * max_pos_pct / 100
             quantity = max(1, int(max_position_value / last_price))
@@ -312,15 +351,39 @@ async def _check_stop_losses() -> None:
         from src.db.models import Instrument, Price
 
         open_orders = db.query(OrderModel).filter(OrderModel.status.in_(["filled", "partial"])).all()
-        for order in open_orders:
-            inst = db.query(Instrument).filter_by(ticker=order.ticker).first()
-            if not inst:
-                continue
-            price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-            if not price or not price.close:
-                continue
+        if not open_orders:
+            return
 
-            await position_tracker.execute_triggers(str(order.ticker), float(price.close))
+        tickers = list({o.ticker for o in open_orders if o.ticker})
+        instruments_map = {}
+        if tickers:
+            for i in db.query(Instrument).filter(Instrument.ticker.in_(tickers)).all():
+                if i.id:
+                    instruments_map[i.ticker] = i
+
+        inst_ids = [i.id for i in instruments_map.values() if i.id]
+        latest_prices: dict[int, float] = {}
+        if inst_ids:
+            all_prices = (
+                db.query(Price)
+                .filter(Price.instrument_id.in_(inst_ids))
+                .order_by(Price.instrument_id, Price.date.desc())
+                .all()
+            )
+            seen: set[int] = set()
+            for p in all_prices:
+                if p.instrument_id not in seen and p.close is not None:
+                    latest_prices[p.instrument_id] = float(p.close)
+                    seen.add(p.instrument_id)
+
+        for order in open_orders:
+            inst = instruments_map.get(str(order.ticker))
+            if not inst or not inst.id:
+                continue
+            price_close = latest_prices.get(inst.id)
+            if price_close is None:
+                continue
+            await position_tracker.execute_triggers(str(order.ticker), price_close)
     finally:
         db.close()
 
@@ -333,14 +396,29 @@ async def _check_daily_pnl() -> None:
 
         total = db.query(PortModel).all()
         current_value = 0.0
-        for p in total:
-            if not p.instrument_id:
-                continue
-            latest_price = (
-                db.query(Price.close).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
-            )
-            price = float(latest_price[0]) if latest_price else float(p.avg_price or 0)
-            current_value += float(p.quantity or 0) * price
+        if total:
+            inst_ids = [p.instrument_id for p in total if p.instrument_id]
+            latest_prices: dict[int, float] = {}
+            if inst_ids:
+                all_prices = (
+                    db.query(Price.instrument_id, Price.close)
+                    .filter(Price.instrument_id.in_(inst_ids))
+                    .order_by(Price.date.desc())
+                    .all()
+                )
+                seen: set[int] = set()
+                for row in all_prices:
+                    pid = getattr(row, "instrument_id", row[0] if isinstance(row, (list, tuple)) else None)
+                    close_val = getattr(row, "close", row[1] if isinstance(row, (list, tuple)) else None)
+                    if pid is not None and pid not in seen and close_val is not None:
+                        latest_prices[pid] = float(close_val)
+                        seen.add(pid)
+
+            for p in total:
+                if not p.instrument_id:
+                    continue
+                price = latest_prices.get(p.instrument_id, float(p.avg_price or 0))
+                current_value += float(p.quantity or 0) * price
         await async_update_day_value(current_value)
         await async_update_drawdown(current_value)
         pnl, pnl_pct = get_day_pnl()
@@ -386,8 +464,8 @@ async def run_execution_loop(interval: int = 300) -> None:
         from src.db.connection import init_db
 
         init_db()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to initialize DB in execution loop: %s", e)
 
     _load_daily_counters()
     _load_risk_params()

@@ -15,6 +15,7 @@ _position_limit_pct: Optional[float] = None
 
 # max drawdown
 _peak_value: Optional[float] = None
+_current_portfolio_value: Optional[float] = None
 _max_drawdown_pct: float = 0.20
 
 
@@ -52,9 +53,28 @@ RISK_PROFILE_MAP = {
 }
 
 
-def _load_risk_params() -> None:
+_INSANE_OPT_IN_KEY = "allow_insane_profile"
+
+
+def _resolve_risk_profile() -> dict[str, float]:
     profile = str(personal.get("risk_profile") or "balanced").lower()
-    mapping = RISK_PROFILE_MAP.get(profile, RISK_PROFILE_MAP["balanced"])
+    mapping = RISK_PROFILE_MAP.get(profile)
+    if mapping is None:
+        return RISK_PROFILE_MAP["balanced"]
+    if profile == "insane":
+        allow = personal.get(_INSANE_OPT_IN_KEY, False)
+        if not allow:
+            logger.warning(
+                "Risk profile 'insane' requires '%s=true' in personal_settings.yaml. "
+                "Falling back to 'aggressive'.",
+                _INSANE_OPT_IN_KEY,
+            )
+            return RISK_PROFILE_MAP["aggressive"]
+    return mapping
+
+
+def _load_risk_params() -> None:
+    mapping = _resolve_risk_profile()
     global _position_limit_pct, _daily_loss_limit, _max_drawdown_pct
     _position_limit_pct = mapping["max_position_pct"]
     _daily_loss_limit = mapping["daily_loss_limit"]
@@ -62,13 +82,11 @@ def _load_risk_params() -> None:
 
 
 def risk_per_trade() -> float:
-    profile = str(personal.get("risk_profile") or "balanced").lower()
-    return RISK_PROFILE_MAP.get(profile, RISK_PROFILE_MAP["balanced"])["risk_per_trade"]
+    return _resolve_risk_profile()["risk_per_trade"]
 
 
 def max_position_pct() -> float:
-    profile = str(personal.get("risk_profile") or "balanced").lower()
-    return RISK_PROFILE_MAP.get(profile, RISK_PROFILE_MAP["balanced"])["max_position_pct"]
+    return _resolve_risk_profile()["max_position_pct"]
 
 
 def max_drawdown_pct() -> float:
@@ -229,7 +247,8 @@ def check_news_sentiment(news_scores: list[float]) -> tuple[bool, str]:
 
 
 def update_drawdown(current_value: float) -> float:
-    global _peak_value
+    global _peak_value, _current_portfolio_value
+    _current_portfolio_value = current_value
     if _peak_value is None or current_value > _peak_value:
         _peak_value = current_value
     if _peak_value <= 0:
@@ -246,7 +265,9 @@ def reset_peak(value: float) -> None:
 
 
 def current_drawdown() -> float:
-    return 0.0
+    if _peak_value is None or _current_portfolio_value is None or _peak_value <= 0:
+        return 0.0
+    return (_current_portfolio_value - _peak_value) / _peak_value
 
 
 # track P&L for the day

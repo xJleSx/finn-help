@@ -43,6 +43,7 @@ dependencies = [
     "sentence-transformers>=5.6.0",
     "structlog>=25.0.0",
     "prometheus-client>=0.25.0",
+    "tenacity>=9.0.0",
 ]
 
 [project.scripts]
@@ -74,7 +75,7 @@ asyncio_default_fixture_loop_scope = "function"
 source = ["src"]
 
 [tool.coverage.report]
-fail_under = 40
+fail_under = 60
 exclude_also = [
     "def __repr__",
     "def __str__",

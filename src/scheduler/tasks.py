@@ -25,7 +25,7 @@ from src.scheduler.collectors import (
     run_news_summarizer,
     run_sector_impact_analysis,
 )
-from src.signal.engine import SignalFusionEngine
+from src.signals.engine import SignalFusionEngine
 from src.trading.brokers.sync import sync_portfolio_from_broker
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ async def daily_update() -> None:
 
         await run_sector_impact_analysis(db)
 
-        sync_result = await sync_portfolio_from_broker()
+        sync_result = await sync_portfolio_from_broker(user_id=1)
         if sync_result.get("positions_synced", 0) > 0 or sync_result.get("removed", 0) > 0:
             logger.info(
                 "Portfolio synced: %d positions, %d removed",

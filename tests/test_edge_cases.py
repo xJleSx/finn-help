@@ -178,19 +178,23 @@ class TestSectorAnalyzer:
 class TestBacktestEdgeCases:
     @pytest.mark.parametrize("slippage_bps", [0, 5, 10, 20])
     def test_various_slippage(self, slippage_bps):
-        from src.analysis.backtest import run_monte_carlo
+        from src.analysis.backtest import BacktestConfig, apply_costs
 
-        returns = [np.random.randn() * 0.02 for _ in range(100)]
-        mc = run_monte_carlo(returns)
-        assert isinstance(mc.simulations, int)
+        config = BacktestConfig(slippage_bps=slippage_bps)
+        net, slip, comm = apply_costs(0.01, True, 0.5, config)
+        assert net < 0.01
+        assert slip >= 0
+        assert comm >= 0
 
     @pytest.mark.parametrize("commission_pct", [0.0, 0.0005, 0.001, 0.003])
     def test_various_commission(self, commission_pct):
-        from src.analysis.backtest import run_monte_carlo
+        from src.analysis.backtest import BacktestConfig, apply_costs
 
-        returns = [np.random.randn() * 0.02 for _ in range(100)]
-        mc = run_monte_carlo(returns)
-        assert isinstance(mc.simulations, int)
+        config = BacktestConfig(commission_pct=commission_pct)
+        net, slip, comm = apply_costs(0.01, True, 0.5, config)
+        assert net < 0.01
+        assert slip >= 0
+        assert comm >= 0
 
     @pytest.mark.parametrize("initial_capital", [10000, 100000, 1000000])
     def test_various_capital(self, initial_capital):

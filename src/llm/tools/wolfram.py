@@ -1,7 +1,22 @@
 import asyncio
 import logging
+from typing import Any
 
 import httpx
+from tenacity import (
+    AsyncRetrying,
+    before_log,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+from src.core.resilience import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerOpenError,
+    get_circuit_breaker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +38,7 @@ class WolframAlphaClient:
     def __init__(self, app_id: str, rate_limiter: asyncio.Lock | None = None) -> None:
         self._app_id = app_id
         self._lock = rate_limiter or asyncio.Lock()
+        self._circuit_breaker: CircuitBreaker = get_circuit_breaker("wolfram")
 
     async def enrich_signal(self, ticker: str, queries: list[str]) -> dict[str, str]:
         results: dict[str, str] = {}
@@ -51,8 +67,9 @@ class WolframAlphaClient:
     async def _query(self, input_text: str) -> str:
         if not self._app_id:
             return ""
-        async with self._lock:
-            try:
+
+        async def _do_query() -> str:
+            async with self._lock:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.get(
                         WOLFRAM_LLM_URL,
@@ -66,12 +83,12 @@ class WolframAlphaClient:
                     if text and not text.startswith("Wolfram|Alpha did not understand"):
                         return text
                     return ""
-            except httpx.TimeoutException:
-                logger.warning("WolframAlpha timeout for: %s", input_text)
-                return ""
-            except httpx.HTTPStatusError as e:
-                logger.warning("WolframAlpha HTTP %s for: %s", e.response.status_code, input_text)
-                return ""
-            except Exception as e:
-                logger.warning("WolframAlpha error for '%s': %s", input_text, e)
-                return ""
+
+        try:
+            return await self._circuit_breaker.call(_do_query)
+        except CircuitBreakerOpenError:
+            logger.warning("wolfram.circuit_breaker.open, skipping query: %s", input_text)
+            return ""
+        except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
+            logger.warning("WolframAlpha failed for: %s", input_text, exc_info=True)
+            return ""

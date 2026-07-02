@@ -141,7 +141,7 @@ class TestSignalEngineIntegration:
     """Integration tests for signal generation pipeline."""
 
     def test_signal_fuse_returns_action(self, db_session):
-        from src.signal.engine import SignalFusionEngine
+        from src.signals.engine import SignalFusionEngine
 
         engine = SignalFusionEngine()
         result = engine.fuse(
@@ -157,7 +157,7 @@ class TestSignalEngineIntegration:
         assert result["action"] in ("BUY", "CAUTIOUS_BUY", "HOLD", "SELL", "NEUTRAL")
 
     def test_signal_fuse_with_high_geo_risk(self, db_session):
-        from src.signal.engine import SignalFusionEngine
+        from src.signals.engine import SignalFusionEngine
 
         engine = SignalFusionEngine()
         result = engine.fuse(

@@ -1,10 +1,13 @@
+import secrets
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
 load_dotenv()
+
+_DEFAULT_JWT = secrets.token_urlsafe(48)
 
 
 PERSONAL_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "personal_settings.yaml"
@@ -29,9 +32,9 @@ class Settings(BaseSettings):
     social_groq_model: str = "llama-3.1-8b-instant"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
-    jwt_secret: str = ""
+    jwt_secret: str = _DEFAULT_JWT
     jwt_expire_minutes: int = 15
-    password_min_length: int = 6
+    password_min_length: int = 8
     tinkoff_token: str = ""
     tinkoff_sandbox: bool = True
     database_url: str = "postgresql://finn:finn@localhost:5432/finn"
@@ -45,6 +48,7 @@ class Settings(BaseSettings):
     ssl_tbank_verify: bool = True
     enable_trading: bool = False
     max_trades_per_day: int = 5
+    metrics_token: str = ""
 
     wolfram_app_id: str = ""
     wolfram_enabled: bool = True
@@ -108,6 +112,8 @@ class Settings(BaseSettings):
     alert_cooldown_minutes: int = 60
     alert_min_impact_abs: float = 0.005
     alert_max_alerts_per_run: int = 20
+
+    redis_password: str = ""
 
     smtp_host: str = ""
     smtp_port: int = 587

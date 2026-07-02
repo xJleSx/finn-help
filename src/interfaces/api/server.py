@@ -6,12 +6,11 @@ from typing import Any, AsyncIterator, Optional
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from prometheus_client import Counter, Histogram, generate_latest
 from pydantic import BaseModel, Field, field_validator
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 from sqlalchemy import func as sqlfunc
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +24,7 @@ from src.interfaces.api.routes.analysis import router as analysis_router
 from src.interfaces.api.routes_instruments import router as instruments_router
 from src.interfaces.api.routes_market import router as market_router
 from src.interfaces.api.routes_portfolio import router as portfolio_router
+from src.interfaces.api.rate_limiter import limiter
 from src.interfaces.api.schemas import AuthTokenResponse, HealthResponse, UserResponse
 from src.scheduler.service import run_forever
 from src.scheduler.service import stop as stop_scheduler
@@ -33,8 +33,6 @@ logger = structlog.get_logger(__name__)
 
 HTTP_REQUESTS = Counter("http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"])
 HTTP_LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency", ["method", "endpoint"])
-
-limiter = Limiter(key_func=get_remote_address)
 
 
 @asynccontextmanager
@@ -50,17 +48,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("startup.trade_mode", mode="DRY_RUN" if not settings.enable_trading else "AUTO")
     scheduler_task = asyncio.create_task(run_forever())
     yield
+    logger.info("shutdown.stopping_scheduler")
     stop_scheduler()
     scheduler_task.cancel()
     try:
-        await scheduler_task
+        await asyncio.wait_for(scheduler_task, timeout=10.0)
     except asyncio.CancelledError:
         pass
+    except asyncio.TimeoutError:
+        logger.warning("shutdown.scheduler_timeout")
+    logger.info("shutdown.complete")
 
 
 app = FastAPI(title="FinAdvisor API", version="0.1.0", lifespan=lifespan)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.exception_handler(Exception)
@@ -86,6 +88,17 @@ app.add_middleware(
 
 
 @app.middleware("http")
+async def security_headers_middleware(request: Request, call_next: Any) -> Response:
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    return response
+
+
+@app.middleware("http")
 async def prometheus_middleware(request: Request, call_next: Any) -> Response:
     with HTTP_LATENCY.labels(method=request.method, endpoint=request.url.path).time():
         response = await call_next(request)
@@ -100,9 +113,18 @@ app.include_router(market_router)
 
 
 @app.get("/metrics")
-async def metrics() -> Response:
-    from fastapi.responses import PlainTextResponse
+async def metrics(request: Request) -> Response:
+    token = settings.metrics_token
+    if not token:
+        logger.warning("METRICS_TOKEN not set — /metrics only accessible from localhost")
+        host = request.client.host if request.client else ""
+        if host not in ("127.0.0.1", "::1", "localhost"):
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return PlainTextResponse(generate_latest().decode("utf-8"), media_type="text/plain")
 
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {token}":
+        raise HTTPException(status_code=403, detail="Forbidden")
     return PlainTextResponse(generate_latest().decode("utf-8"), media_type="text/plain")
 
 
