@@ -131,7 +131,7 @@ jobs:
         run: uv sync --group dev --group ml
 
       - name: pip-audit
-        run: uv run pip-audit --strict --skip-editable
+        run: uv run pip-audit --strict --ignore-vuln finn-help
 
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
