@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from src.db.models import User
 from src.interfaces.api.auth import get_current_user
-from src.interfaces.api.dependencies import get_market_service
+from src.interfaces.api.dependencies import get_market_service, get_market_service_readonly
 from src.interfaces.api.rate_limiter import limiter
 from src.interfaces.api.schemas import (
     AdviceResponse,
@@ -33,7 +33,7 @@ class AskBody(BaseModel):
 @router.get("/api/instruments", response_model=list[InstrumentListItem])
 async def list_instruments(
     type_filter: Optional[str] = Query(None, alias="type"),
-    svc: MarketService = Depends(get_market_service),
+    svc: MarketService = Depends(get_market_service_readonly),
 ) -> list[dict[str, Any]]:
     return await svc.list_instruments(type_filter)
 
@@ -41,7 +41,7 @@ async def list_instruments(
 @router.get("/api/instruments/{ticker}", response_model=InstrumentDetail)
 async def get_instrument(
     ticker: str,
-    svc: MarketService = Depends(get_market_service),
+    svc: MarketService = Depends(get_market_service_readonly),
 ) -> dict[str, Any]:
     return await svc.get_instrument(ticker)
 
@@ -50,7 +50,7 @@ async def get_instrument(
 async def get_prices(
     ticker: str,
     days: int = Query(365, le=365 * 5),
-    svc: MarketService = Depends(get_market_service),
+    svc: MarketService = Depends(get_market_service_readonly),
 ) -> list[dict[str, Any]]:
     return await svc.get_prices(ticker, days)
 
@@ -59,7 +59,7 @@ async def get_prices(
 async def get_indicators(
     ticker: str,
     days: int = Query(90),
-    svc: MarketService = Depends(get_market_service),
+    svc: MarketService = Depends(get_market_service_readonly),
 ) -> list[dict[str, Any]]:
     return await svc.get_indicators(ticker, days)
 
@@ -67,7 +67,7 @@ async def get_indicators(
 @router.get("/api/instruments/{ticker}/signal")
 async def get_signal(
     ticker: str,
-    svc: MarketService = Depends(get_market_service),
+    svc: MarketService = Depends(get_market_service_readonly),
 ) -> Any:
     return await svc.get_signal(ticker)
 
@@ -76,7 +76,7 @@ async def get_signal(
 async def get_trade_plan(
     ticker: str,
     profile: str = Query("balanced"),
-    svc: MarketService = Depends(get_market_service),
+    svc: MarketService = Depends(get_market_service_readonly),
 ) -> dict[str, Any]:
     return await svc.get_trade_plan(ticker, profile)
 
@@ -85,7 +85,7 @@ async def get_trade_plan(
 async def get_advice(
     ticker: str,
     user: Optional[User] = Depends(get_current_user),
-    svc: MarketService = Depends(get_market_service),
+    svc: MarketService = Depends(get_market_service_readonly),
 ) -> dict[str, Any]:
     return await svc.get_advice(ticker, int(user.id) if user else None)
 

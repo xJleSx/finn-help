@@ -65,11 +65,11 @@ class PortfolioService:
         await self.db.commit()
         return {"status": "ok"}
 
-    async def allocate(self, capital: float) -> Any:
+    async def allocate(self, capital: float, user_id: int | None = None) -> Any:
         from src.portfolio.allocator import allocator
 
         try:
-            return await allocator.allocate_async(capital, db=self.db)
+            return await allocator.allocate_async(capital, db=self.db, user_id=user_id)
         except Exception as e:
             logger.exception("allocation_failed", capital=capital)
             raise HTTPException(500, f"Allocation failed: {e}")

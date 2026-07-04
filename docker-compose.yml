@@ -15,6 +15,36 @@ services:
       timeout: 3s
       retries: 5
 
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DB_USER: finn
+      DB_PASSWORD: ${DB_PASSWORD:-finn}
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: finn
+      POOL_MODE: transaction
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_POOL_SIZE:-25}
+      MAX_DB_CONNECTIONS: ${PGBOUNCER_MAX_CONNECTIONS:-50}
+      SERVER_IDLE_TIMEOUT: 600
+    ports:
+      - "5433:5432"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - finn_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   api:
     build:
       context: .
@@ -22,13 +52,20 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-finn}@db:5432/finn
+      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-finn}@pgbouncer:5432/finn
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - LOG_LEVEL=INFO
       - CORS_ORIGINS=http://localhost:3000
       - JWT_SECRET=${JWT_SECRET}
       - FINN_ENV=production
+      - DB_POOL_SIZE=5
+      - DB_MAX_OVERFLOW=10
     depends_on:
-      db:
+      pgbouncer:
+        condition: service_started
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
@@ -36,6 +73,46 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A src.tasks worker --loglevel=INFO --concurrency=${CELERY_CONCURRENCY:-2}
+    environment:
+      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-finn}@pgbouncer:5432/finn
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - LOG_LEVEL=INFO
+      - FINN_ENV=production
+    volumes:
+      - finn_data:/app/data
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A src.tasks beat --loglevel=INFO --scheduler celery.beat.PersistentScheduler
+    environment:
+      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-finn}@pgbouncer:5432/finn
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - LOG_LEVEL=INFO
+      - FINN_ENV=production
+    volumes:
+      - finn_data:/app/data
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
   web:
     build:
@@ -58,3 +135,5 @@ services:
 
 volumes:
   finn_postgres:
+  finn_redis:
+  finn_data:

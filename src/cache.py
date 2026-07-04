@@ -1,35 +1,52 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable
+
+import redis as redis_mod
+from redis import ConnectionPool
+
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-_redis: Any = None
+_pool: ConnectionPool | None = None
 _memory_cache: dict[str, tuple[float, Any]] = {}
 
 
-def get_redis() -> Any:
-    global _redis
-    if _redis is None:
+def _get_pool() -> ConnectionPool | None:
+    global _pool
+    if _pool is None:
         try:
-            import redis as redis_mod
-
-            from src.config import settings
-
-            redis_password = getattr(settings, "redis_password", "") or None
-            _redis = redis_mod.Redis(
-                host="localhost", port=6379, db=0,
-                password=redis_password,
-                decode_responses=True, socket_connect_timeout=2, socket_timeout=2,
+            url = settings.redis_url or "redis://localhost:6379/0"
+            _pool = ConnectionPool.from_url(
+                url,
+                max_connections=settings.redis_max_connections,
+                socket_connect_timeout=settings.redis_socket_connect_timeout,
+                socket_timeout=settings.redis_socket_timeout,
+                decode_responses=True,
             )
-            _redis.ping()
-            logger.info("Redis connected at localhost:6379")
+            r = redis_mod.Redis(connection_pool=_pool)
+            r.ping()
+            logger.info("Redis connected: %s", url)
         except Exception:
             logger.warning("Redis unavailable, using in-memory fallback")
-            _redis = False
-    return _redis if _redis else None
+            _pool = False
+    return _pool if _pool else None
+
+
+def get_redis() -> Any:
+    pool = _get_pool()
+    if pool is None:
+        return None
+    try:
+        return redis_mod.Redis(connection_pool=pool)
+    except Exception:
+        logger.warning("Failed to get Redis connection from pool")
+        return None
 
 
 def make_key(prefix: str, *args: Any, **kwargs: Any) -> str:
@@ -39,7 +56,7 @@ def make_key(prefix: str, *args: Any, **kwargs: Any) -> str:
 
 def cached(
     ttl: int = 300,
-    prefix: Optional[str] = None,
+    prefix: str | None = None,
 ) -> Callable[..., Any]:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -91,3 +108,15 @@ def invalidate(pattern: str) -> None:
     keys_to_delete = [k for k in _memory_cache if k.startswith(key.replace("*", ""))]
     for k in keys_to_delete:
         _memory_cache.pop(k, None)
+
+
+def close_redis() -> None:
+    global _pool
+    if _pool and _pool is not False:
+        try:
+            _pool.disconnect()
+            logger.info("Redis connection pool closed")
+        except Exception as e:
+            logger.warning("Failed to close Redis pool: %s", e)
+    _pool = None
+    _memory_cache.clear()

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { api } from "../lib/api-client";
 
 export default function SectorHeatmap() {
   const [sectors, setSectors] = useState<Record<string, number>>({});

@@ -23,7 +23,7 @@ export default function DonutChart({ plan, capital }: { plan: Record<string, All
 
   return (
     <svg width={300} height={300} viewBox="0 0 300 300" className="drop-shadow-lg">
-      {segments.map((seg, i) => {
+      {segments.map((seg) => {
         const p = seg.pct * 360;
         const s = seg.start * 360;
         const sr = (s - 90) * (Math.PI / 180);

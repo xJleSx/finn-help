@@ -116,7 +116,25 @@ class Settings(BaseSettings):
     alert_min_impact_abs: float = 0.005
     alert_max_alerts_per_run: int = 20
 
+    redis_url: str = "redis://localhost:6379/0"
     redis_password: str = ""
+    redis_socket_timeout: int = 2
+    redis_socket_connect_timeout: int = 2
+    redis_max_connections: int = 20
+
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_timeout: int = 30
+    db_pool_recycle: int = 3600
+    db_pool_pre_ping: bool = True
+    db_read_replica_url: str = ""
+
+    celery_broker_url: str = "redis://localhost:6379/1"
+    celery_result_backend: str = "redis://localhost:6379/2"
+    celery_task_always_eager: bool = False
+    celery_worker_concurrency: int = 2
+    celery_task_soft_time_limit: int = 300
+    celery_task_hard_time_limit: int = 600
 
     smtp_host: str = ""
     smtp_port: int = 587

@@ -11,11 +11,6 @@ const nextConfig: NextConfig = {
     minimumCacheTTL: 86400,
   },
 
-  i18n: {
-    locales: ["ru", "en"],
-    defaultLocale: "ru",
-  },
-
   poweredByHeader: false,
 
   experimental: {

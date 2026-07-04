@@ -1,0 +1,22 @@
+[project]
+name = "financemarker-api"
+version = "0.1.0"
+description = "Portable CLI skill for FinanceMarker.ru fundamental data API"
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+markers = [
+    "live: hits the real FinanceMarker API; needs a valid FM_API_TOKEN",
+]

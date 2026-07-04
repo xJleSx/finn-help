@@ -1,0 +1,4 @@
+# Stdlib only — requests, sqlite3, json, logging are all in Python 3.10+.
+# Add runtime deps here with a pinned version when needed.
+pytest==8.3.3
+ruff==0.6.9

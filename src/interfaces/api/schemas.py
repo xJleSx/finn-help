@@ -13,9 +13,15 @@ class HealthResponse(BaseModel):
 
 class AuthTokenResponse(BaseModel):
     access_token: str = Field(..., description="JWT access token")
+    refresh_token: str = Field(..., description="JWT refresh token (30-day expiry)")
     token_type: str = Field(..., description="Token type (bearer)")
     user_id: int = Field(..., description="User identifier")
     username: str = Field(..., description="Display name")
+
+
+class RefreshTokenResponse(BaseModel):
+    access_token: str = Field(..., description="New JWT access token")
+    token_type: str = Field(..., description="Token type (bearer)")
 
 
 class UserResponse(BaseModel):
@@ -243,3 +249,10 @@ class ImpactAttributionResponse(BaseModel):
     news_id: int = Field(..., description="News article ID")
     ticker: str = Field(..., description="Affected ticker")
     feature_importances: list[FeatureImportance] = Field(..., description="Top features")
+
+
+class AlertPreferencesResponse(BaseModel):
+    min_severity: str = Field(..., description="Minimum alert severity (LOW, MEDIUM, HIGH, CRITICAL)")
+    muted_tickers: list[str] = Field(..., description="List of muted tickers")
+    quiet_hours_start: str | None = Field(None, description="Quiet hours start time (HH:MM)")
+    quiet_hours_end: str | None = Field(None, description="Quiet hours end time (HH:MM)")

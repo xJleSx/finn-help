@@ -5,7 +5,7 @@ import type { AllocationPlan } from "./types";
 import ContributionBar from "./ContributionBar";
 import SectorBreakdown from "./SectorBreakdown";
 import DonutChart from "./DonutChart";
-import { api } from "../lib/api";
+import { api } from "../lib/api-client";
 
 function formatCurrency(v: number) {
   return v.toLocaleString("ru-RU", { style: "currency", currency: "RUB", minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -19,8 +19,6 @@ export default function AllocationSection({ onSelectTicker }: { onSelectTicker: 
   const [capital, setCapital] = useState("100000");
   const [allocation, setAllocation] = useState<AllocationPlan | null>(null);
   const [loadingAlloc, setLoadingAlloc] = useState(false);
-  const [showAlloc, setShowAlloc] = useState(false);
-
   const fetchAllocation = async () => {
     setLoadingAlloc(true);
     try {
@@ -28,7 +26,6 @@ export default function AllocationSection({ onSelectTicker }: { onSelectTicker: 
       const alloc = await api.portfolio.allocate(val);
       setAllocation(alloc);
       setCapital(String(val));
-      setShowAlloc(true);
     } catch (e) {
       console.error("Allocation failed", e);
     } finally {

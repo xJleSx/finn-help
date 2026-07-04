@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import User
-from src.interfaces.api.auth import create_token, hash_password, verify_password
+from src.interfaces.api.auth import create_refresh_token, create_token, hash_password, verify_password
 
 logger = structlog.get_logger(__name__)
 
@@ -36,7 +36,8 @@ class AuthService:
         await self.db.commit()
         await self.db.refresh(user)
         token = create_token(int(user.id), str(user.username))
-        return {"access_token": token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
+        refresh_token = create_refresh_token(int(user.id), str(user.username))
+        return {"access_token": token, "refresh_token": refresh_token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
 
     async def login(self, username: str, password: str) -> dict[str, Any]:
         result = await self.db.execute(select(User).where(User.username == username))
@@ -44,7 +45,8 @@ class AuthService:
         if not user or not verify_password(password, str(user.hashed_password)):
             raise HTTPException(401, "Invalid credentials")
         token = create_token(int(user.id), str(user.username))
-        return {"access_token": token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
+        refresh_token = create_refresh_token(int(user.id), str(user.username))
+        return {"access_token": token, "refresh_token": refresh_token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
 
     async def get_me(self, user: User) -> dict[str, Any]:
         return {

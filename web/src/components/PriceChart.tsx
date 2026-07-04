@@ -1,14 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { api } from "../lib/api-client";
 
-type PricePoint = { date: string; close: number; volume?: number };
-
-type Instrument = {
-  id: number; ticker: string; full_name: string; type: string;
-  last_price: number | null; last_date: string | null;
-};
+type PricePoint = { date: string; close: number; volume?: number | null };
 
 export default function PriceChart({ ticker, company }: { ticker: string; company: string }) {
   const chartRef = useRef<HTMLDivElement>(null);
@@ -26,21 +21,33 @@ export default function PriceChart({ ticker, company }: { ticker: string; compan
 
   useEffect(() => {
     if (!chartRef.current || prices.length === 0) return;
-    let chart: any, line: any, smaLine: any;
+
+    let cleanup: (() => void) | undefined;
 
     import("lightweight-charts").then((lc) => {
-      chart = lc.createChart(chartRef.current!, {
-        width: chartRef.current!.clientWidth,
+      if (!chartRef.current) return;
+
+      const chart = lc.createChart(chartRef.current, {
+        width: chartRef.current.clientWidth,
         height: 280,
-        layout: { background: { type: lc.ColorType.Solid, color: "transparent" } as any, textColor: "#9CA3AF" },
-        grid: { vertLines: { color: "rgba(255,255,255,0.03)" }, horzLines: { color: "rgba(255,255,255,0.03)" } },
-        crosshair: { vertLine: { color: "#F0B90B", width: 1, style: 2 }, horzLine: { color: "#F0B90B", width: 1, style: 2 } },
+        layout: {
+          background: { type: lc.ColorType.Solid, color: "transparent" },
+          textColor: "#9CA3AF",
+        },
+        grid: {
+          vertLines: { color: "rgba(255,255,255,0.03)" },
+          horzLines: { color: "rgba(255,255,255,0.03)" },
+        },
+        crosshair: {
+          vertLine: { color: "#F0B90B", width: 1, style: lc.LineStyle.Dashed },
+          horzLine: { color: "#F0B90B", width: 1, style: lc.LineStyle.Dashed },
+        },
         timeScale: { borderColor: "rgba(255,255,255,0.08)" },
         rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
       });
 
-      const data = prices.map((p) => ({ time: p.date.slice(0, 10), value: p.close }));
-      line = chart.addLineSeries({ color: "#F0B90B", lineWidth: 2, crosshairMarkerVisible: true });
+      const data = prices.map((p) => ({ time: p.date.slice(0, 10) as string, value: p.close }));
+      const line = chart.addSeries(lc.LineSeries, { color: "#F0B90B", lineWidth: 2, crosshairMarkerVisible: true });
       line.setData(data);
 
       if (showSMA) {
@@ -49,7 +56,7 @@ export default function PriceChart({ ticker, company }: { ticker: string; compan
           const vals = arr.slice(i - 19, i + 1).map((x) => x.value);
           return { ...d, value: vals.reduce((a, b) => a + b, 0) / vals.length };
         });
-        smaLine = chart.addLineSeries({ color: "#10B981", lineWidth: 1, lineStyle: 2 });
+        const smaLine = chart.addSeries(lc.LineSeries, { color: "#10B981", lineWidth: 1, lineStyle: lc.LineStyle.Dotted });
         smaLine.setData(smaData);
       }
 
@@ -57,11 +64,14 @@ export default function PriceChart({ ticker, company }: { ticker: string; compan
         if (chartRef.current) chart.applyOptions({ width: chartRef.current.clientWidth });
       };
       window.addEventListener("resize", handleResize);
-      return () => {
+
+      cleanup = () => {
         window.removeEventListener("resize", handleResize);
         chart.remove();
       };
     });
+
+    return () => cleanup?.();
   }, [prices, showSMA]);
 
   const periods = ["1Н", "1М", "3М", "1Г"];

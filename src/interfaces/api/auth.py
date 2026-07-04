@@ -18,9 +18,13 @@ logger = logging.getLogger(__name__)
 if not settings.jwt_secret:
     logger.warning("JWT_SECRET is not configured. Using auto-generated secret — all existing tokens will be invalidated on restart.")
 SECRET_KEY = settings.jwt_secret or "insecure-fallback-not-for-production"
+REFRESH_SECRET_KEY = settings.jwt_secret + "_refresh" if settings.jwt_secret else "insecure-refresh-fallback"
 ALGORITHM = "HS256"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+# In-memory blacklist for refresh tokens (use Redis in production)
+_refresh_blacklist: set[str] = set()
 
 
 def hash_password(password: str) -> str:
@@ -34,8 +38,17 @@ def verify_password(plain: str, hashed: str) -> bool:
 def create_token(user_id: int, username: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
     return jwt.encode(
-        {"sub": str(user_id), "username": username, "exp": expire},
+        {"sub": str(user_id), "username": username, "exp": expire, "type": "access"},
         SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def create_refresh_token(user_id: int, username: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(days=30)
+    return jwt.encode(
+        {"sub": str(user_id), "username": username, "exp": expire, "type": "refresh"},
+        REFRESH_SECRET_KEY,
         algorithm=ALGORITHM,
     )
 
@@ -48,8 +61,33 @@ def decode_token(token: str) -> dict[str, Any]:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
+def decode_refresh_token(token: str) -> dict[str, Any]:
+    try:
+        payload = jwt.decode(token, REFRESH_SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+        return payload
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+
+def blacklist_refresh_token(token: str) -> None:
+    _refresh_blacklist.add(token)
+
+
+def is_refresh_token_blacklisted(token: str) -> bool:
+    return token in _refresh_blacklist
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async for session in get_async_session():
+        yield session
+
+
+async def get_read_db() -> AsyncGenerator[AsyncSession, None]:
+    from src.db.connection import get_read_replica_session
+
+    async for session in get_read_replica_session():
         yield session
 
 

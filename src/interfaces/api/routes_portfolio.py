@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from src.db.models import User
 from src.interfaces.api.auth import get_current_user, require_user
-from src.interfaces.api.dependencies import get_portfolio_service
+from src.interfaces.api.dependencies import get_portfolio_service, get_portfolio_service_readonly
 from src.interfaces.api.schemas import AllocationResponse, PortfolioAddResponse, PortfolioPosition
 from src.portfolio.service import PortfolioService
 from src.reports import generate_portfolio_csv, generate_sector_report_csv, generate_signals_csv
@@ -25,7 +25,7 @@ class AllocateBody(BaseModel):
 @router.get("/api/portfolio", response_model=list[PortfolioPosition])
 async def get_portfolio(
     user: User = Depends(require_user),
-    svc: PortfolioService = Depends(get_portfolio_service),
+    svc: PortfolioService = Depends(get_portfolio_service_readonly),
 ) -> list[dict[str, Any]]:
     return await svc.get_positions(user.id)
 
@@ -51,13 +51,13 @@ async def allocate_portfolio(
     user: User = Depends(require_user),
     svc: PortfolioService = Depends(get_portfolio_service),
 ) -> Any:
-    return await svc.allocate(body.capital)
+    return await svc.allocate(body.capital, user_id=user.id)
 
 
 @router.get("/api/reports/portfolio")
 async def report_portfolio_csv(
     user: Optional[User] = Depends(get_current_user),
-    svc: PortfolioService = Depends(get_portfolio_service),
+    svc: PortfolioService = Depends(get_portfolio_service_readonly),
 ) -> PlainTextResponse:
     positions = await svc.get_positions_for_csv(user.id if user else None)
     csv_content = generate_portfolio_csv(positions)
@@ -69,7 +69,7 @@ async def report_portfolio_csv(
 
 
 @router.get("/api/reports/signals")
-async def report_signals_csv(svc: PortfolioService = Depends(get_portfolio_service)) -> PlainTextResponse:
+async def report_signals_csv(svc: PortfolioService = Depends(get_portfolio_service_readonly)) -> PlainTextResponse:
     signal_list = await svc.get_signals_for_csv()
     csv_content = generate_signals_csv(signal_list)
     return PlainTextResponse(
@@ -80,7 +80,7 @@ async def report_signals_csv(svc: PortfolioService = Depends(get_portfolio_servi
 
 
 @router.get("/api/reports/sectors")
-async def report_sectors_csv(svc: PortfolioService = Depends(get_portfolio_service)) -> PlainTextResponse:
+async def report_sectors_csv(svc: PortfolioService = Depends(get_portfolio_service_readonly)) -> PlainTextResponse:
     perf, vol = await svc.get_sectors_for_csv()
     csv_content = generate_sector_report_csv(perf, vol)
     return PlainTextResponse(

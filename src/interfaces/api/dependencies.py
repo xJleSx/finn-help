@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.analysis.service import AnalysisService
 from src.core.auth_service import AuthService
-from src.interfaces.api.auth import get_db
+from src.interfaces.api.auth import get_db, get_read_db
 from src.market.service import MarketService
 from src.notifications.service import NotificationService
 from src.portfolio.service import PortfolioService
@@ -19,7 +19,15 @@ def get_portfolio_service(db: AsyncSession = Depends(get_db)) -> PortfolioServic
     return PortfolioService(db)
 
 
+def get_portfolio_service_readonly(db: AsyncSession = Depends(get_read_db)) -> PortfolioService:
+    return PortfolioService(db)
+
+
 def get_market_service(db: AsyncSession = Depends(get_db)) -> MarketService:
+    return MarketService(db)
+
+
+def get_market_service_readonly(db: AsyncSession = Depends(get_read_db)) -> MarketService:
     return MarketService(db)
 
 

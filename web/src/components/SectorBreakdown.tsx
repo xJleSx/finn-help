@@ -1,6 +1,6 @@
 "use client";
 
-export default function SectorBreakdown({ sectors, capital }: { sectors: Record<string, number>; capital: number }) {
+export default function SectorBreakdown({ sectors }: { sectors: Record<string, number>; capital?: number }) {
   const sectorColors: Record<string, string> = {
     Финансы: "bg-blue-500", Нефть: "bg-yellow-600", Металлы: "bg-orange-500",
     IT: "bg-purple-500", Потребительский: "bg-pink-500", Телеком: "bg-cyan-500",

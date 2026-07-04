@@ -73,18 +73,27 @@ class _MemoryCache:
 _mem = _MemoryCache()
 
 _redis_instance: Any = None
+_redis_pool: Any = None
 
 
 def _get_redis() -> Any:
-    global _redis_instance
+    global _redis_instance, _redis_pool
     if _redis_instance is None:
         try:
             import redis as redis_mod
+            from redis import ConnectionPool
 
-            _redis_instance = redis_mod.Redis(
-                host="localhost", port=6379, db=1, decode_responses=True,
-                socket_connect_timeout=2, socket_timeout=2,
+            from src.config import settings
+
+            url = settings.redis_url or "redis://localhost:6379/0"
+            _redis_pool = ConnectionPool.from_url(
+                url, db=1,
+                max_connections=settings.redis_max_connections,
+                socket_connect_timeout=settings.redis_socket_connect_timeout,
+                socket_timeout=settings.redis_socket_timeout,
+                decode_responses=True,
             )
+            _redis_instance = redis_mod.Redis(connection_pool=_redis_pool)
             _redis_instance.ping()
         except Exception:
             _redis_instance = False

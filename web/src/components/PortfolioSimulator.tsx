@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { api } from "../lib/api-client";
 
-type PricePoint = { date: string; close: number; volume?: number };
+type PricePoint = { date: string; close: number; volume?: number | null };
 
 type SimulationResult = {
   mean_return: number; median_return: number; best_return: number; worst_return: number;

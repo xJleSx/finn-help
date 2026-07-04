@@ -1,6 +1,8 @@
 "use client";
 
-export default function ContributionBar({ plan, capital }: { plan: Record<string, any>; capital: number }) {
+import type { AllocationCategory } from "./types";
+
+export default function ContributionBar({ plan, capital }: { plan: Record<string, AllocationCategory>; capital: number }) {
   const colors: Record<string, string> = { etf: "bg-amber-400", dividend: "bg-emerald-500", bond: "bg-orange-500", growth: "bg-violet-500" };
   const labels: Record<string, string> = { etf: "БПИФ", dividend: "Дивиденды", bond: "Облигации", growth: "Рост" };
 

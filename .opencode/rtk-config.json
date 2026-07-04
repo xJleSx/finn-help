@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "logSavings": false,
+  "showUpdateEvery": 0,
+  "techniques": {
+    "ansiStripping": true,
+    "truncation": { "enabled": true, "maxChars": 5000 },
+    "sourceCodeFiltering": "minimal",
+    "smartTruncation": { "enabled": true, "maxLines": 100 },
+    "testOutputAggregation": true,
+    "buildOutputFiltering": true,
+    "gitCompaction": true,
+    "searchResultGrouping": true,
+    "linterAggregation": true
+  }
+}

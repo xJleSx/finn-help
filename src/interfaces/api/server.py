@@ -22,10 +22,20 @@ from src.core.health import health_registry
 from src.core.logging import setup_logging
 from src.core.sentry import setup_sentry
 from src.db.models import Instrument, Price, Signal, User
-from src.interfaces.api.auth import get_db, require_user
+from src.interfaces.api.auth import (
+    blacklist_refresh_token,
+    create_token,
+    decode_refresh_token,
+    get_db,
+    is_refresh_token_blacklisted,
+    require_user,
+)
 from src.interfaces.api.dependencies import get_auth_service
 from src.interfaces.api.rate_limiter import limiter
+from src.interfaces.api.routes.alert_preferences import router as alert_prefs_router
 from src.interfaces.api.routes.analysis import router as analysis_router
+from src.interfaces.api.routes.backtest import router as backtest_router
+from src.interfaces.api.routes.paper_trading import router as paper_trading_router
 from src.interfaces.api.routes_instruments import router as instruments_router
 from src.interfaces.api.routes_market import router as market_router
 from src.interfaces.api.routes_portfolio import router as portfolio_router
@@ -44,7 +54,7 @@ HTTP_LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
-    from src.db.connection import init_db
+    from src.db.connection import close_db, init_db
 
     try:
         init_db()
@@ -64,6 +74,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pass
     except asyncio.TimeoutError:
         logger.warning("shutdown.scheduler_timeout")
+    try:
+        from src.cache import close_redis
+        close_redis()
+    except Exception:
+        pass
+    close_db()
     logger.info("shutdown.complete")
 
 
@@ -140,7 +156,10 @@ async def prometheus_middleware(request: Request, call_next: Any) -> Response:
     return response
 
 
+app.include_router(alert_prefs_router)
 app.include_router(analysis_router)
+app.include_router(backtest_router)
+app.include_router(paper_trading_router)
 app.include_router(instruments_router)
 app.include_router(portfolio_router)
 app.include_router(market_router)
@@ -160,6 +179,41 @@ async def metrics(request: Request) -> Response:
     if auth != f"Bearer {token}":
         raise HTTPException(status_code=403, detail="Forbidden")
     return PlainTextResponse(generate_latest().decode("utf-8"), media_type="text/plain")
+
+
+class RefreshBody(BaseModel):
+    refresh_token: str
+
+
+@app.post("/api/auth/refresh")
+@limiter.limit("10/minute")
+async def refresh_token(
+    request: Request,
+    body: RefreshBody,
+) -> dict[str, Any]:
+    if is_refresh_token_blacklisted(body.refresh_token):
+        raise HTTPException(status_code=401, detail="Refresh token revoked")
+    try:
+        payload = decode_refresh_token(body.refresh_token)
+        user_id = int(payload.get("sub", 0))
+        username = str(payload.get("username", ""))
+        if not user_id or not username:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+        new_token = create_token(user_id, username)
+        return {"access_token": new_token, "token_type": "bearer"}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+
+@app.post("/api/auth/logout")
+async def logout(
+    request: Request,
+    body: RefreshBody,
+) -> dict[str, str]:
+    blacklist_refresh_token(body.refresh_token)
+    return {"status": "ok"}
 
 
 @app.get("/api/health", response_model=HealthResponse)

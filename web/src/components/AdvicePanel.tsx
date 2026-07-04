@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Instrument } from "./types";
-import { api } from "../lib/api";
+import { api } from "../lib/api-client";
 
 export default function AdvicePanel({ selectedTicker, onSelectTicker, instruments }: {
   selectedTicker: string; onSelectTicker: (t: string) => void; instruments: Instrument[];

@@ -789,6 +789,145 @@ def scheduler() -> None:
     asyncio.run(run_forever())
 
 
+# ── Paper trading CLI ─────────────────────────────────────────────────────────
+
+paper_app = typer.Typer(help="Paper trading — симуляция сделок без реальных денег")
+
+
+@paper_app.command()
+def status() -> None:
+    """Показать состояние paper-счёта"""
+    from src.trading.paper import PaperTradingEngine
+
+    engine = PaperTradingEngine(user_id=0)
+    state = engine.get_state()
+    equity = state.total_equity()
+    console.print("[bold cyan]Paper Trading Status[/bold cyan]")
+    console.print(f"  Баланс: {state.balance:,.2f} ₽")
+    console.print(f"  Начальный капитал: {state.initial_capital:,.2f} ₽")
+    console.print(f"  Суммарная equity: {equity:,.2f} ₽")
+    console.print(f"  Доходность: {((equity / state.initial_capital) - 1) * 100:+.2f}%")
+    console.print(f"  Сделок: {len(state.trades)}")
+    console.print(f"  Позиций: {len(state.positions)}")
+    console.print(f"  Старт: {state.start_time}")
+    if state.positions:
+        console.print("\n[bold]Позиции:[/bold]")
+        for p in sorted(state.positions.values(), key=lambda x: x.quantity * x.avg_price, reverse=True):
+            console.print(f"  {p.ticker}: {p.quantity:.0f} × {p.avg_price:.2f} = {p.quantity * p.avg_price:,.2f} ₽")
+
+
+@paper_app.command()
+def buy(
+    ticker: str = typer.Argument(..., help="Тикер"),
+    quantity: float = typer.Argument(..., help="Количество"),
+    price: float = typer.Argument(None, help="Цена (опционально)"),
+    reason: str = typer.Option("", "--reason", "-r", help="Причина сделки"),
+) -> None:
+    """Купить тикер в paper-портфеле"""
+    from src.trading.paper import PaperTradingEngine
+
+    engine = PaperTradingEngine(user_id=0)
+    result = engine.execute_order(ticker=ticker, direction="BUY", quantity=quantity, price=price, reason=reason)
+    if result["status"] == "error":
+        console.print(f"[red]Ошибка:[/red] {result['error']}")
+    else:
+        console.print(f"[green]Куплено[/green] {result['quantity']:.0f} {ticker} @ {result['price']:.2f}")
+        console.print(f"  Комиссия: {result['commission']:.2f} ₽")
+        console.print(f"  Баланс после: {result['balance_after']:,.2f} ₽")
+        console.print(f"  Total equity: {result['total_equity']:,.2f} ₽")
+
+
+@paper_app.command()
+def sell(
+    ticker: str = typer.Argument(..., help="Тикер"),
+    quantity: float = typer.Argument(None, help="Количество (все, если не указано)"),
+    price: float = typer.Argument(None, help="Цена (опционально)"),
+    reason: str = typer.Option("", "--reason", "-r", help="Причина сделки"),
+) -> None:
+    """Продать тикер из paper-портфеля"""
+    from src.trading.paper import PaperTradingEngine
+
+    engine = PaperTradingEngine(user_id=0)
+    if quantity is None:
+        pos = engine.get_positions().get(ticker.upper())
+        if not pos:
+            console.print(f"[red]Нет позиции {ticker}[/red]")
+            return
+        quantity = pos.quantity
+    result = engine.execute_order(ticker=ticker, direction="SELL", quantity=quantity, price=price, reason=reason)
+    if result["status"] == "error":
+        console.print(f"[red]Ошибка:[/red] {result['error']}")
+    else:
+        console.print(f"[yellow]Продано[/yellow] {result['quantity']:.0f} {ticker} @ {result['price']:.2f}")
+        console.print(f"  P&L: {result['pnl']:+,.2f} ₽")
+        console.print(f"  Комиссия: {result['commission']:.2f} ₽")
+        console.print(f"  Баланс после: {result['balance_after']:,.2f} ₽")
+
+
+@paper_app.command()
+def history(
+    limit: int = typer.Option(20, "--limit", "-l", help="Количество записей"),
+) -> None:
+    """Показать историю paper-сделок"""
+    from src.trading.paper import PaperTradingEngine
+
+    engine = PaperTradingEngine(user_id=0)
+    trades = engine.get_trades(limit=limit)
+    if not trades:
+        console.print("[dim]Нет сделок[/dim]")
+        return
+    table = Table(title=f"Paper trades (last {len(trades)})")
+    table.add_column("Время", style="dim")
+    table.add_column("Тикер", style="cyan")
+    table.add_column("Напр.", style="yellow")
+    table.add_column("Кол-во", justify="right")
+    table.add_column("Цена", justify="right")
+    table.add_column("P&L", justify="right")
+    table.add_column("Баланс", justify="right")
+    table.add_column("Причина")
+    for t in reversed(trades):
+        pnl_str = f"{t['pnl']:+,.2f}" if t['pnl'] else "-"
+        table.add_row(
+            t["timestamp"][:19], t["ticker"], t["direction"],
+            f"{t['quantity']:.0f}", f"{t['price']:.2f}",
+            pnl_str, f"{t['balance_after']:,.0f}", t["reason"],
+        )
+    console.print(table)
+
+
+@paper_app.command()
+def reset(
+    capital: float = typer.Option(1_000_000, "--capital", "-c", help="Начальный капитал"),
+) -> None:
+    """Сбросить paper-счёт"""
+    from src.trading.paper import PaperTradingEngine
+
+    engine = PaperTradingEngine(user_id=0)
+    state = engine.reset(initial_capital=capital)
+    console.print(f"[green]Paper-счёт сброшен.[/green] Баланс: {state.balance:,.2f} ₽")
+
+
+@paper_app.command()
+def metrics() -> None:
+    """Показать метрики производительности paper-портфеля"""
+    from src.trading.paper import PaperTradingEngine
+
+    engine = PaperTradingEngine(user_id=0)
+    m = engine.get_metrics()
+    console.print("[bold cyan]Paper Trading Metrics[/bold cyan]")
+    console.print(f"  Total Return: {m.total_return:+.2%}")
+    console.print(f"  Annual Return: {m.annual_return:+.2%}")
+    console.print(f"  Sharpe: {m.sharpe:.2f}")
+    console.print(f"  Sortino: {m.sortino:.2f}")
+    console.print(f"  Calmar: {m.calmar:.2f}")
+    console.print(f"  Max Drawdown: {m.max_drawdown:.2%}")
+    console.print(f"  Win Rate: {m.win_rate:.1%} ({m.n_wins}/{m.n_trades})")
+    console.print(f"  Profit Factor: {m.profit_factor:.2f}")
+    console.print(f"  VaR(95%): {m.var_95:.2%}")
+    console.print(f"  Volatility: {m.volatility:.2%}")
+
+
+app.add_typer(paper_app, name="paper")
 app.add_typer(social_app, name="social")
 
 
