@@ -22,7 +22,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 USER_SCOPED_TABLES = [
-    "users",
     "portfolio",
     "transactions",
     "subscriptions",
@@ -72,22 +71,29 @@ def _run_rls_sql(direction: str) -> None:
                 BEGIN
                     FOREACH tbl IN ARRAY tables
                     LOOP
-                        BEGIN
-                            EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
-                            EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tbl);
-                            EXECUTE format(
-                                'DROP POLICY IF EXISTS tenant_isolation_policy ON %I',
-                                tbl
-                            );
-                            EXECUTE format(
-                                'CREATE POLICY tenant_isolation_policy ON %I '
-                                'USING (user_id = current_setting(''app.current_user_id'')::int)',
-                                tbl
-                            );
-                        EXCEPTION
-                            WHEN undefined_table THEN NULL;
-                            WHEN feature_not_supported THEN NULL;
-                        END;
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = tbl
+                              AND column_name = 'user_id'
+                        ) THEN
+                            BEGIN
+                                EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
+                                EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tbl);
+                                EXECUTE format(
+                                    'DROP POLICY IF EXISTS tenant_isolation_policy ON %I',
+                                    tbl
+                                );
+                                EXECUTE format(
+                                    'CREATE POLICY tenant_isolation_policy ON %I '
+                                    'USING (user_id = current_setting(''app.current_user_id'')::int)',
+                                    tbl
+                                );
+                            EXCEPTION
+                                WHEN undefined_table THEN NULL;
+                                WHEN feature_not_supported THEN NULL;
+                            END;
+                        END IF;
                     END LOOP;
                 EXCEPTION
                     WHEN feature_not_supported THEN NULL;
