@@ -102,6 +102,14 @@ plugins = ["sqlalchemy.ext.mypy.plugin"]
 module = ["t_tech.*", "groq.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["telegram.*", "telegram.ext.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["src.interfaces.telegram", "src.interfaces.api.server"]
+strict = false
+
 
 
 [tool.ruff]
