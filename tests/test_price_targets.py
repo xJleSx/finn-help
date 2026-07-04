@@ -239,31 +239,37 @@ class TestPredictionInterval:
         assert 0.10 <= width <= 0.20
 
     def test_build_trade_plan_with_confidence(self):
-        df = pd.DataFrame({
-            "close": [100, 102, 101, 103, 105],
-            "low": [99, 100, 100, 102, 104],
-            "high": [101, 103, 102, 104, 106],
-        })
+        df = pd.DataFrame(
+            {
+                "close": [100, 102, 101, 103, 105],
+                "low": [99, 100, 100, 102, 104],
+                "high": [101, 103, 102, 104, 106],
+            }
+        )
         plan = build_trade_plan(close=105.0, sma20=103.0, atr=2.0, df=df, confidence=0.85)
         assert plan.prediction_interval is not None
         assert plan.prediction_interval.confidence == 0.85
         assert plan.prediction_interval.lower < plan.prediction_interval.upper
 
     def test_build_trade_plan_without_confidence(self):
-        df = pd.DataFrame({
-            "close": [100, 102, 101, 103, 105],
-            "low": [99, 100, 100, 102, 104],
-            "high": [101, 103, 102, 104, 106],
-        })
+        df = pd.DataFrame(
+            {
+                "close": [100, 102, 101, 103, 105],
+                "low": [99, 100, 100, 102, 104],
+                "high": [101, 103, 102, 104, 106],
+            }
+        )
         plan = build_trade_plan(close=105.0, sma20=103.0, atr=2.0, df=df)
         assert plan.prediction_interval is None
 
     def test_to_dict_includes_prediction_interval(self):
-        df = pd.DataFrame({
-            "close": [100, 102, 101, 103, 105],
-            "low": [99, 100, 100, 102, 104],
-            "high": [101, 103, 102, 104, 106],
-        })
+        df = pd.DataFrame(
+            {
+                "close": [100, 102, 101, 103, 105],
+                "low": [99, 100, 100, 102, 104],
+                "high": [101, 103, 102, 104, 106],
+            }
+        )
         plan = build_trade_plan(close=105.0, sma20=103.0, atr=2.0, df=df, confidence=0.85)
         d = to_dict(plan)
         assert "prediction_interval" in d

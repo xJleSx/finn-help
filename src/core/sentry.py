@@ -8,12 +8,14 @@ logger = logging.getLogger(__name__)
 def setup_sentry() -> None:
     try:
         from src.config import settings
+
         dsn = settings.sentry_dsn
         if not dsn:
             logger.info("Sentry not configured (SENTRY_DSN is empty)")
             return
         import sentry_sdk
         from sentry_sdk.integrations.logging import LoggingIntegration
+
         sentry_sdk.init(
             dsn=dsn,
             environment=settings.sentry_environment or "production",
@@ -30,6 +32,7 @@ def setup_sentry() -> None:
 def sentry_set_user_context(user_id: int, username: str = "", portfolio_id: int | None = None) -> None:
     try:
         import sentry_sdk
+
         sentry_sdk.set_user({"id": str(user_id), "username": username})
         extra = {}
         if portfolio_id is not None:
@@ -43,6 +46,7 @@ def sentry_set_user_context(user_id: int, username: str = "", portfolio_id: int 
 def sentry_set_extra(key: str, value: object) -> None:
     try:
         import sentry_sdk
+
         sentry_sdk.set_extra(key, value)
     except Exception:
         pass

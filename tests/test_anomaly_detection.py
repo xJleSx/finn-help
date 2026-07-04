@@ -96,6 +96,7 @@ def prices(db_session: Session, instrument: Instrument) -> list[Price]:
 
 # --- Test Feature Functions ---
 
+
 class TestArticleCountsPerDay:
     def test_returns_dataframe(self, db_session: Session, instrument: Instrument, news_articles: list[News]):
         df = article_counts_per_day(db_session, "TEST")
@@ -157,8 +158,11 @@ class TestTopicFrequencies:
 
 class TestBuildAnomalyFeatureVector:
     def test_returns_array(
-        self, db_session: Session, instrument: Instrument,
-        news_articles: list[News], prices: list[Price],
+        self,
+        db_session: Session,
+        instrument: Instrument,
+        news_articles: list[News],
+        prices: list[Price],
     ):
         vec = build_anomaly_feature_vector(db_session, news_articles[0])
         assert isinstance(vec, np.ndarray)
@@ -167,6 +171,7 @@ class TestBuildAnomalyFeatureVector:
 
 
 # --- Test Detectors ---
+
 
 class TestVolumeAnomalyDetector:
     def test_init(self):
@@ -232,8 +237,12 @@ class TestSourceAnomalyDetector:
         d = SourceAnomalyDetector()
         d.train(db_session)
         article = News(
-            id=999, title="Test", summary="", source_type="rss",
-            source_name="UnknownSourceXYZ", published_at=datetime.now(timezone.utc),
+            id=999,
+            title="Test",
+            summary="",
+            source_type="rss",
+            source_name="UnknownSourceXYZ",
+            published_at=datetime.now(timezone.utc),
             category="MACRO",
         )
         score = d.predict_article(article)
@@ -257,9 +266,13 @@ class TestTopicAnomalyDetector:
         d = TopicAnomalyDetector()
         d.train(db_session)
         article = News(
-            id=999, title="Test", summary="", source_type="rss",
+            id=999,
+            title="Test",
+            summary="",
+            source_type="rss",
             published_at=datetime.now(timezone.utc),
-            category="SECTOR", subcategory="energy",
+            category="SECTOR",
+            subcategory="energy",
         )
         score = d.predict_article(article)
         assert 0.0 <= score <= 1.0
@@ -268,7 +281,10 @@ class TestTopicAnomalyDetector:
         d = TopicAnomalyDetector()
         d._trained = True
         article = News(
-            id=1, title="Test", summary="", source_type="rss",
+            id=1,
+            title="Test",
+            summary="",
+            source_type="rss",
             published_at=datetime.now(timezone.utc),
             category="MACRO",
         )
@@ -298,8 +314,11 @@ class TestAutoencoderAnomalyDetector:
         assert not result["trained"]
 
     def test_train_and_predict(
-        self, db_session: Session, instrument: Instrument,
-        news_articles: list[News], prices: list[Price],
+        self,
+        db_session: Session,
+        instrument: Instrument,
+        news_articles: list[News],
+        prices: list[Price],
     ):
         d = AutoencoderAnomalyDetector(input_dim=24)
         result = d.train(db_session, "TEST")
@@ -309,7 +328,10 @@ class TestAutoencoderAnomalyDetector:
         assert 0.0 <= score <= 1.0
 
     def test_predict_pads_features(
-        self, db_session: Session, news_articles: list[News], prices: list[Price],
+        self,
+        db_session: Session,
+        news_articles: list[News],
+        prices: list[Price],
     ):
         d = AutoencoderAnomalyDetector(input_dim=50)
         score = d.predict_article(db_session, news_articles[0])
@@ -333,8 +355,11 @@ class TestAnomalyDetector:
         assert not result["is_anomaly"]
 
     def test_train_and_predict(
-        self, db_session: Session, instrument: Instrument,
-        news_articles: list[News], prices: list[Price],
+        self,
+        db_session: Session,
+        instrument: Instrument,
+        news_articles: list[News],
+        prices: list[Price],
     ):
         d = AnomalyDetector("TEST")
         train_results = d.train_all(db_session)
@@ -348,8 +373,11 @@ class TestAnomalyDetector:
         assert isinstance(result["is_anomaly"], bool)
 
     def test_predict_multiple_articles(
-        self, db_session: Session, instrument: Instrument,
-        news_articles: list[News], prices: list[Price],
+        self,
+        db_session: Session,
+        instrument: Instrument,
+        news_articles: list[News],
+        prices: list[Price],
     ):
         d = AnomalyDetector("TEST")
         d.train_all(db_session)

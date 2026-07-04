@@ -71,6 +71,7 @@ class TestMOEXCorporateEventCollector:
                 client.get.return_value = resp
                 mock_get.return_value = client
                 return await collector.fetch_corporate_events("SBER")
+
         result = asyncio.run(run())
         assert result == []
 
@@ -85,6 +86,7 @@ class TestMOEXCorporateEventCollector:
                 client.get.return_value = resp
                 mock_get.return_value = client
                 return await collector.fetch_corporate_events("SBER")
+
         result = asyncio.run(run())
         assert result == []
 

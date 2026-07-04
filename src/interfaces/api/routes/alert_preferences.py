@@ -65,6 +65,7 @@ async def get_alert_preferences(
     user: User = Depends(require_user),
 ) -> dict[str, Any]:
     import asyncio
+
     loop = asyncio.get_running_loop()
     try:
         return await loop.run_in_executor(None, _sync_get_prefs, user.id)
@@ -85,11 +86,10 @@ async def update_alert_preferences(
     user: User = Depends(require_user),
 ) -> dict[str, Any]:
     import asyncio
+
     loop = asyncio.get_running_loop()
     try:
-        return await loop.run_in_executor(
-            None, _sync_set_prefs, user.id, body.model_dump(exclude_none=True)
-        )
+        return await loop.run_in_executor(None, _sync_set_prefs, user.id, body.model_dump(exclude_none=True))
     except Exception as e:
         logger.exception("alert_prefs_update_failed", user_id=user.id)
         raise HTTPException(500, f"Failed to update alert preferences: {e}")
@@ -101,6 +101,7 @@ async def mute_ticker(
     user: User = Depends(require_user),
 ) -> dict[str, str]:
     import asyncio
+
     loop = asyncio.get_running_loop()
     try:
         ok = await loop.run_in_executor(None, _sync_mute_ticker, user.id, ticker)
@@ -118,6 +119,7 @@ async def unmute_ticker(
     user: User = Depends(require_user),
 ) -> dict[str, str]:
     import asyncio
+
     loop = asyncio.get_running_loop()
     try:
         ok = await loop.run_in_executor(None, _sync_unmute_ticker, user.id, ticker)

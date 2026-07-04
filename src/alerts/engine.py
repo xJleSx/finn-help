@@ -25,9 +25,7 @@ class AlertEngine:
 
     def train_anomaly(self, db: Any) -> dict[str, Any]:
         result = self.anomaly_detector.train_all(db)
-        self._anomaly_trained = any(
-            v.get("trained", False) for v in result.values()
-        )
+        self._anomaly_trained = any(v.get("trained", False) for v in result.values())
         return result
 
     def train_impact(self, db: Any, tickers: list[str] | None = None) -> dict[str, Any]:
@@ -44,7 +42,10 @@ class AlertEngine:
         return results
 
     def process_articles(
-        self, db: Any, articles: list[News], portfolio_tickers: set[str] | None = None,
+        self,
+        db: Any,
+        articles: list[News],
+        portfolio_tickers: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         if portfolio_tickers is None:
             portfolio_tickers = set()
@@ -77,28 +78,21 @@ class AlertEngine:
         return candidates[: settings.alert_max_alerts_per_run]
 
     def process_portfolio_articles(
-        self, db: Any, articles: list[News], user_id: int = 0,
+        self,
+        db: Any,
+        articles: list[News],
+        user_id: int = 0,
     ) -> list[dict[str, Any]]:
-        rows = (
-            db.execute(
-                select(Instrument.ticker)
-                .join(Portfolio, Portfolio.instrument_id == Instrument.id)
-                .where(Portfolio.user_id == user_id)
-            )
-            .all()
-        )
+        rows = db.execute(
+            select(Instrument.ticker).join(Portfolio, Portfolio.instrument_id == Instrument.id).where(Portfolio.user_id == user_id)
+        ).all()
         portfolio_tickers = {r[0] for r in rows}
         return self.process_articles(db, articles, portfolio_tickers)
 
     def _article_tickers(self, db: Any, article: News) -> list[str]:
-        rows = (
-            db.execute(
-                select(Instrument.ticker)
-                .join(NewsInstrument, NewsInstrument.instrument_id == Instrument.id)
-                .where(NewsInstrument.news_id == article.id)
-            )
-            .all()
-        )
+        rows = db.execute(
+            select(Instrument.ticker).join(NewsInstrument, NewsInstrument.instrument_id == Instrument.id).where(NewsInstrument.news_id == article.id)
+        ).all()
         return [r[0] for r in rows]
 
     def _predict_impact(self, db: Any, article: News, ticker: str) -> dict[str, Any]:

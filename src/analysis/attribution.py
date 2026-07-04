@@ -40,7 +40,10 @@ class NewsAttribution:
         return None
 
     def explain(
-        self, db: Any, news_article: Any, horizon_days: int = 1,
+        self,
+        db: Any,
+        news_article: Any,
+        horizon_days: int = 1,
     ) -> list[dict[str, Any]]:
         features = extract_features(db, news_article)
         vec = np.array(
@@ -90,7 +93,10 @@ class NewsAttribution:
             return []
 
     def summary_stats(
-        self, db: Any, ticker: str, n_articles: int = 100,
+        self,
+        db: Any,
+        ticker: str,
+        n_articles: int = 100,
     ) -> dict[str, float]:
         from src.analysis.ml.news_impact_features import build_training_data
 
@@ -134,10 +140,7 @@ class NewsAttribution:
                     continue
             try:
                 scores = xgb_model.feature_importances_
-                return {
-                    ALL_FEATURE_COLS[i]: round(float(abs(scores[i])), 6)
-                    for i in range(len(ALL_FEATURE_COLS))
-                }
+                return {ALL_FEATURE_COLS[i]: round(float(abs(scores[i])), 6) for i in range(len(ALL_FEATURE_COLS))}
             except Exception:
                 continue
         return {}

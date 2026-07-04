@@ -76,6 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("shutdown.scheduler_timeout")
     try:
         from src.cache import close_redis
+
         close_redis()
     except Exception:
         pass
@@ -92,6 +93,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     try:
         import sentry_sdk
+
         sentry_sdk.set_context("request", {"method": request.method, "path": request.url.path})
         if hasattr(request, "user") and request.user:
             sentry_sdk.set_user({"id": str(request.user.id), "username": request.user.username})
@@ -315,9 +317,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         from src.db.models import AlertLog
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-        alert_cnt = await db.execute(
-            select(sqlfunc.count(AlertLog.id)).where(AlertLog.created_at >= cutoff)
-        )
+        alert_cnt = await db.execute(select(sqlfunc.count(AlertLog.id)).where(AlertLog.created_at >= cutoff))
         components["alerts_7d"] = int(alert_cnt.scalar() or 0)
     except Exception:
         components["alerts_7d"] = None
@@ -357,7 +357,7 @@ class RegisterBody(BaseModel):
 async def register(
     request: Request,
     body: RegisterBody,
-    svc = Depends(get_auth_service),
+    svc=Depends(get_auth_service),
 ) -> dict[str, Any]:
     return await svc.register(
         username=body.username,
@@ -377,7 +377,7 @@ class LoginBody(BaseModel):
 async def login(
     request: Request,
     body: LoginBody,
-    svc = Depends(get_auth_service),
+    svc=Depends(get_auth_service),
 ) -> dict[str, Any]:
     return await svc.login(username=body.username, password=body.password)
 
@@ -385,6 +385,6 @@ async def login(
 @app.get("/api/auth/me", response_model=UserResponse)
 async def get_me(
     user: User = Depends(require_user),
-    svc = Depends(get_auth_service),
+    svc=Depends(get_auth_service),
 ) -> dict[str, Any]:
     return await svc.get_me(user)

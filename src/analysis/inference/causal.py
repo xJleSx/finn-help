@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from statsmodels.tsa.stattools import grangercausalitytests
+
     _HAS_STATSMODELS = True
 except ImportError:
     _HAS_STATSMODELS = False
@@ -33,12 +34,7 @@ class GrangerCausality:
         if not instrument:
             return {"ticker": ticker, "error": "Instrument not found"}
 
-        prices = (
-            db_session.query(Price)
-            .filter(Price.instrument_id == instrument.id, Price.close.isnot(None))
-            .order_by(Price.date.asc())
-            .all()
-        )
+        prices = db_session.query(Price).filter(Price.instrument_id == instrument.id, Price.close.isnot(None)).order_by(Price.date.asc()).all()
         if len(prices) < self.max_lag + 5:
             return {"ticker": ticker, "error": "Not enough price data"}
 
@@ -99,9 +95,7 @@ class GrangerCausality:
 class CausalImpactAnalyzer:
     """Simple before/after causal impact estimation with synthetic control."""
 
-    def estimate_impact(
-        self, ticker: str, event_date: datetime, db_session: Any, window_days: int = 30
-    ) -> dict[str, Any]:
+    def estimate_impact(self, ticker: str, event_date: datetime, db_session: Any, window_days: int = 30) -> dict[str, Any]:
         if isinstance(event_date, datetime):
             event_date_only = event_date.date()
         else:
@@ -146,24 +140,14 @@ class CausalImpactAnalyzer:
                 "error": "Not enough price data",
             }
 
-        before_returns = [
-            (before_prices[i].close - before_prices[i - 1].close) / before_prices[i - 1].close
-            for i in range(1, len(before_prices))
-        ]
-        after_returns = [
-            (after_prices[i].close - after_prices[i - 1].close) / after_prices[i - 1].close
-            for i in range(1, len(after_prices))
-        ]
+        before_returns = [(before_prices[i].close - before_prices[i - 1].close) / before_prices[i - 1].close for i in range(1, len(before_prices))]
+        after_returns = [(after_prices[i].close - after_prices[i - 1].close) / after_prices[i - 1].close for i in range(1, len(after_prices))]
 
         before_avg = float(np.mean(before_returns)) if before_returns else 0.0
         after_avg = float(np.mean(after_returns)) if after_returns else 0.0
         observed_effect = after_avg - before_avg
 
-        peers = (
-            db_session.query(Instrument)
-            .filter(Instrument.sector == instrument.sector, Instrument.ticker != ticker.upper())
-            .all()
-        )
+        peers = db_session.query(Instrument).filter(Instrument.sector == instrument.sector, Instrument.ticker != ticker.upper()).all()
 
         peer_before_all: list[float] = []
         peer_after_all: list[float] = []
@@ -191,12 +175,8 @@ class CausalImpactAnalyzer:
                 .all()
             )
             if len(pb) >= 2 and len(pa) >= 2:
-                peer_before_all.extend(
-                    (pb[i].close - pb[i - 1].close) / pb[i - 1].close for i in range(1, len(pb))
-                )
-                peer_after_all.extend(
-                    (pa[i].close - pa[i - 1].close) / pa[i - 1].close for i in range(1, len(pa))
-                )
+                peer_before_all.extend((pb[i].close - pb[i - 1].close) / pb[i - 1].close for i in range(1, len(pb)))
+                peer_after_all.extend((pa[i].close - pa[i - 1].close) / pa[i - 1].close for i in range(1, len(pa)))
 
         if peer_before_all and peer_after_all:
             peer_before_avg = float(np.mean(peer_before_all))
@@ -213,6 +193,7 @@ class CausalImpactAnalyzer:
             if peer_std > 0:
                 z = abs(impact) / peer_std
                 import math
+
                 p_value = min(1.0, 2.0 * math.exp(-0.5 * z * z))
             else:
                 p_value = 1.0
@@ -232,12 +213,7 @@ class CausalImpactAnalyzer:
         if not news_article.published_at:
             return {"error": "Article has no published_at"}
 
-        linked = (
-            db_session.query(Instrument)
-            .join(NewsInstrument)
-            .filter(NewsInstrument.news_id == news_article.id)
-            .all()
-        )
+        linked = db_session.query(Instrument).join(NewsInstrument).filter(NewsInstrument.news_id == news_article.id).all()
         if not linked:
             return {"error": "No linked instruments"}
 
@@ -270,12 +246,7 @@ class InstrumentCausalGraph:
             return {"error": "One or both instruments not found"}
 
         def _get_returns(instrument: Instrument) -> dict[Any, float]:
-            rows = (
-                db_session.query(Price)
-                .filter(Price.instrument_id == instrument.id, Price.close.isnot(None))
-                .order_by(Price.date.asc())
-                .all()
-            )
+            rows = db_session.query(Price).filter(Price.instrument_id == instrument.id, Price.close.isnot(None)).order_by(Price.date.asc()).all()
             rets: dict[Any, float] = {}
             for i in range(1, len(rows)):
                 prev, cur = rows[i - 1].close, rows[i].close
@@ -328,11 +299,7 @@ class InstrumentCausalGraph:
         if not instrument:
             return []
 
-        candidates = (
-            db_session.query(Instrument)
-            .filter(Instrument.sector == instrument.sector, Instrument.ticker != ticker.upper())
-            .all()
-        )
+        candidates = db_session.query(Instrument).filter(Instrument.sector == instrument.sector, Instrument.ticker != ticker.upper()).all()
 
         results: list[dict[str, Any]] = []
         for cand in candidates:

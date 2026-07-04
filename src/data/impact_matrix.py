@@ -101,9 +101,7 @@ class ImpactMatrix:
         self.matrix = IMPACT_MATRIX
         self.decay_params = IMPACT_DECAY_PARAMS
 
-    def get_impact(
-        self, news_type: str, sector: str, base_impact_score: float
-    ) -> float:
+    def get_impact(self, news_type: str, sector: str, base_impact_score: float) -> float:
         """Calculate impact of news on a sector.
 
         Args:
@@ -148,9 +146,7 @@ class ImpactMatrix:
         min_impact = self.decay_params["min_impact"]
         return max(min_impact, decay_factor)
 
-    def calculate_sector_daily_risk(
-        self, sector: str, news_articles: list[Any], current_date: Optional[datetime] = None
-    ) -> dict[str, Any]:
+    def calculate_sector_daily_risk(self, sector: str, news_articles: list[Any], current_date: Optional[datetime] = None) -> dict[str, Any]:
         """Calculate daily risk score for a sector based on news.
 
         Args:
@@ -192,12 +188,14 @@ class ImpactMatrix:
             total_risk += final_impact
             news_count += 1
 
-            top_risks.append({
-                "article_id": article.id,
-                "title": article.title,
-                "impact": final_impact,
-                "published_at": article.published_at,
-            })
+            top_risks.append(
+                {
+                    "article_id": article.id,
+                    "title": article.title,
+                    "impact": final_impact,
+                    "published_at": article.published_at,
+                }
+            )
 
         # Sort top risks
         top_risks.sort(key=lambda x: x["impact"], reverse=True)
@@ -215,9 +213,7 @@ class ImpactMatrix:
             "top_risks": top_risks,
         }
 
-    def calculate_all_sectors_daily_risk(
-        self, sectors: list[str], db_session: Any, current_date: Optional[datetime] = None
-    ) -> dict[str, Any]:
+    def calculate_all_sectors_daily_risk(self, sectors: list[str], db_session: Any, current_date: Optional[datetime] = None) -> dict[str, Any]:
         """Calculate daily risk for all sectors.
 
         Args:
@@ -237,19 +233,21 @@ class ImpactMatrix:
 
         for sector in sectors:
             # Get relevant news for this sector (simplified - in production use news_sector_impacts)
-            articles = db_session.query(News).filter(
-                News.is_relevant,
-                News.published_at >= current_date - timedelta(days=90),  # Last 90 days
-            ).all()
+            articles = (
+                db_session.query(News)
+                .filter(
+                    News.is_relevant,
+                    News.published_at >= current_date - timedelta(days=90),  # Last 90 days
+                )
+                .all()
+            )
 
             sector_risk = self.calculate_sector_daily_risk(sector, articles, current_date)
             results[sector] = sector_risk
 
         return results
 
-    def calculate_trend(
-        self, sector: str, db_session: Any, days: int = 30
-    ) -> dict[str, Any]:
+    def calculate_trend(self, sector: str, db_session: Any, days: int = 30) -> dict[str, Any]:
         """Calculate risk trend for a sector over time.
 
         Args:
@@ -268,18 +266,24 @@ class ImpactMatrix:
         for day_offset in range(days, -1, -1):
             date = current_date - timedelta(days=day_offset)
 
-            articles = db_session.query(News).filter(
-                News.is_relevant,
-                News.published_at >= date - timedelta(days=1),
-                News.published_at < date + timedelta(days=1),
-            ).all()
+            articles = (
+                db_session.query(News)
+                .filter(
+                    News.is_relevant,
+                    News.published_at >= date - timedelta(days=1),
+                    News.published_at < date + timedelta(days=1),
+                )
+                .all()
+            )
 
             risk = self.calculate_sector_daily_risk(sector, articles, date)
-            trend_data.append({
-                "date": date.date(),
-                "risk_score": risk["avg_risk"],
-                "article_count": risk["article_count"],
-            })
+            trend_data.append(
+                {
+                    "date": date.date(),
+                    "risk_score": risk["avg_risk"],
+                    "article_count": risk["article_count"],
+                }
+            )
 
         # Calculate trend (simple linear regression)
         if len(trend_data) > 1:
@@ -299,9 +303,7 @@ class ImpactMatrix:
             "daily_data": trend_data,
         }
 
-    def calculate_source_diversity_score(
-        self, sector: str, db_session: Any, days: int = 30
-    ) -> float:
+    def calculate_source_diversity_score(self, sector: str, db_session: Any, days: int = 30) -> float:
         """Calculate source diversity score (higher = more reliable).
 
         Args:
@@ -314,10 +316,14 @@ class ImpactMatrix:
         """
         from src.db.models import News
 
-        articles = db_session.query(News).filter(
-            News.is_relevant,
-            News.published_at >= datetime.now(timezone.utc) - timedelta(days=days),
-        ).all()
+        articles = (
+            db_session.query(News)
+            .filter(
+                News.is_relevant,
+                News.published_at >= datetime.now(timezone.utc) - timedelta(days=days),
+            )
+            .all()
+        )
 
         if not articles:
             return 0.0

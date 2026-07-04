@@ -20,9 +20,7 @@ class LLMRouter:
         self._ollama_model = settings.ollama_model
         self._ollama_url = settings.ollama_url
         self._wolfram: WolframAlphaClient | None = (
-            WolframAlphaClient(settings.wolfram_app_id)
-            if settings.wolfram_enabled and settings.wolfram_app_id
-            else None
+            WolframAlphaClient(settings.wolfram_app_id) if settings.wolfram_enabled and settings.wolfram_app_id else None
         )
 
     async def advise(self, signal: dict[str, object], user_id: str | int | None = None) -> str:
@@ -151,12 +149,7 @@ class LLMRouter:
 
             from src.db.models import AltDataPoint
 
-            alt_rows = (
-                db.query(AltDataPoint)
-                .filter(AltDataPoint.date >= date.today() - timedelta(days=7))
-                .order_by(AltDataPoint.date.desc())
-                .all()
-            )
+            alt_rows = db.query(AltDataPoint).filter(AltDataPoint.date >= date.today() - timedelta(days=7)).order_by(AltDataPoint.date.desc()).all()
             if alt_rows:
                 seen: set[str] = set()
                 for r in alt_rows:
@@ -173,11 +166,7 @@ class LLMRouter:
             from src.db.models import Signal as SignalModel
 
             today_signals = (
-                db.query(SignalModel)
-                .filter(func.date(SignalModel.date) == date.today())
-                .order_by(SignalModel.confidence.desc())
-                .limit(10)
-                .all()
+                db.query(SignalModel).filter(func.date(SignalModel.date) == date.today()).order_by(SignalModel.confidence.desc()).limit(10).all()
             )
             if today_signals:
                 top = []
@@ -187,13 +176,7 @@ class LLMRouter:
                     top.append(f"{ticker}: {s.action} ({s.confidence:.0%})")
                 lines.append(f"Топ-сигналы сегодня: {'; '.join(top)}")
 
-            bmk = (
-                db.query(Price)
-                .join(Instrument)
-                .filter(Instrument.ticker == "IMOEX")
-                .order_by(Price.date.desc())
-                .first()
-            )
+            bmk = db.query(Price).join(Instrument).filter(Instrument.ticker == "IMOEX").order_by(Price.date.desc()).first()
             if bmk:
                 lines.append(f"IMOEX: {bmk.close:.0f}")
 
@@ -342,8 +325,11 @@ class LLMRouter:
     async def _groq_advise(self, signal: dict[str, object]) -> str:
         try:
             result = await self._call(
-                prompts.SYSTEM_PROMPT, prompts.build_user_message(signal),
-                backend="groq", temperature=LLM_TEMPERATURE, max_tokens=768,
+                prompts.SYSTEM_PROMPT,
+                prompts.build_user_message(signal),
+                backend="groq",
+                temperature=LLM_TEMPERATURE,
+                max_tokens=768,
             )
             return result or self._fallback_text(signal)
         except ImportError:
@@ -353,8 +339,12 @@ class LLMRouter:
     async def _ollama_advise(self, signal: dict[str, object]) -> str:
         try:
             result = await self._call(
-                prompts.SYSTEM_PROMPT, prompts.build_user_message(signal),
-                backend="ollama", temperature=LLM_TEMPERATURE, max_tokens=768, timeout=60.0,
+                prompts.SYSTEM_PROMPT,
+                prompts.build_user_message(signal),
+                backend="ollama",
+                temperature=LLM_TEMPERATURE,
+                max_tokens=768,
+                timeout=60.0,
             )
             return result or self._fallback_text(signal)
         except Exception as e:
@@ -364,8 +354,11 @@ class LLMRouter:
     async def _groq_report(self, signal: dict[str, object]) -> str:
         try:
             result = await self._call(
-                prompts.REPORT_SYSTEM_PROMPT, prompts.build_report_message(signal),
-                backend="groq", temperature=0.2, max_tokens=1024,
+                prompts.REPORT_SYSTEM_PROMPT,
+                prompts.build_report_message(signal),
+                backend="groq",
+                temperature=0.2,
+                max_tokens=1024,
             )
             return result or self._fallback_report(signal)
         except ImportError:
@@ -375,8 +368,12 @@ class LLMRouter:
     async def _ollama_report(self, signal: dict[str, object]) -> str:
         try:
             result = await self._call(
-                prompts.REPORT_SYSTEM_PROMPT, prompts.build_report_message(signal),
-                backend="ollama", temperature=0.2, max_tokens=1024, timeout=60.0,
+                prompts.REPORT_SYSTEM_PROMPT,
+                prompts.build_report_message(signal),
+                backend="ollama",
+                temperature=0.2,
+                max_tokens=1024,
+                timeout=60.0,
             )
             return result or self._fallback_report(signal)
         except Exception as e:
@@ -622,16 +619,23 @@ class LLMRouter:
 
     async def _groq_social(self, prompt: str) -> str:
         result = await self._call(
-            "Отвечай JSON-массивом. Компактно.", prompt,
-            backend="groq", model=settings.social_groq_model,
-            temperature=0.05, max_tokens=2048,
+            "Отвечай JSON-массивом. Компактно.",
+            prompt,
+            backend="groq",
+            model=settings.social_groq_model,
+            temperature=0.05,
+            max_tokens=2048,
         )
         return result or "[]"
 
     async def _ollama_social(self, prompt: str) -> str:
         result = await self._call(
-            "Отвечай JSON-массивом. Компактно.", prompt,
-            backend="ollama", temperature=0.05, max_tokens=2048, timeout=300.0,
+            "Отвечай JSON-массивом. Компактно.",
+            prompt,
+            backend="ollama",
+            temperature=0.05,
+            max_tokens=2048,
+            timeout=300.0,
         )
         return result or "[]"
 

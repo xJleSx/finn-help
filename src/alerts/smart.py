@@ -21,7 +21,9 @@ SEVERITY_MAP: dict[str, int] = {"gt": 3, "gte": 3, "lt": 2, "lte": 2, "eq": 1}
 
 class SmartAlertEngine:
     def evaluate_rules(
-        self, db: Any, user_id: int | None = None,
+        self,
+        db: Any,
+        user_id: int | None = None,
     ) -> list[dict[str, Any]]:
         query = db.query(SmartAlertRule).filter(SmartAlertRule.enabled.is_(True))
         if user_id is not None:
@@ -50,19 +52,10 @@ class SmartAlertEngine:
         return False
 
     def _check_price(self, db: Any, rule: SmartAlertRule) -> bool:
-        instr = (
-            db.query(Instrument)
-            .filter(Instrument.ticker == rule.ticker)
-            .first()
-        )
+        instr = db.query(Instrument).filter(Instrument.ticker == rule.ticker).first()
         if instr is None:
             return False
-        latest_price = (
-            db.query(Price.close)
-            .filter(Price.instrument_id == instr.id)
-            .order_by(Price.date.desc())
-            .first()
-        )
+        latest_price = db.query(Price.close).filter(Price.instrument_id == instr.id).order_by(Price.date.desc()).first()
         if latest_price is None or latest_price[0] is None:
             return False
         op = CONDITION_FN.get(rule.condition)
@@ -71,19 +64,10 @@ class SmartAlertEngine:
         return bool(op(float(latest_price[0]), rule.threshold))
 
     def _check_signal(self, db: Any, rule: SmartAlertRule) -> bool:
-        instr = (
-            db.query(Instrument)
-            .filter(Instrument.ticker == rule.ticker)
-            .first()
-        )
+        instr = db.query(Instrument).filter(Instrument.ticker == rule.ticker).first()
         if instr is None:
             return False
-        latest = (
-            db.query(Signal)
-            .filter(Signal.instrument_id == instr.id)
-            .order_by(Signal.created_at.desc())
-            .first()
-        )
+        latest = db.query(Signal).filter(Signal.instrument_id == instr.id).order_by(Signal.created_at.desc()).first()
         if latest is None or latest.confidence is None:
             return False
         op = CONDITION_FN.get(rule.condition)
@@ -106,11 +90,7 @@ class SmartAlertEngine:
             target_hour, target_min = map(int, parts[1].split("."))
             if now.hour != target_hour or now.minute != target_min:
                 return False
-            return (
-                rule.last_triggered.hour != target_hour
-                or rule.last_triggered.minute != target_min
-                or rule.last_triggered.date() != now.date()
-            )
+            return rule.last_triggered.hour != target_hour or rule.last_triggered.minute != target_min or rule.last_triggered.date() != now.date()
 
         if interval == "weekly":
             if len(parts) < 3:

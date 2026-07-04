@@ -322,9 +322,7 @@ Return JSON with 'type' (news/spam/press_release/opinion/scam) and 'confidence' 
             logger.warning(f"LLM classification failed: {e}")
             return {"type": "unknown", "confidence": 0.0}
 
-    def evaluate_article(
-        self, title: str, summary: str, source_name: str = ""
-    ) -> dict[str, Any]:
+    def evaluate_article(self, title: str, summary: str, source_name: str = "") -> dict[str, Any]:
         quality = self.check_content_quality(title, summary)
         blacklist = self.check_keyword_blacklist(title, summary)
         press_release = self.detect_press_release(title, summary)

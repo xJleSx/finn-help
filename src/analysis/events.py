@@ -69,9 +69,7 @@ class EventFeatureBuilder:
 
     async def compute_geo_from_events(self, db: AsyncSession) -> float | None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-        result = await db.execute(
-            select(MarketEvent).where(MarketEvent.event_type == "sanctions_timeline", MarketEvent.date >= cutoff)
-        )
+        result = await db.execute(select(MarketEvent).where(MarketEvent.event_type == "sanctions_timeline", MarketEvent.date >= cutoff))
         events = result.scalars().all()
         if not events:
             return None
@@ -90,11 +88,7 @@ class EventFeatureBuilder:
 
     def compute_geo_from_events_sync(self, db: Any) -> float | None:
         cutoff = datetime.now(timezone.utc).date() - timedelta(days=30)
-        events = (
-            db.query(MarketEvent)
-            .filter(MarketEvent.event_type == "sanctions_timeline", MarketEvent.date >= cutoff)
-            .all()
-        )
+        events = db.query(MarketEvent).filter(MarketEvent.event_type == "sanctions_timeline", MarketEvent.date >= cutoff).all()
         if not events:
             return None
 

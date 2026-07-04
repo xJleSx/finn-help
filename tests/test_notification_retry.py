@@ -48,8 +48,11 @@ class TestReceiptManager:
     def test_create_receipt(self, db_session):
         mgr = ReceiptManager(db_session)
         receipt = mgr.create_receipt(
-            user_id=1, channel="telegram",
-            notification_type="alert", title="Test", message="Hello",
+            user_id=1,
+            channel="telegram",
+            notification_type="alert",
+            title="Test",
+            message="Hello",
         )
         assert receipt.id is not None
         assert receipt.status == "pending"

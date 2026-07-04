@@ -14,6 +14,8 @@ def _get_risk_lock() -> asyncio.Lock:
     if _risk_lock is None:
         _risk_lock = asyncio.Lock()
     return _risk_lock
+
+
 _CB_KILL_SWITCH_REASONS: set[str] = set()
 
 
@@ -103,8 +105,7 @@ def _resolve_risk_profile() -> dict[str, float]:
         allow = personal.get(_INSANE_OPT_IN_KEY, False)
         if not allow:
             logger.warning(
-                "Risk profile 'insane' requires '%s=true' in personal_settings.yaml. "
-                "Falling back to 'aggressive'.",
+                "Risk profile 'insane' requires '%s=true' in personal_settings.yaml. Falling back to 'aggressive'.",
                 _INSANE_OPT_IN_KEY,
             )
             return RISK_PROFILE_MAP["aggressive"]

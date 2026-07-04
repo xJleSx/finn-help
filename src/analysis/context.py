@@ -65,11 +65,7 @@ class TickerContextBuilder:
                     if ind.sma_200 is not None:
                         lines.append(f"SMA200: {ind.sma_200:.2f} (цена {'выше' if last > ind.sma_200 else 'ниже'})")
                     if ind.bb_upper is not None and ind.bb_lower is not None:
-                        bb_pos = (
-                            "у верхней"
-                            if last >= ind.bb_upper
-                            else ("у нижней" if last <= ind.bb_lower else "в середине")
-                        )
+                        bb_pos = "у верхней" if last >= ind.bb_upper else ("у нижней" if last <= ind.bb_lower else "в середине")
                         lines.append(f"Боллинджер: {bb_pos} ({ind.bb_lower:.1f}–{ind.bb_upper:.1f})")
                     if ind.macd_hist is not None:
                         lines.append(f"MACD: {ind.macd_hist:.2f} ({'бычья' if ind.macd_hist > 0 else 'медвежья'})")

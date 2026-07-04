@@ -39,16 +39,16 @@ class RiskExplorer:
             qty = float(r["quantity"])
             price = float(r["avg_price"] or 0.0)
             amount = qty * price
-            positions.append({
-                "ticker": r["ticker"],
-                "sector": r["sector"] or "Прочее",
-                "amount": amount,
-            })
+            positions.append(
+                {
+                    "ticker": r["ticker"],
+                    "sector": r["sector"] or "Прочее",
+                    "amount": amount,
+                }
+            )
         return positions
 
-    def _portfolio_value_series(
-        self, db: Any, positions: list[dict[str, Any]], days: int
-    ) -> np.ndarray | None:
+    def _portfolio_value_series(self, db: Any, positions: list[dict[str, Any]], days: int) -> np.ndarray | None:
         cutoff = datetime.now(timezone.utc).date() - timedelta(days=days)
         tickers = [p["ticker"] for p in positions if p["ticker"]]
         weights = np.array([p["amount"] for p in positions if p["ticker"]], dtype=float)
@@ -87,11 +87,7 @@ class RiskExplorer:
 
     def _recent_anomaly_count(self, db: Any, days: int = 7) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        result = db.execute(
-            select(News.id)
-            .where(News.published_at >= cutoff)
-            .where(News.impact_score >= 0.7)
-        )
+        result = db.execute(select(News.id).where(News.published_at >= cutoff).where(News.impact_score >= 0.7))
         return len(result.all())
 
     def portfolio_risk_summary(self, db: Any, user_id: int = 0) -> dict[str, Any]:
@@ -144,10 +140,7 @@ class RiskExplorer:
                     for j in range(i + 1, len(tickers)):
                         pairs.append((tickers[i], tickers[j], float(corr[i, j])))
                 pairs.sort(key=lambda x: abs(x[2]), reverse=True)
-                corr_pairs = [
-                    {"ticker_a": a, "ticker_b": b, "correlation": round(c, 4)}
-                    for a, b, c in pairs[:10]
-                ]
+                corr_pairs = [{"ticker_a": a, "ticker_b": b, "correlation": round(c, 4)} for a, b, c in pairs[:10]]
 
         port_val_90d = self._portfolio_value_series(db, positions, 90)
         port_val_1y = self._portfolio_value_series(db, positions, 365)
@@ -211,17 +204,11 @@ class RiskExplorer:
                 "sharpe": sharpe,
             }
 
-        instr = db.execute(
-            select(Instrument.id).where(Instrument.ticker == ticker)
-        ).scalar_one_or_none()
+        instr = db.execute(select(Instrument.id).where(Instrument.ticker == ticker)).scalar_one_or_none()
 
         corr_to_portfolio: dict[str, Any] | None = None
         if instr is not None:
-            in_portfolio = db.execute(
-                select(Portfolio.id)
-                .where(Portfolio.instrument_id == instr)
-                .where(Portfolio.quantity > 0)
-            ).first()
+            in_portfolio = db.execute(select(Portfolio.id).where(Portfolio.instrument_id == instr).where(Portfolio.quantity > 0)).first()
             if in_portfolio is not None:
                 positions = self._get_positions(db, 0)
                 portfolio_engine = ScenarioEngine()
@@ -336,19 +323,9 @@ class RiskExplorer:
                 var_contrib = mc.var_95
 
             corr_to_market: float | None = None
-            if (
-                engine._returns
-                and len(engine._tickers) > 1
-                and engine._weights is not None
-            ):
-                port_ret = sum(
-                    engine._returns[t] * w
-                    for t, w in zip(engine._tickers, engine._weights)
-                    if len(engine._returns.get(t, [])) >= 20
-                )
-                sector_tickers_in_data = [
-                    t for t, _ in tickers_in_sector if t in engine._returns and len(engine._returns[t]) >= 20
-                ]
+            if engine._returns and len(engine._tickers) > 1 and engine._weights is not None:
+                port_ret = sum(engine._returns[t] * w for t, w in zip(engine._tickers, engine._weights) if len(engine._returns.get(t, [])) >= 20)
+                sector_tickers_in_data = [t for t, _ in tickers_in_sector if t in engine._returns and len(engine._returns[t]) >= 20]
                 if sector_tickers_in_data and len(port_ret) > 0:
                     sector_ret = np.mean(
                         [engine._returns[t] for t in sector_tickers_in_data],
@@ -358,19 +335,19 @@ class RiskExplorer:
                     c = float(np.corrcoef(sector_ret[-min_len:], port_ret[-min_len:])[0, 1])
                     corr_to_market = round(c, 4)
 
-            result.append({
-                "sector": sector,
-                "weight": round(weight, 4),
-                "VaR_contribution": round(var_contrib, 4),
-                "correlation_to_market": corr_to_market,
-            })
+            result.append(
+                {
+                    "sector": sector,
+                    "weight": round(weight, 4),
+                    "VaR_contribution": round(var_contrib, 4),
+                    "correlation_to_market": corr_to_market,
+                }
+            )
 
         result.sort(key=lambda x: x["weight"], reverse=True)
         return result
 
-    def correlation_table(
-        self, db: Any, tickers: list[str]
-    ) -> list[dict[str, Any]]:
+    def correlation_table(self, db: Any, tickers: list[str]) -> list[dict[str, Any]]:
         if len(tickers) < 2:
             return []
 
@@ -402,11 +379,13 @@ class RiskExplorer:
         result = []
         for i in range(len(tickers_with_data)):
             for j in range(i + 1, len(tickers_with_data)):
-                result.append({
-                    "ticker_a": tickers_with_data[i],
-                    "ticker_b": tickers_with_data[j],
-                    "correlation": round(float(corr[i, j]), 4),
-                })
+                result.append(
+                    {
+                        "ticker_a": tickers_with_data[i],
+                        "ticker_b": tickers_with_data[j],
+                        "correlation": round(float(corr[i, j]), 4),
+                    }
+                )
 
         result.sort(key=lambda x: abs(x["correlation"]), reverse=True)
         return result

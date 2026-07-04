@@ -34,12 +34,7 @@ class GeoRiskScorer:
             "volume_anomaly": 0.0,
         }
 
-        raw_score = (
-            components["sanctions_risk"]
-            + components["instability"]
-            + components["currency_stress"]
-            + components["volume_anomaly"]
-        )
+        raw_score = components["sanctions_risk"] + components["instability"] + components["currency_stress"] + components["volume_anomaly"]
 
         normalized_score = max(0, min(raw_score, 10.0))
 

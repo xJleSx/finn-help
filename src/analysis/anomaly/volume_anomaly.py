@@ -44,6 +44,7 @@ class VolumeAnomalyDetector:
 
         def _sync_train() -> dict[str, Any]:
             from src.db.connection import get_session
+
             sync_db = get_session()
             try:
                 return self.train(sync_db, ticker)
@@ -55,9 +56,7 @@ class VolumeAnomalyDetector:
     def predict(self, features: dict[str, float]) -> float:
         if self._model is None:
             return 0.0
-        vec = np.array(
-            [[features.get(c, 0.0) for c in self._feature_cols]], dtype=np.float32
-        )
+        vec = np.array([[features.get(c, 0.0) for c in self._feature_cols]], dtype=np.float32)
         score = self._model.score_samples(vec)[0]
         anomaly_score = float(np.clip(-score / 10.0, 0.0, 1.0))
         return anomaly_score
@@ -74,6 +73,7 @@ class VolumeAnomalyDetector:
 
         def _sync_predict() -> float:
             from src.db.connection import get_session
+
             sync_db = get_session()
             try:
                 return self.predict_article(sync_db, news_article)

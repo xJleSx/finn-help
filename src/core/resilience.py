@@ -102,10 +102,7 @@ class CircuitBreaker:
 
             if self._state is CircuitState.HALF_OPEN:
                 if self._half_open_calls >= self.config.half_open_max_calls:
-                    raise CircuitBreakerOpenError(
-                        f"Circuit breaker '{self.config.name}' is HALF_OPEN, "
-                        f"max probe calls reached"
-                    )
+                    raise CircuitBreakerOpenError(f"Circuit breaker '{self.config.name}' is HALF_OPEN, max probe calls reached")
                 self._half_open_calls += 1
 
         try:
@@ -183,7 +180,9 @@ def with_circuit_breaker(name: str = "default") -> Callable[[CircuitBreakerFn], 
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             cb = get_circuit_breaker(name)
             return await cb.call(fn, *args, **kwargs)
+
         return wrapper
+
     return decorator
 
 

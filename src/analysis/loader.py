@@ -170,10 +170,7 @@ class DataLoader:
 
     async def load_latest_report(self, db: AsyncSession, instrument_id: int) -> dict[str, Any] | None:
         result = await db.execute(
-            select(FinancialReport)
-            .where(FinancialReport.instrument_id == instrument_id)
-            .order_by(FinancialReport.report_date.desc())
-            .limit(1)
+            select(FinancialReport).where(FinancialReport.instrument_id == instrument_id).order_by(FinancialReport.report_date.desc()).limit(1)
         )
         row = result.scalar_one_or_none()
         if row is None:
@@ -199,12 +196,7 @@ class DataLoader:
         }
 
     def load_latest_report_sync(self, db: Any, instrument_id: int) -> dict[str, Any] | None:
-        row = (
-            db.query(FinancialReport)
-            .filter_by(instrument_id=instrument_id)
-            .order_by(FinancialReport.report_date.desc())
-            .first()
-        )
+        row = db.query(FinancialReport).filter_by(instrument_id=instrument_id).order_by(FinancialReport.report_date.desc()).first()
         if row is None:
             return None
         return {
@@ -229,10 +221,7 @@ class DataLoader:
 
     async def load_bond_offering(self, db: AsyncSession, instrument_id: int) -> dict[str, Any] | None:
         result = await db.execute(
-            select(BondOffering)
-            .where(BondOffering.instrument_id == instrument_id)
-            .order_by(BondOffering.offering_date.desc())
-            .limit(1)
+            select(BondOffering).where(BondOffering.instrument_id == instrument_id).order_by(BondOffering.offering_date.desc()).limit(1)
         )
         row = result.scalar_one_or_none()
         if row is None:
@@ -255,12 +244,7 @@ class DataLoader:
         }
 
     def load_bond_offering_sync(self, db: Any, instrument_id: int) -> dict[str, Any] | None:
-        row = (
-            db.query(BondOffering)
-            .filter_by(instrument_id=instrument_id)
-            .order_by(BondOffering.offering_date.desc())
-            .first()
-        )
+        row = db.query(BondOffering).filter_by(instrument_id=instrument_id).order_by(BondOffering.offering_date.desc()).first()
         if row is None:
             return None
         return {
@@ -282,10 +266,7 @@ class DataLoader:
 
     async def load_fundamental_metrics(self, db: AsyncSession, instrument_id: int) -> dict[str, Any] | None:
         result = await db.execute(
-            select(FundamentalMetric)
-            .where(FundamentalMetric.instrument_id == instrument_id)
-            .order_by(FundamentalMetric.date.desc())
-            .limit(1)
+            select(FundamentalMetric).where(FundamentalMetric.instrument_id == instrument_id).order_by(FundamentalMetric.date.desc()).limit(1)
         )
         row = result.scalar_one_or_none()
         if row is None:
@@ -300,12 +281,7 @@ class DataLoader:
         }
 
     def load_fundamental_metrics_sync(self, db: Any, instrument_id: int) -> dict[str, Any] | None:
-        row = (
-            db.query(FundamentalMetric)
-            .filter_by(instrument_id=instrument_id)
-            .order_by(FundamentalMetric.date.desc())
-            .first()
-        )
+        row = db.query(FundamentalMetric).filter_by(instrument_id=instrument_id).order_by(FundamentalMetric.date.desc()).first()
         if row is None:
             return None
         return {
@@ -318,9 +294,7 @@ class DataLoader:
         }
 
     @staticmethod
-    def augment_with_sector_avg(
-        db: Any, fund_metrics: dict[str, Any] | None, inst: Instrument
-    ) -> dict[str, Any] | None:
+    def augment_with_sector_avg(db: Any, fund_metrics: dict[str, Any] | None, inst: Instrument) -> dict[str, Any] | None:
         if not fund_metrics:
             return fund_metrics
         sector = inst.sector

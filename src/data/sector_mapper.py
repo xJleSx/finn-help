@@ -243,9 +243,7 @@ class SectorMapper:
 
         return affected
 
-    def map_to_instruments(
-        self, sectors: list[str], db_session: Any
-    ) -> list[int]:
+    def map_to_instruments(self, sectors: list[str], db_session: Any) -> list[int]:
         """Map sectors to instrument IDs.
 
         Args:
@@ -295,9 +293,7 @@ class SectorMapper:
 
         return cascade_effects
 
-    def analyze_sector_exposure(
-        self, category: str, subcategory: str, text: str, db_session: Any
-    ) -> dict[str, Any]:
+    def analyze_sector_exposure(self, category: str, subcategory: str, text: str, db_session: Any) -> dict[str, Any]:
         """Complete sector analysis for a news article.
 
         Args:
@@ -314,16 +310,12 @@ class SectorMapper:
 
         # Map to instruments
         primary_instruments = self.map_to_instruments(list(primary_sectors.keys()), db_session)
-        cascade_instruments = self.map_to_instruments(
-            list(cascade_sectors.keys()), db_session
-        )
+        cascade_instruments = self.map_to_instruments(list(cascade_sectors.keys()), db_session)
 
         return {
             "primary_sectors": primary_sectors,
             "cascade_sectors": cascade_sectors,
             "primary_instruments": primary_instruments,
             "cascade_instruments": cascade_instruments,
-            "total_affected_instruments": len(
-                set(primary_instruments + cascade_instruments)
-            ),
+            "total_affected_instruments": len(set(primary_instruments + cascade_instruments)),
         }

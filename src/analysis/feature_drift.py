@@ -140,11 +140,7 @@ def _extract_vectors(entries: list[dict[str, Any]], keys: list[str]) -> dict[str
 def summary() -> dict[str, Any]:
     db = get_session()
     try:
-        active_feature_types = (
-            db.query(FeatureCache.feature_type, func.count(FeatureCache.id))
-            .group_by(FeatureCache.feature_type)
-            .all()
-        )
+        active_feature_types = db.query(FeatureCache.feature_type, func.count(FeatureCache.id)).group_by(FeatureCache.feature_type).all()
         return {
             "feature_types": {row[0]: row[1] for row in active_feature_types},
             "drift_threshold": DRIFT_THRESHOLD_DEFAULT,

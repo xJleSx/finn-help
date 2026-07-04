@@ -90,15 +90,11 @@ class NewsClusterer:
             if article.embedding:
                 continue
             try:
-                article.embedding = self.generate_embedding(
-                    article.title or "", article.summary or ""
-                )
+                article.embedding = self.generate_embedding(article.title or "", article.summary or "")
             except Exception as e:
                 logger.warning("Failed to embed article %s: %s", article.id, e)
 
-    def cluster_articles(
-        self, articles: list[Any]
-    ) -> list[list[Any]]:
+    def cluster_articles(self, articles: list[Any]) -> list[list[Any]]:
         if len(articles) < 2:
             return []
 
@@ -151,11 +147,7 @@ class NewsClusterer:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
         if cutoff.tzinfo is None:
             cutoff = cutoff.replace(tzinfo=timezone.utc)
-        articles = (
-            db.query(News)
-            .filter(News.published_at >= cutoff, News.is_relevant)
-            .all()
-        )
+        articles = db.query(News).filter(News.published_at >= cutoff, News.is_relevant).all()
         total = len(articles)
         before = db.query(News).filter(News.event_id.isnot(None)).count()
         mapping = self.cluster_and_save(db, articles)

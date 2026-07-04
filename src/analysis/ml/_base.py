@@ -71,10 +71,7 @@ def log_feature_importance(model: Any, feature_names: list[str]) -> list[dict[st
     try:
         scores = model.feature_importances_
         indices = np.argsort(scores)[-10:][::-1]
-        return [
-            {"feature": feature_names[i], "importance": round(float(scores[i]), 4)}
-            for i in indices
-        ]
+        return [{"feature": feature_names[i], "importance": round(float(scores[i]), 4)} for i in indices]
     except Exception:
         return []
 
@@ -254,7 +251,9 @@ class BaseMLClassifier(PersistMixin, ABC):
             if study.best_params:
                 logger.info(
                     "%s — HPO best acc=%.3f params=%s",
-                    self.model_name, study.best_value, study.best_params,
+                    self.model_name,
+                    study.best_value,
+                    study.best_params,
                 )
                 best_params = {**study.best_params}
         except Exception as e:
@@ -275,10 +274,7 @@ class BaseMLClassifier(PersistMixin, ABC):
                 shap_values = shap_values[1] if len(shap_values) > 1 else shap_values[0]
             mean_abs = np.mean(np.abs(shap_values), axis=0)
             feature_names = self._feature_names()
-            return {
-                feature_names[i]: round(float(mean_abs[i]), 4)
-                for i in range(min(len(mean_abs), len(feature_names)))
-            }
+            return {feature_names[i]: round(float(mean_abs[i]), 4) for i in range(min(len(mean_abs), len(feature_names)))}
         except Exception:
             return {}
 
@@ -353,7 +349,10 @@ class BaseMLClassifier(PersistMixin, ABC):
             return float(pred_model.predict_proba(base)[0, 1])
 
     def _train_on_the_fly(
-        self, df: pd.DataFrame, features: pd.DataFrame, anomaly_mask: np.ndarray | None = None,
+        self,
+        df: pd.DataFrame,
+        features: pd.DataFrame,
+        anomaly_mask: np.ndarray | None = None,
     ) -> tuple[Any, dict[str, Any] | None] | None:
         try:
             lookahead = settings.ml_lookahead

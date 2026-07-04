@@ -159,9 +159,7 @@ class TestAlternativeDataCollector:
 
         rosstat = MagicMock(spec=RosstatSource)
         rosstat.name = "rosstat"
-        rosstat.fetch.return_value = {
-            "indicators": [{"indicator_name": "rosstat_gdp", "value": 1.5, "date": date.today()}]
-        }
+        rosstat.fetch.return_value = {"indicators": [{"indicator_name": "rosstat_gdp", "value": 1.5, "date": date.today()}]}
 
         trends = MagicMock(spec=GoogleTrendsSource)
         trends.name = "google_trends"

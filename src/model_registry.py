@@ -48,7 +48,8 @@ def _save_registry(registry: dict[str, Any]) -> None:
 
 
 def save_model(
-    model: Any, name: str,
+    model: Any,
+    name: str,
     metrics: Optional[dict[str, Any]] = None,
     params: Optional[dict[str, Any]] = None,
 ) -> str:
@@ -81,7 +82,8 @@ def save_model(
 
 
 async def save_model_async(
-    model: Any, name: str,
+    model: Any,
+    name: str,
     metrics: Optional[dict[str, Any]] = None,
     params: Optional[dict[str, Any]] = None,
 ) -> str:
@@ -109,9 +111,7 @@ def load_model(name: str, version: Optional[str] = None) -> Any:
     if "hash" in meta:
         actual_hash = hashlib.md5(path.read_bytes()).hexdigest()
         if actual_hash != meta["hash"]:
-            raise ValueError(
-                f"Model hash mismatch for '{name}' version {version}: expected {meta['hash']}, got {actual_hash}"
-            )
+            raise ValueError(f"Model hash mismatch for '{name}' version {version}: expected {meta['hash']}, got {actual_hash}")
 
     with open(path, "rb") as f:
         model = cloudpickle.load(f)
@@ -291,7 +291,8 @@ def prune_models(max_versions: int = 5, model_dir: Optional[Path] = None) -> dic
     if registry_pruned > 0 or orphan_removed > 0:
         logger.info(
             "Prune complete: %d registry versions removed, %d orphan files cleaned",
-            registry_pruned, orphan_removed,
+            registry_pruned,
+            orphan_removed,
         )
     else:
         logger.info("Prune: nothing to clean")

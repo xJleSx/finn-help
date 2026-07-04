@@ -69,19 +69,12 @@ async def take_snapshot(period: str) -> None:
                 geo_score = round(float(geo_row.score), 2)
 
         for inst in instruments:
-            last_indicator = (
-                db.query(Indicator).filter(Indicator.instrument_id == inst.id).order_by(Indicator.date.desc()).first()
-            )
+            last_indicator = db.query(Indicator).filter(Indicator.instrument_id == inst.id).order_by(Indicator.date.desc()).first()
             if not last_indicator:
                 continue
 
             last_price = db.query(Price).filter(Price.instrument_id == inst.id).order_by(Price.date.desc()).first()
-            last_signal = (
-                db.query(SignalModel)
-                .filter(SignalModel.instrument_id == inst.id)
-                .order_by(SignalModel.date.desc())
-                .first()
-            )
+            last_signal = db.query(SignalModel).filter(SignalModel.instrument_id == inst.id).order_by(SignalModel.date.desc()).first()
 
             rsi_val = float(last_indicator.rsi) if last_indicator.rsi is not None else None
             macd_line = float(last_indicator.macd_line) if last_indicator.macd_line is not None else None
@@ -281,11 +274,7 @@ async def generate_weekly_report_text() -> str:
             )
             if len(recent) < 2:
                 recent_daily = (
-                    db.query(MetricSnapshot)
-                    .filter(MetricSnapshot.instrument_id == inst.id)
-                    .order_by(MetricSnapshot.taken_at.desc())
-                    .limit(2)
-                    .all()
+                    db.query(MetricSnapshot).filter(MetricSnapshot.instrument_id == inst.id).order_by(MetricSnapshot.taken_at.desc()).limit(2).all()
                 )
                 if len(recent_daily) < 2:
                     continue

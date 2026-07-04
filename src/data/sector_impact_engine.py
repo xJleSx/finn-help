@@ -33,8 +33,8 @@ class EWMARiskCalculator:
     def momentum(self, scores: list[float]) -> float:
         if len(scores) < 2:
             return 0.0
-        recent = scores[-min(self.momentum_window, len(scores)):]
-        earlier = scores[:-len(recent)] or [0.0]
+        recent = scores[-min(self.momentum_window, len(scores)) :]
+        earlier = scores[: -len(recent)] or [0.0]
         avg_recent = sum(recent) / len(recent)
         avg_earlier = sum(earlier) / len(earlier)
         return avg_recent - avg_earlier
@@ -50,9 +50,14 @@ class SectorCorrelationTracker:
     def load_from_history(self, db: Any, days: int = 90) -> None:
         from src.db.models import SectorRiskHistory
 
-        history = db.query(SectorRiskHistory).filter(
-            SectorRiskHistory.date >= datetime.now(timezone.utc).date() - timedelta(days=days),
-        ).order_by(SectorRiskHistory.date).all()
+        history = (
+            db.query(SectorRiskHistory)
+            .filter(
+                SectorRiskHistory.date >= datetime.now(timezone.utc).date() - timedelta(days=days),
+            )
+            .order_by(SectorRiskHistory.date)
+            .all()
+        )
 
         by_sector: dict[str, list[float]] = {}
         for h in history:
@@ -105,9 +110,7 @@ class SectorImpactEngine:
         self.impact_matrix = impact_matrix
         self.sector_mapper = sector_mapper
 
-    def calculate_sector_impact_from_news(
-        self, news_article: Any, db_session: Any
-    ) -> dict[str, Any]:
+    def calculate_sector_impact_from_news(self, news_article: Any, db_session: Any) -> dict[str, Any]:
         """Calculate sector impacts from a single news article.
 
         Args:
@@ -147,9 +150,7 @@ class SectorImpactEngine:
                 "intensity": details["intensity"],
                 "calculated_impact": final_impact,
                 "decay_factor": decay,
-                "sentiment_multiplier": self._get_sentiment_multiplier(
-                    news_article.sentiment
-                ),
+                "sentiment_multiplier": self._get_sentiment_multiplier(news_article.sentiment),
             }
 
         # Cascade sector impacts (reduced intensity)
@@ -174,9 +175,7 @@ class SectorImpactEngine:
 
         return impacts
 
-    def store_news_sector_impacts(
-        self, news_article: Any, sector_impacts: dict[str, Any], db_session: Any
-    ) -> int:
+    def store_news_sector_impacts(self, news_article: Any, sector_impacts: dict[str, Any], db_session: Any) -> int:
         """Store news-sector impact relationships in database.
 
         Args:
@@ -219,18 +218,20 @@ class SectorImpactEngine:
             return 1.3
         return 1.0
 
-    def calculate_daily_sector_risk(
-        self, sector: str, db_session: Any, current_date: Optional[datetime] = None
-    ) -> dict[str, Any]:
+    def calculate_daily_sector_risk(self, sector: str, db_session: Any, current_date: Optional[datetime] = None) -> dict[str, Any]:
         if current_date is None:
             current_date = datetime.now(timezone.utc)
 
         from src.db.models import NewsSectorImpact
 
-        impacts = db_session.query(NewsSectorImpact).filter(
-            NewsSectorImpact.sector == sector,
-            NewsSectorImpact.created_at >= current_date - timedelta(days=90),
-        ).all()
+        impacts = (
+            db_session.query(NewsSectorImpact)
+            .filter(
+                NewsSectorImpact.sector == sector,
+                NewsSectorImpact.created_at >= current_date - timedelta(days=90),
+            )
+            .all()
+        )
 
         if not impacts:
             return {
@@ -265,9 +266,7 @@ class SectorImpactEngine:
                 sentiment_count += 1
 
         for impact_type in components:
-            components[impact_type]["avg"] = (
-                components[impact_type]["total"] / max(components[impact_type]["count"], 1)
-            )
+            components[impact_type]["avg"] = components[impact_type]["total"] / max(components[impact_type]["count"], 1)
 
         risk_score = ewma_calc.calculate(all_scores)
         momentum = ewma_calc.momentum(all_scores)
@@ -301,9 +300,7 @@ class SectorImpactEngine:
             "contagion_sectors": contagion,
         }
 
-    def calculate_all_sectors_daily_risk(
-        self, sectors: list[str], db_session: Any, current_date: Optional[datetime] = None
-    ) -> dict[str, Any]:
+    def calculate_all_sectors_daily_risk(self, sectors: list[str], db_session: Any, current_date: Optional[datetime] = None) -> dict[str, Any]:
         results = {}
 
         tracker = SectorCorrelationTracker()
@@ -316,9 +313,7 @@ class SectorImpactEngine:
 
         return results
 
-    def store_daily_sector_risk(
-        self, sector: str, risk_assessment: dict[str, Any], db_session: Any
-    ) -> bool:
+    def store_daily_sector_risk(self, sector: str, risk_assessment: dict[str, Any], db_session: Any) -> bool:
         """Store daily sector risk to history table.
 
         Args:
@@ -346,9 +341,7 @@ class SectorImpactEngine:
             logger.error(f"Failed to store sector risk for {sector}: {e}")
             return False
 
-    def get_sector_trend(
-        self, sector: str, db_session: Any, days: int = 30
-    ) -> dict[str, Any]:
+    def get_sector_trend(self, sector: str, db_session: Any, days: int = 30) -> dict[str, Any]:
         """Get risk trend for a sector.
 
         Args:
@@ -361,10 +354,15 @@ class SectorImpactEngine:
         """
         from src.db.models import SectorRiskHistory
 
-        history = db_session.query(SectorRiskHistory).filter(
-            SectorRiskHistory.sector == sector,
-            SectorRiskHistory.date >= datetime.now(timezone.utc).date() - timedelta(days=days),
-        ).order_by(SectorRiskHistory.date).all()
+        history = (
+            db_session.query(SectorRiskHistory)
+            .filter(
+                SectorRiskHistory.sector == sector,
+                SectorRiskHistory.date >= datetime.now(timezone.utc).date() - timedelta(days=days),
+            )
+            .order_by(SectorRiskHistory.date)
+            .all()
+        )
 
         if not history:
             return {
@@ -393,15 +391,10 @@ class SectorImpactEngine:
             "average_risk": average,
             "max_risk": max_risk,
             "days": len(history),
-            "history": [
-                {"date": h.date, "risk": h.risk_score}
-                for h in history
-            ],
+            "history": [{"date": h.date, "risk": h.risk_score} for h in history],
         }
 
-    def identify_high_risk_sectors(
-        self, db_session: Any, threshold: float = 6.0
-    ) -> list[str]:
+    def identify_high_risk_sectors(self, db_session: Any, threshold: float = 6.0) -> list[str]:
         """Identify sectors with risk above threshold.
 
         Args:
@@ -414,16 +407,18 @@ class SectorImpactEngine:
         from src.db.models import SectorRiskHistory
 
         today = datetime.now(timezone.utc).date()
-        high_risk = db_session.query(SectorRiskHistory).filter(
-            SectorRiskHistory.date == today,
-            SectorRiskHistory.risk_score >= threshold,
-        ).all()
+        high_risk = (
+            db_session.query(SectorRiskHistory)
+            .filter(
+                SectorRiskHistory.date == today,
+                SectorRiskHistory.risk_score >= threshold,
+            )
+            .all()
+        )
 
         return list(set(h.sector for h in high_risk))
 
-    def get_daily_risk_v2(
-        self, sector: str, db_session: Any, current_date: Optional[datetime] = None
-    ) -> dict[str, Any]:
+    def get_daily_risk_v2(self, sector: str, db_session: Any, current_date: Optional[datetime] = None) -> dict[str, Any]:
         result = self.calculate_daily_sector_risk(sector, db_session, current_date)
 
         if self._correlation_tracker is None:
@@ -440,15 +435,11 @@ class SectorImpactEngine:
 
         return result
 
-    def get_risk_heatmap(
-        self, db_session: Any, sectors: Optional[list[str]] = None
-    ) -> list[dict[str, Any]]:
+    def get_risk_heatmap(self, db_session: Any, sectors: Optional[list[str]] = None) -> list[dict[str, Any]]:
         from src.db.models import Instrument
 
         if sectors is None:
-            sectors = [
-                r[0] for r in db_session.query(Instrument.sector).distinct().all() if r[0]
-            ]
+            sectors = [r[0] for r in db_session.query(Instrument.sector).distinct().all() if r[0]]
 
         tracker = SectorCorrelationTracker()
         tracker.load_from_history(db_session)
@@ -457,20 +448,20 @@ class SectorImpactEngine:
         for sector in sectors:
             risk = self.calculate_daily_sector_risk(sector, db_session)
             contagion = tracker.get_contagion_risk(sector)
-            results.append({
-                "sector": sector,
-                "risk_score": risk["risk_score"],
-                "momentum": risk["momentum"],
-                "confidence": risk["confidence"],
-                "article_count": risk["article_count"],
-                "contagion": [s for s, _ in contagion[:3]],
-                "regime": "high" if risk["risk_score"] > 7 else "medium" if risk["risk_score"] > 4 else "low",
-            })
+            results.append(
+                {
+                    "sector": sector,
+                    "risk_score": risk["risk_score"],
+                    "momentum": risk["momentum"],
+                    "confidence": risk["confidence"],
+                    "article_count": risk["article_count"],
+                    "contagion": [s for s, _ in contagion[:3]],
+                    "regime": "high" if risk["risk_score"] > 7 else "medium" if risk["risk_score"] > 4 else "low",
+                }
+            )
 
         return sorted(results, key=lambda x: -x["risk_score"])
 
-    def cascade_sector_impacts(
-        self, primary_sector: str, db_session: Any
-    ) -> dict[str, Any]:
+    def cascade_sector_impacts(self, primary_sector: str, db_session: Any) -> dict[str, Any]:
         cascades = self.sector_mapper.get_cascading_effects([primary_sector])
         return cascades

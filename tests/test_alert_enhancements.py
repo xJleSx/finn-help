@@ -23,9 +23,36 @@ class TestAlertAnalytics:
     def test_analytics_with_data(self):
         history = AlertHistory()
         history._memory = [
-            {"timestamp": "2026-06-30T10:00:00", "type": "HIGH", "ticker": "SBER", "severity": 0.8, "user_id": 1, "read": False, "title": "a", "message": "a"},
-            {"timestamp": "2026-06-29T10:00:00", "type": "MEDIUM", "ticker": "GAZP", "severity": 0.5, "user_id": 1, "read": True, "title": "b", "message": "b"},
-            {"timestamp": "2026-06-28T10:00:00", "type": "LOW", "ticker": "SBER", "severity": 0.2, "user_id": 1, "read": False, "title": "c", "message": "c"},
+            {
+                "timestamp": "2026-06-30T10:00:00",
+                "type": "HIGH",
+                "ticker": "SBER",
+                "severity": 0.8,
+                "user_id": 1,
+                "read": False,
+                "title": "a",
+                "message": "a",
+            },
+            {
+                "timestamp": "2026-06-29T10:00:00",
+                "type": "MEDIUM",
+                "ticker": "GAZP",
+                "severity": 0.5,
+                "user_id": 1,
+                "read": True,
+                "title": "b",
+                "message": "b",
+            },
+            {
+                "timestamp": "2026-06-28T10:00:00",
+                "type": "LOW",
+                "ticker": "SBER",
+                "severity": 0.2,
+                "user_id": 1,
+                "read": False,
+                "title": "c",
+                "message": "c",
+            },
         ]
         result = history.get_analytics(days=30)
         assert result["total"] == 3
@@ -40,8 +67,26 @@ class TestAlertAnalytics:
     def test_analytics_filter_older_than_days(self):
         history = AlertHistory()
         history._memory = [
-            {"timestamp": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat(), "type": "HIGH", "ticker": "SBER", "severity": 0.8, "user_id": 1, "read": False, "title": "a", "message": "a"},
-            {"timestamp": (datetime.now(timezone.utc) - timedelta(days=40)).isoformat(), "type": "LOW", "ticker": "GAZP", "severity": 0.2, "user_id": 1, "read": False, "title": "b", "message": "b"},
+            {
+                "timestamp": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat(),
+                "type": "HIGH",
+                "ticker": "SBER",
+                "severity": 0.8,
+                "user_id": 1,
+                "read": False,
+                "title": "a",
+                "message": "a",
+            },
+            {
+                "timestamp": (datetime.now(timezone.utc) - timedelta(days=40)).isoformat(),
+                "type": "LOW",
+                "ticker": "GAZP",
+                "severity": 0.2,
+                "user_id": 1,
+                "read": False,
+                "title": "b",
+                "message": "b",
+            },
         ]
         result = history.get_analytics(days=30)
         assert result["total"] == 1
@@ -50,8 +95,26 @@ class TestAlertAnalytics:
     def test_analytics_filter_by_user_id(self):
         history = AlertHistory()
         history._memory = [
-            {"timestamp": "2026-06-30T10:00:00", "type": "HIGH", "ticker": "SBER", "severity": 0.8, "user_id": 1, "read": False, "title": "a", "message": "a"},
-            {"timestamp": "2026-06-29T10:00:00", "type": "MEDIUM", "ticker": "GAZP", "severity": 0.5, "user_id": 2, "read": True, "title": "b", "message": "b"},
+            {
+                "timestamp": "2026-06-30T10:00:00",
+                "type": "HIGH",
+                "ticker": "SBER",
+                "severity": 0.8,
+                "user_id": 1,
+                "read": False,
+                "title": "a",
+                "message": "a",
+            },
+            {
+                "timestamp": "2026-06-29T10:00:00",
+                "type": "MEDIUM",
+                "ticker": "GAZP",
+                "severity": 0.5,
+                "user_id": 2,
+                "read": True,
+                "title": "b",
+                "message": "b",
+            },
         ]
         result = history.get_analytics(days=30, user_id=1)
         assert result["total"] == 1
@@ -60,8 +123,26 @@ class TestAlertAnalytics:
     def test_analytics_avg_severity(self):
         history = AlertHistory()
         history._memory = [
-            {"timestamp": "2026-06-30T10:00:00", "type": "LOW", "ticker": "SBER", "severity": 0.2, "user_id": 1, "read": False, "title": "a", "message": "a"},
-            {"timestamp": "2026-06-29T10:00:00", "type": "HIGH", "ticker": "GAZP", "severity": 0.8, "user_id": 1, "read": False, "title": "b", "message": "b"},
+            {
+                "timestamp": "2026-06-30T10:00:00",
+                "type": "LOW",
+                "ticker": "SBER",
+                "severity": 0.2,
+                "user_id": 1,
+                "read": False,
+                "title": "a",
+                "message": "a",
+            },
+            {
+                "timestamp": "2026-06-29T10:00:00",
+                "type": "HIGH",
+                "ticker": "GAZP",
+                "severity": 0.8,
+                "user_id": 1,
+                "read": False,
+                "title": "b",
+                "message": "b",
+            },
         ]
         result = history.get_analytics(days=30)
         assert result["avg_severity"] == 0.5
@@ -70,10 +151,14 @@ class TestAlertAnalytics:
 class TestAlertHistory:
     def test_log_alert_memory(self):
         hist = AlertHistory()
-        hist.log_alert({
-            "ticker": "SBER", "priority": "HIGH",
-            "priority_score": 0.8, "reason": "anomaly",
-        })
+        hist.log_alert(
+            {
+                "ticker": "SBER",
+                "priority": "HIGH",
+                "priority_score": 0.8,
+                "reason": "anomaly",
+            }
+        )
         recent = hist.get_recent(days=1)
         assert len(recent) == 1
         assert recent[0]["ticker"] == "SBER"
@@ -83,10 +168,14 @@ class TestAlertHistory:
     def test_log_alert_with_db(self):
         mock_db = MagicMock()
         hist = AlertHistory(db=mock_db)
-        hist.log_alert({
-            "ticker": "GAZP", "priority": "CRITICAL",
-            "title": "Risk", "reason": "sanctions",
-        })
+        hist.log_alert(
+            {
+                "ticker": "GAZP",
+                "priority": "CRITICAL",
+                "title": "Risk",
+                "reason": "sanctions",
+            }
+        )
         mock_db.add.assert_called_once()
         added = mock_db.add.call_args[0][0]
         assert isinstance(added, AlertLog)
@@ -98,9 +187,13 @@ class TestAlertHistory:
         mock_db = MagicMock()
         mock_db.commit.side_effect = Exception("DB error")
         hist = AlertHistory(db=mock_db)
-        hist.log_alert({
-            "ticker": "SBER", "priority": "LOW", "priority_score": 0.1,
-        })
+        hist.log_alert(
+            {
+                "ticker": "SBER",
+                "priority": "LOW",
+                "priority_score": 0.1,
+            }
+        )
         mock_db.rollback.assert_called_once()
         recent = hist.get_recent(days=1)
         assert len(recent) == 1
@@ -118,12 +211,9 @@ class TestAlertHistory:
         hist = AlertHistory()
         now = datetime.now(timezone.utc)
         hist._memory = [
-            {"timestamp": (now - timedelta(hours=1)).isoformat(),
-             "ticker": "SBER", "type": "HIGH", "severity": 0.8, "message": ""},
-            {"timestamp": (now - timedelta(hours=2)).isoformat(),
-             "ticker": "GAZP", "type": "MEDIUM", "severity": 0.5, "message": ""},
-            {"timestamp": (now - timedelta(days=10)).isoformat(),
-             "ticker": "SBER", "type": "LOW", "severity": 0.2, "message": ""},
+            {"timestamp": (now - timedelta(hours=1)).isoformat(), "ticker": "SBER", "type": "HIGH", "severity": 0.8, "message": ""},
+            {"timestamp": (now - timedelta(hours=2)).isoformat(), "ticker": "GAZP", "type": "MEDIUM", "severity": 0.5, "message": ""},
+            {"timestamp": (now - timedelta(days=10)).isoformat(), "ticker": "SBER", "type": "LOW", "severity": 0.2, "message": ""},
         ]
         all_recent = hist.get_recent(days=7)
         assert len(all_recent) == 2
@@ -139,10 +229,15 @@ class TestAlertHistory:
         mock_filter2 = mock_filter.filter.return_value
         mock_filter2.order_by.return_value.all.return_value = [
             MagicMock(
-                id=1, ticker="SBER", alert_type="HIGH", severity=0.8,
-                title="Test", message="msg",
+                id=1,
+                ticker="SBER",
+                alert_type="HIGH",
+                severity=0.8,
+                title="Test",
+                message="msg",
                 created_at=datetime.now(timezone.utc),
-                read=False, user_id=None,
+                read=False,
+                user_id=None,
             ),
         ]
         hist = AlertHistory(db=mock_db)
@@ -154,12 +249,9 @@ class TestAlertHistory:
         hist = AlertHistory()
         now = datetime.now(timezone.utc)
         hist._memory = [
-            {"timestamp": (now - timedelta(hours=1)).isoformat(),
-             "ticker": "SBER", "type": "HIGH", "severity": 0.8, "message": ""},
-            {"timestamp": (now - timedelta(hours=2)).isoformat(),
-             "ticker": "GAZP", "type": "MEDIUM", "severity": 0.5, "message": ""},
-            {"timestamp": (now - timedelta(hours=3)).isoformat(),
-             "ticker": "SBER", "type": "HIGH", "severity": 0.9, "message": ""},
+            {"timestamp": (now - timedelta(hours=1)).isoformat(), "ticker": "SBER", "type": "HIGH", "severity": 0.8, "message": ""},
+            {"timestamp": (now - timedelta(hours=2)).isoformat(), "ticker": "GAZP", "type": "MEDIUM", "severity": 0.5, "message": ""},
+            {"timestamp": (now - timedelta(hours=3)).isoformat(), "ticker": "SBER", "type": "HIGH", "severity": 0.9, "message": ""},
         ]
         stats = hist.get_stats(days=7)
         assert stats["total"] == 3
@@ -179,12 +271,9 @@ class TestAlertAggregator:
         now = datetime.now(timezone.utc)
         alerts = [
             {"category": "COMPANY", "ticker": "SBER", "timestamp": now.isoformat()},
-            {"category": "COMPANY", "ticker": "SBER",
-             "timestamp": (now - timedelta(minutes=5)).isoformat()},
-            {"category": "COMPANY", "ticker": "SBER",
-             "timestamp": (now - timedelta(minutes=10)).isoformat()},
-            {"category": "GEOPOLITICAL", "ticker": "GAZP",
-             "timestamp": now.isoformat()},
+            {"category": "COMPANY", "ticker": "SBER", "timestamp": (now - timedelta(minutes=5)).isoformat()},
+            {"category": "COMPANY", "ticker": "SBER", "timestamp": (now - timedelta(minutes=10)).isoformat()},
+            {"category": "GEOPOLITICAL", "ticker": "GAZP", "timestamp": now.isoformat()},
         ]
         result = agg.aggregate(alerts)
         assert result["count"] == 4
@@ -196,8 +285,7 @@ class TestAlertAggregator:
         now = datetime.now(timezone.utc)
         alerts = [
             {"category": "COMPANY", "ticker": "SBER", "timestamp": now.isoformat()},
-            {"category": "COMPANY", "ticker": "SBER",
-             "timestamp": (now - timedelta(minutes=45)).isoformat()},
+            {"category": "COMPANY", "ticker": "SBER", "timestamp": (now - timedelta(minutes=45)).isoformat()},
         ]
         result = agg.aggregate(alerts)
         assert result["count"] == 1
@@ -207,8 +295,7 @@ class TestAlertAggregator:
         now = datetime.now(timezone.utc)
         alerts = [
             {"category": "MACRO", "ticker": "USD/RUB", "timestamp": now.isoformat()},
-            {"category": "MACRO", "ticker": "USD/RUB",
-             "timestamp": (now - timedelta(minutes=1)).isoformat()},
+            {"category": "MACRO", "ticker": "USD/RUB", "timestamp": (now - timedelta(minutes=1)).isoformat()},
         ]
         result = agg.aggregate(alerts)
         assert result["summary"] == "2 MACRO alerts about USD/RUB"
@@ -246,7 +333,8 @@ class TestUserAlertPreferences:
             {"ticker": "SBER", "priority": "HIGH", "severity": 0.7},
         ]
         filtered = prefs.filter_alerts(
-            alerts, {"min_severity": "MEDIUM", "muted_tickers": []},
+            alerts,
+            {"min_severity": "MEDIUM", "muted_tickers": []},
         )
         assert len(filtered) == 2
         assert filtered[0]["priority"] == "MEDIUM"
@@ -259,7 +347,8 @@ class TestUserAlertPreferences:
             {"ticker": "GAZP", "priority": "CRITICAL"},
         ]
         filtered = prefs.filter_alerts(
-            alerts, {"min_severity": "LOW", "muted_tickers": ["SBER"]},
+            alerts,
+            {"min_severity": "LOW", "muted_tickers": ["SBER"]},
         )
         assert len(filtered) == 1
         assert filtered[0]["ticker"] == "GAZP"
@@ -274,12 +363,15 @@ class TestUserAlertPreferences:
                 {"ticker": "SBER", "priority": "HIGH"},
                 {"ticker": "GAZP", "priority": "CRITICAL"},
             ]
-            filtered = prefs.filter_alerts(alerts, {
-                "min_severity": "LOW",
-                "muted_tickers": [],
-                "quiet_hours_start": "22:00",
-                "quiet_hours_end": "08:00",
-            })
+            filtered = prefs.filter_alerts(
+                alerts,
+                {
+                    "min_severity": "LOW",
+                    "muted_tickers": [],
+                    "quiet_hours_start": "22:00",
+                    "quiet_hours_end": "08:00",
+                },
+            )
             assert len(filtered) == 1
             assert filtered[0]["ticker"] == "GAZP"
 
@@ -291,7 +383,8 @@ class TestUserAlertPreferences:
             {"ticker": "SBER", "severity": 0.9},
         ]
         filtered = prefs.filter_alerts(
-            alerts, {"min_severity": "MEDIUM", "muted_tickers": []},
+            alerts,
+            {"min_severity": "MEDIUM", "muted_tickers": []},
         )
         assert len(filtered) == 2
 

@@ -85,9 +85,7 @@ class TestFindCorrelated:
         inst = MagicMock()
         inst.id = 1
         db.query.return_value.filter_by.return_value.first.return_value = inst
-        db.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = [
-            MagicMock() for _ in range(10)
-        ]
+        db.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = [MagicMock() for _ in range(10)]
         assert _find_correlated(db, "SBER") == []
 
     def test_returns_related_tickers(self):

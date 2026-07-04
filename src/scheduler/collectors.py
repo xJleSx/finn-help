@@ -120,11 +120,7 @@ async def collect_prices(db: Session) -> set[int]:
 
         from sqlalchemy import func as sqlfunc
 
-        last_dates: dict[int, date | None] = dict(
-            db.query(Price.instrument_id, sqlfunc.max(Price.date))
-            .group_by(Price.instrument_id)
-            .all()
-        )  # type: ignore[arg-type]
+        last_dates: dict[int, date | None] = dict(db.query(Price.instrument_id, sqlfunc.max(Price.date)).group_by(Price.instrument_id).all())  # type: ignore[arg-type]
 
         for inst in instruments:
             last_dt = last_dates.get(int(inst.id))
@@ -419,9 +415,7 @@ async def collect_social_sentiment() -> None:
                 try:
                     new_count = 0
                     for post in posts:
-                        exists = (
-                            db.query(SocialPost).filter_by(source=post.source, external_id=post.external_id).first()
-                        )
+                        exists = db.query(SocialPost).filter_by(source=post.source, external_id=post.external_id).first()
                         if exists:
                             continue
                         sp = SocialPost(
@@ -503,9 +497,7 @@ async def collect_financial_reports(db: Session) -> None:
                 continue
             rd = date.fromisoformat(report_date_str) if isinstance(report_date_str, str) else report_date_str
 
-            existing = db.query(FinancialReport).filter_by(
-                instrument_id=inst.id, report_date=rd, period_type=period_type
-            ).first()
+            existing = db.query(FinancialReport).filter_by(instrument_id=inst.id, report_date=rd, period_type=period_type).first()
             if existing:
                 continue
             report = FinancialReport(

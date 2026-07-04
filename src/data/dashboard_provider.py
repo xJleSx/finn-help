@@ -21,9 +21,7 @@ class DashboardDataProvider:
         """Initialize provider."""
         pass
 
-    def get_news_dashboard_data(
-        self, db_session: Any, days: int = 7
-    ) -> dict[str, Any]:
+    def get_news_dashboard_data(self, db_session: Any, days: int = 7) -> dict[str, Any]:
         """Get data for news dashboard.
 
         Args:
@@ -38,9 +36,7 @@ class DashboardDataProvider:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         # Get news events
-        events = db_session.query(NewsEvent).filter(
-            NewsEvent.created_at >= cutoff
-        ).order_by(NewsEvent.created_at.desc()).limit(50).all()
+        events = db_session.query(NewsEvent).filter(NewsEvent.created_at >= cutoff).order_by(NewsEvent.created_at.desc()).limit(50).all()
 
         # Categorize
         by_category = {}
@@ -48,44 +44,56 @@ class DashboardDataProvider:
             cat = event.category or "UNCLASSIFIED"
             if cat not in by_category:
                 by_category[cat] = []
-            by_category[cat].append({
-                "id": event.id,
-                "title": event.title,
-                "summary": event.summary,
-                "category": event.category,
-                "subcategory": event.subcategory,
-                "impact": event.impact_score,
-                "sentiment": event.sentiment,
-                "article_count": event.article_count,
-                "published": event.published_at.isoformat() if event.published_at else None,
-            })
+            by_category[cat].append(
+                {
+                    "id": event.id,
+                    "title": event.title,
+                    "summary": event.summary,
+                    "category": event.category,
+                    "subcategory": event.subcategory,
+                    "impact": event.impact_score,
+                    "sentiment": event.sentiment,
+                    "article_count": event.article_count,
+                    "published": event.published_at.isoformat() if event.published_at else None,
+                }
+            )
 
         # Get top news by impact
-        all_articles = db_session.query(News).filter(
-            News.created_at >= cutoff,
-            News.is_relevant,
-        ).order_by(News.impact_score.desc()).limit(20).all()
+        all_articles = (
+            db_session.query(News)
+            .filter(
+                News.created_at >= cutoff,
+                News.is_relevant,
+            )
+            .order_by(News.impact_score.desc())
+            .limit(20)
+            .all()
+        )
 
         top_news = []
         for article in all_articles:
-            top_news.append({
-                "id": article.id,
-                "title": article.title,
-                "source": article.source_name,
-                "impact": article.impact_score,
-                "sentiment": article.sentiment,
-                "published": article.published_at.isoformat() if article.published_at else None,
-            })
+            top_news.append(
+                {
+                    "id": article.id,
+                    "title": article.title,
+                    "source": article.source_name,
+                    "impact": article.impact_score,
+                    "sentiment": article.sentiment,
+                    "published": article.published_at.isoformat() if article.published_at else None,
+                }
+            )
 
         # Statistics
-        total_articles = db_session.query(News).filter(
-            News.created_at >= cutoff
-        ).count()
+        total_articles = db_session.query(News).filter(News.created_at >= cutoff).count()
 
-        relevant_articles = db_session.query(News).filter(
-            News.created_at >= cutoff,
-            News.is_relevant,
-        ).count()
+        relevant_articles = (
+            db_session.query(News)
+            .filter(
+                News.created_at >= cutoff,
+                News.is_relevant,
+            )
+            .count()
+        )
 
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -114,16 +122,18 @@ class DashboardDataProvider:
         today = datetime.now(timezone.utc).date()
 
         # Get all sectors
-        sectors = db_session.query(Instrument.sector).distinct().filter(
-            Instrument.sector.isnot(None)
-        ).all()
+        sectors = db_session.query(Instrument.sector).distinct().filter(Instrument.sector.isnot(None)).all()
 
         heatmap = {}
         for (sector,) in sectors:
-            risk = db_session.query(SectorRiskHistory).filter(
-                SectorRiskHistory.sector == sector,
-                SectorRiskHistory.date == today,
-            ).first()
+            risk = (
+                db_session.query(SectorRiskHistory)
+                .filter(
+                    SectorRiskHistory.sector == sector,
+                    SectorRiskHistory.date == today,
+                )
+                .first()
+            )
 
             risk_score = risk.risk_score if risk else 0.0
 
@@ -140,9 +150,7 @@ class DashboardDataProvider:
             "heatmap": heatmap,
         }
 
-    def get_company_risk_decomposition(
-        self, ticker: str, db_session: Any
-    ) -> dict[str, Any]:
+    def get_company_risk_decomposition(self, ticker: str, db_session: Any) -> dict[str, Any]:
         """Get risk component breakdown for a company.
 
         Args:
@@ -160,10 +168,14 @@ class DashboardDataProvider:
 
         today = datetime.now(timezone.utc).date()
 
-        risk = db_session.query(CompanyRiskHistory).filter(
-            CompanyRiskHistory.instrument_id == instrument.id,
-            CompanyRiskHistory.date == today,
-        ).first()
+        risk = (
+            db_session.query(CompanyRiskHistory)
+            .filter(
+                CompanyRiskHistory.instrument_id == instrument.id,
+                CompanyRiskHistory.date == today,
+            )
+            .first()
+        )
 
         if not risk:
             return {
@@ -210,9 +222,7 @@ class DashboardDataProvider:
 
         today = datetime.now(timezone.utc).date()
 
-        geo_risk = db_session.query(GeopoliticalRiskHistory).filter(
-            GeopoliticalRiskHistory.date == today
-        ).first()
+        geo_risk = db_session.query(GeopoliticalRiskHistory).filter(GeopoliticalRiskHistory.date == today).first()
 
         if not geo_risk:
             return {
@@ -263,9 +273,7 @@ class DashboardDataProvider:
             },
         }
 
-    def get_risk_trends(
-        self, target: str, target_type: str, db_session: Any, days: int = 30
-    ) -> dict[str, Any]:
+    def get_risk_trends(self, target: str, target_type: str, db_session: Any, days: int = 30) -> dict[str, Any]:
         """Get risk score trends over time.
 
         Args:
@@ -283,28 +291,32 @@ class DashboardDataProvider:
         history = []
 
         if target_type == "sector":
-            data = db_session.query(SectorRiskHistory).filter(
-                SectorRiskHistory.sector == target,
-                SectorRiskHistory.date >= cutoff.date(),
-            ).order_by(SectorRiskHistory.date).all()
+            data = (
+                db_session.query(SectorRiskHistory)
+                .filter(
+                    SectorRiskHistory.sector == target,
+                    SectorRiskHistory.date >= cutoff.date(),
+                )
+                .order_by(SectorRiskHistory.date)
+                .all()
+            )
 
-            history = [
-                {"date": d.date.isoformat(), "risk": d.risk_score}
-                for d in data
-            ]
+            history = [{"date": d.date.isoformat(), "risk": d.risk_score} for d in data]
 
         elif target_type == "company":
             instrument = db_session.query(Instrument).filter_by(ticker=target).first()
             if instrument:
-                data = db_session.query(CompanyRiskHistory).filter(
-                    CompanyRiskHistory.instrument_id == instrument.id,
-                    CompanyRiskHistory.date >= cutoff.date(),
-                ).order_by(CompanyRiskHistory.date).all()
+                data = (
+                    db_session.query(CompanyRiskHistory)
+                    .filter(
+                        CompanyRiskHistory.instrument_id == instrument.id,
+                        CompanyRiskHistory.date >= cutoff.date(),
+                    )
+                    .order_by(CompanyRiskHistory.date)
+                    .all()
+                )
 
-                history = [
-                    {"date": d.date.isoformat(), "risk": d.risk_score}
-                    for d in data
-                ]
+                history = [{"date": d.date.isoformat(), "risk": d.risk_score} for d in data]
 
         if not history:
             return {"error": f"No data found for {target}"}

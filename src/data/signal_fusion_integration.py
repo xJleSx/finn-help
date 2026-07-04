@@ -37,9 +37,7 @@ class SignalFusionIntegration:
         self.company_aggregator = company_aggregator
         self.event_detector = event_detector
 
-    def generate_news_risk_signal(
-        self, instrument: Any, db_session: Any
-    ) -> dict[str, Any]:
+    def generate_news_risk_signal(self, instrument: Any, db_session: Any) -> dict[str, Any]:
         """Generate news-based risk signal for an instrument.
 
         Args:
@@ -50,9 +48,7 @@ class SignalFusionIntegration:
             Signal dict with confidence and components
         """
         # Get company risk assessment
-        company_risk = self.company_aggregator.calculate_company_risk(
-            instrument, db_session
-        )
+        company_risk = self.company_aggregator.calculate_company_risk(instrument, db_session)
 
         # Get geopolitical context
         geo_risk = self.geo_engine.calculate_daily_geopolitical_risk(db_session)
@@ -60,12 +56,16 @@ class SignalFusionIntegration:
         # Extract relevant news articles
         from src.db.models import News, NewsInstrument
 
-        recent_news = db_session.query(News).join(
-            NewsInstrument, NewsInstrument.news_id == News.id
-        ).filter(
-            NewsInstrument.instrument_id == instrument.id,
-            News.is_relevant,
-        ).limit(10).all()
+        recent_news = (
+            db_session.query(News)
+            .join(NewsInstrument, NewsInstrument.news_id == News.id)
+            .filter(
+                NewsInstrument.instrument_id == instrument.id,
+                News.is_relevant,
+            )
+            .limit(10)
+            .all()
+        )
 
         # Aggregate sentiments
         sentiments = [n.sentiment for n in recent_news if n.sentiment]
@@ -95,9 +95,7 @@ class SignalFusionIntegration:
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    def generate_sector_risk_signal(
-        self, sector: str, db_session: Any
-    ) -> dict[str, Any]:
+    def generate_sector_risk_signal(self, sector: str, db_session: Any) -> dict[str, Any]:
         """Generate sector-level risk signal.
 
         Args:
@@ -109,10 +107,14 @@ class SignalFusionIntegration:
         """
         from src.db.models import SectorRiskHistory
 
-        risk_history = db_session.query(SectorRiskHistory).filter(
-            SectorRiskHistory.sector == sector,
-            SectorRiskHistory.date == datetime.now(timezone.utc).date(),
-        ).first()
+        risk_history = (
+            db_session.query(SectorRiskHistory)
+            .filter(
+                SectorRiskHistory.sector == sector,
+                SectorRiskHistory.date == datetime.now(timezone.utc).date(),
+            )
+            .first()
+        )
 
         if not risk_history:
             return {
@@ -153,9 +155,7 @@ class SignalFusionIntegration:
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    def adjust_portfolio_weights_for_risk(
-        self, portfolio_weights: dict[str, float], db_session: Any
-    ) -> dict[str, float]:
+    def adjust_portfolio_weights_for_risk(self, portfolio_weights: dict[str, float], db_session: Any) -> dict[str, float]:
         """Adjust portfolio allocation based on news/sector/company risks.
 
         Args:
@@ -207,34 +207,44 @@ class SignalFusionIntegration:
         # High geopolitical risk alert
         geo_risk = self.geo_engine.calculate_daily_geopolitical_risk(db_session)
         if geo_risk["risk_score"] > 6.5:
-            alerts.append({
-                "type": "geopolitical_escalation",
-                "severity": "HIGH" if geo_risk["risk_score"] > 8 else "MEDIUM",
-                "risk_score": geo_risk["risk_score"],
-                "message": f"Geopolitical risk at {geo_risk['risk_score']:.1f}/10",
-                "action": "Review exposure to high-risk sectors",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
+            alerts.append(
+                {
+                    "type": "geopolitical_escalation",
+                    "severity": "HIGH" if geo_risk["risk_score"] > 8 else "MEDIUM",
+                    "risk_score": geo_risk["risk_score"],
+                    "message": f"Geopolitical risk at {geo_risk['risk_score']:.1f}/10",
+                    "action": "Review exposure to high-risk sectors",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
         # Sector-level alerts
         from src.db.models import SectorRiskHistory
 
-        high_risk_sectors = db_session.query(SectorRiskHistory).filter(
-            SectorRiskHistory.date == datetime.now(timezone.utc).date(),
-            SectorRiskHistory.risk_score > 6.5,
-        ).order_by(SectorRiskHistory.risk_score.desc()).limit(5).all()
+        high_risk_sectors = (
+            db_session.query(SectorRiskHistory)
+            .filter(
+                SectorRiskHistory.date == datetime.now(timezone.utc).date(),
+                SectorRiskHistory.risk_score > 6.5,
+            )
+            .order_by(SectorRiskHistory.risk_score.desc())
+            .limit(5)
+            .all()
+        )
 
         for sector_risk in high_risk_sectors:
-            alerts.append({
-                "type": "sector_risk_elevated",
-                "severity": "HIGH" if sector_risk.risk_score > 8 else "MEDIUM",
-                "sector": sector_risk.sector,
-                "risk_score": sector_risk.risk_score,
-                "article_count": sector_risk.article_count,
-                "message": f"Sector {sector_risk.sector} risk at {sector_risk.risk_score:.1f}/10",
-                "action": f"Reduce exposure to {sector_risk.sector}",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
+            alerts.append(
+                {
+                    "type": "sector_risk_elevated",
+                    "severity": "HIGH" if sector_risk.risk_score > 8 else "MEDIUM",
+                    "sector": sector_risk.sector,
+                    "risk_score": sector_risk.risk_score,
+                    "article_count": sector_risk.article_count,
+                    "message": f"Sector {sector_risk.sector} risk at {sector_risk.risk_score:.1f}/10",
+                    "action": f"Reduce exposure to {sector_risk.sector}",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
         # Sentiment divergence alerts (uncertainty signals)
         from src.data.event_detector import SentimentDivergenceDetector
@@ -244,16 +254,18 @@ class SignalFusionIntegration:
 
         for div in divergences[:3]:  # Top 3 divergences
             ticker = div.get("ticker") or div.get("sector")
-            alerts.append({
-                "type": "sentiment_divergence",
-                "severity": "INFO",
-                "target": ticker,
-                "divergence": div["divergence"],
-                "consensus": div["consensus"],
-                "message": f"Mixed sentiment detected in {ticker} - uncertainty signal",
-                "action": "Monitor for volatility increase",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
+            alerts.append(
+                {
+                    "type": "sentiment_divergence",
+                    "severity": "INFO",
+                    "target": ticker,
+                    "divergence": div["divergence"],
+                    "consensus": div["consensus"],
+                    "message": f"Mixed sentiment detected in {ticker} - uncertainty signal",
+                    "action": "Monitor for volatility increase",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
         # Sort by severity and score
         severity_order = {"HIGH": 0, "MEDIUM": 1, "INFO": 2}
@@ -301,11 +313,13 @@ class SignalFusionIntegration:
         # Adjust confidence based on news
         if "confidence" in signal:
             # Boost confidence if news supports technical signal
-            if (signal.get("action") == "BUY" and news_signal["sentiment"] == "positive") or \
-               (signal.get("action") == "SELL" and news_signal["sentiment"] == "negative"):
+            if (signal.get("action") == "BUY" and news_signal["sentiment"] == "positive") or (
+                signal.get("action") == "SELL" and news_signal["sentiment"] == "negative"
+            ):
                 signal["confidence"] *= 1.2
-            elif (signal.get("action") == "BUY" and news_signal["sentiment"] == "negative") or \
-                 (signal.get("action") == "SELL" and news_signal["sentiment"] == "positive"):
+            elif (signal.get("action") == "BUY" and news_signal["sentiment"] == "negative") or (
+                signal.get("action") == "SELL" and news_signal["sentiment"] == "positive"
+            ):
                 signal["confidence"] *= 0.8
 
             signal["confidence"] = min(signal["confidence"], 1.0)

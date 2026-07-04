@@ -24,6 +24,7 @@ def _is_sqlite(url: str) -> bool:
 
 # ── Async engine (PostgreSQL primary) ────────────────────────────────────
 
+
 def _build_async_url(url: str) -> str:
     if url.startswith("sqlite:///"):
         return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
@@ -84,13 +85,17 @@ def _init_read_replica() -> bool:
     try:
         url = _build_async_url(replica_url)
         _read_replica_engine = create_async_engine(
-            url, echo=False,
+            url,
+            echo=False,
             pool_size=settings.db_pool_size,
             max_overflow=settings.db_max_overflow,
-            pool_pre_ping=True, pool_recycle=settings.db_pool_recycle,
+            pool_pre_ping=True,
+            pool_recycle=settings.db_pool_recycle,
         )
         _ReadReplicaSessionLocal = async_sessionmaker(
-            bind=_read_replica_engine, class_=AsyncSession, expire_on_commit=False,
+            bind=_read_replica_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
         )
         logger.info("Read replica engine initialized: %s", replica_url)
         return True
@@ -180,6 +185,7 @@ def close_db() -> None:
     """Close all database connections during shutdown."""
     try:
         from sqlalchemy.orm import close_all_sessions
+
         close_all_sessions()
         logger.info("All database sessions closed")
     except Exception as e:

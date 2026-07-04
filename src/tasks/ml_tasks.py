@@ -107,6 +107,7 @@ def generate_signals_background(self, instrument_ids: list[int] | None = None) -
     logger.info("Generating signals in background task")
     try:
         import asyncio
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -127,10 +128,12 @@ def collect_prices_background(self) -> dict[str, Any]:
     logger.info("Collecting prices in background task")
     try:
         import asyncio
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             from src.db.connection import get_session
+
             db = get_session()
             try:
                 updated = loop.run_until_complete(collect_prices(db))

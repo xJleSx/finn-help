@@ -176,6 +176,7 @@ def _get_flat_subcategories() -> dict[str, dict[str, str]]:
 def _expand_keywords(keywords: list[str]) -> list[str]:
     return keywords + [kw.lower() for kw in keywords]
 
+
 HIERARCHY_KEYWORDS = {
     "MACRO": _expand_keywords(["макро", "macro", "ввп", "gdp", "инфляци", "inflation", "ставк", "rate", "ключев"]),
     "monetary_policy": _expand_keywords(["ставк", "rate", "ключев", "цб", "central bank"]),
@@ -317,15 +318,11 @@ class NewsClassifier:
 
     # --- Classification ---
 
-    def classify_with_llm(
-        self, title: str, summary: str, source_name: str = ""
-    ) -> dict[str, Any]:
+    def classify_with_llm(self, title: str, summary: str, source_name: str = "") -> dict[str, Any]:
         if not self.llm_provider:
             return self._fallback_classification(title, summary)
 
-        cats_lines = "\n".join(
-            f"  - {cat}: {info['description']}" for cat, info in self.categories.items()
-        )
+        cats_lines = "\n".join(f"  - {cat}: {info['description']}" for cat, info in self.categories.items())
 
         prompt = f"""Classify this news article:
 
@@ -386,14 +383,14 @@ Return valid JSON (no markdown, no backticks):
         }
         impact_score = impact_map.get(category, 5)
 
-        positive_count = sum(1 for w in _expand_keywords(
-            ["рост", "growth", "прибыль", "profit", "выше", "above", "восстановление",
-             "увелич", "increase", "повыш"]
-        ) if w in text)
-        negative_count = sum(1 for w in _expand_keywords(
-            ["падение", "decline", "убыток", "loss", "ниже", "below", "кризис",
-             "сократ", "уменьш"]
-        ) if w in text)
+        positive_count = sum(
+            1
+            for w in _expand_keywords(["рост", "growth", "прибыль", "profit", "выше", "above", "восстановление", "увелич", "increase", "повыш"])
+            if w in text
+        )
+        negative_count = sum(
+            1 for w in _expand_keywords(["падение", "decline", "убыток", "loss", "ниже", "below", "кризис", "сократ", "уменьш"]) if w in text
+        )
 
         if positive_count > negative_count:
             sentiment = "positive"
@@ -447,15 +444,11 @@ Return valid JSON (no markdown, no backticks):
 
         return {"category": cat, "subcategory": sub, "subsubcategory": subsub}
 
-    def classify_hierarchical(
-        self, title: str, summary: str, source_name: str = ""
-    ) -> dict[str, Any]:
+    def classify_hierarchical(self, title: str, summary: str, source_name: str = "") -> dict[str, Any]:
         result = self.classify_with_llm(title, summary, source_name)
         subsub = result.get("subsubcategory", "")
 
-        path = self.get_full_path(
-            result["category"], result.get("subcategory", ""), subsub
-        )
+        path = self.get_full_path(result["category"], result.get("subcategory", ""), subsub)
         result["hierarchy_path"] = path
         return result
 

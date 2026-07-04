@@ -45,12 +45,7 @@ class CorrelationAnalyzer:
             return None
 
         inst_ids = [inst.id for inst in instruments]
-        all_prices = (
-            db.query(Price.instrument_id, Price.date, Price.close)
-            .filter(Price.instrument_id.in_(inst_ids))
-            .order_by(Price.date.asc())
-            .all()
-        )
+        all_prices = db.query(Price.instrument_id, Price.date, Price.close).filter(Price.instrument_id.in_(inst_ids)).order_by(Price.date.asc()).all()
 
         id_to_ticker = {int(inst.id): str(inst.ticker) for inst in instruments}
 
@@ -115,9 +110,7 @@ class CorrelationAnalyzer:
         id_to_ticker = {int(inst.id): str(inst.ticker) for inst in instruments}
 
         price_result = await db.execute(
-            select(Price.instrument_id, Price.date, Price.close)
-            .where(Price.instrument_id.in_(inst_ids))
-            .order_by(Price.date.asc())
+            select(Price.instrument_id, Price.date, Price.close).where(Price.instrument_id.in_(inst_ids)).order_by(Price.date.asc())
         )
         all_prices = price_result.all()
 

@@ -71,9 +71,7 @@ def generate_weekly_report() -> bytes | None:
             eq_arr = np.array([r["portfolio"] for r in ec])
             peak = np.maximum.accumulate(eq_arr)
             dd = (eq_arr - peak) / peak
-            ax3.fill_between(
-                range(len(dd)), dd, 0, color="#ef4444", alpha=0.4, label=f"Max DD: {result.max_drawdown:.1%}"
-            )
+            ax3.fill_between(range(len(dd)), dd, 0, color="#ef4444", alpha=0.4, label=f"Max DD: {result.max_drawdown:.1%}")
             ax3.plot(dd, color="#dc2626", linewidth=1)
             ax3.set_ylabel("Drawdown")
             ax3.set_title("Drawdown")

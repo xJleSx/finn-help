@@ -16,6 +16,7 @@ def run_daily_update(self) -> dict[str, Any]:
     logger.info("Running daily update via Celery task")
     try:
         import asyncio
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -39,6 +40,7 @@ def run_weekly_update(self) -> dict[str, Any]:
     logger.info("Running weekly update via Celery task")
     try:
         import asyncio
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:

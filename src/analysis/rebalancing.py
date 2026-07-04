@@ -62,25 +62,22 @@ class RebalancingEngine:
             instr = db.query(Instrument).filter_by(id=pos.instrument_id).first()
             if not instr:
                 continue
-            price = (
-                db.query(Price)
-                .filter_by(instrument_id=instr.id)
-                .order_by(Price.date.desc())
-                .first()
-            )
+            price = db.query(Price).filter_by(instrument_id=instr.id).order_by(Price.date.desc()).first()
             if not price or not price.close:
                 continue
             current_price = float(price.close)
             value = current_price * float(pos.quantity)
             total_value += value
-            portfolio_items.append({
-                "ticker": instr.ticker,
-                "sector": instr.sector or "Прочее",
-                "quantity": float(pos.quantity),
-                "current_price": current_price,
-                "value": value,
-                "instrument_id": instr.id,
-            })
+            portfolio_items.append(
+                {
+                    "ticker": instr.ticker,
+                    "sector": instr.sector or "Прочее",
+                    "quantity": float(pos.quantity),
+                    "current_price": current_price,
+                    "value": value,
+                    "instrument_id": instr.id,
+                }
+            )
 
         if total_value <= 0:
             return []
@@ -119,17 +116,19 @@ class RebalancingEngine:
             if item["weight"] > self.max_position_pct:
                 alerts.append("position_exceeds_limit")
 
-            results.append({
-                "ticker": ticker,
-                "sector": item["sector"],
-                "current_weight": round(current_weight, 4),
-                "target_weight": round(target_weight, 4),
-                "deviation": round(deviation, 4),
-                "current_price": item["current_price"],
-                "quantity": int(item["quantity"]),
-                "value": round(item["value"], 2),
-                "alerts": alerts,
-            })
+            results.append(
+                {
+                    "ticker": ticker,
+                    "sector": item["sector"],
+                    "current_weight": round(current_weight, 4),
+                    "target_weight": round(target_weight, 4),
+                    "deviation": round(deviation, 4),
+                    "current_price": item["current_price"],
+                    "quantity": int(item["quantity"]),
+                    "value": round(item["value"], 2),
+                    "alerts": alerts,
+                }
+            )
 
         return results
 
@@ -142,8 +141,12 @@ class RebalancingEngine:
         analysis = self.analyze_portfolio(db, user_id, target_weights)
         if not analysis:
             return RebalancePlan(
-                actions=[], total_trades=0, estimated_commission=0.0,
-                turnover=0.0, portfolio_value=0.0, sector_breaks=[],
+                actions=[],
+                total_trades=0,
+                estimated_commission=0.0,
+                turnover=0.0,
+                portfolio_value=0.0,
+                sector_breaks=[],
             )
 
         portfolio_value = sum(a["value"] for a in analysis)
@@ -153,12 +156,7 @@ class RebalancingEngine:
             ticker = a["ticker"]
             instr = db.query(Instrument).filter_by(ticker=ticker).first()
             if instr:
-                signal = (
-                    db.query(Signal)
-                    .filter_by(instrument_id=instr.id)
-                    .order_by(Signal.date.desc())
-                    .first()
-                )
+                signal = db.query(Signal).filter_by(instrument_id=instr.id).order_by(Signal.date.desc()).first()
                 if signal:
                     signals_map[ticker] = {
                         "action": signal.action,
@@ -184,16 +182,18 @@ class RebalancingEngine:
             abs_dev = abs(deviation)
 
             if abs_dev < self.rebalance_threshold:
-                actions.append(RebalanceAction(
-                    ticker=ticker,
-                    current_weight=current_weight,
-                    target_weight=target_weight,
-                    deviation=deviation,
-                    action="HOLD",
-                    quantity=0,
-                    estimated_cost=0.0,
-                    reason="within threshold",
-                ))
+                actions.append(
+                    RebalanceAction(
+                        ticker=ticker,
+                        current_weight=current_weight,
+                        target_weight=target_weight,
+                        deviation=deviation,
+                        action="HOLD",
+                        quantity=0,
+                        estimated_cost=0.0,
+                        reason="within threshold",
+                    )
+                )
                 continue
 
             instr = db.query(Instrument).filter_by(ticker=ticker).first()
@@ -215,24 +215,28 @@ class RebalancingEngine:
                         reason_parts.append(f"partial (signal {signal_action})")
 
                     cost = sell_quantity * price
-                    actions.append(RebalanceAction(
-                        ticker=ticker,
-                        current_weight=current_weight,
-                        target_weight=target_weight,
-                        deviation=deviation,
-                        action="SELL",
-                        quantity=sell_quantity,
-                        estimated_cost=round(cost, 2),
-                        reason="; ".join(reason_parts),
-                    ))
+                    actions.append(
+                        RebalanceAction(
+                            ticker=ticker,
+                            current_weight=current_weight,
+                            target_weight=target_weight,
+                            deviation=deviation,
+                            action="SELL",
+                            quantity=sell_quantity,
+                            estimated_cost=round(cost, 2),
+                            reason="; ".join(reason_parts),
+                        )
+                    )
                     total_turnover += cost
-                    alerts.append(RebalanceAlert(
-                        ticker=ticker,
-                        current_pct=current_weight,
-                        target_pct=target_weight,
-                        deviation_pct=deviation,
-                        reason="; ".join(reason_parts),
-                    ))
+                    alerts.append(
+                        RebalanceAlert(
+                            ticker=ticker,
+                            current_pct=current_weight,
+                            target_pct=target_weight,
+                            deviation_pct=deviation,
+                            reason="; ".join(reason_parts),
+                        )
+                    )
             else:
                 buy_value = abs(deviation) * portfolio_value
                 buy_quantity = int(buy_value / price / lot_size) * lot_size if price > 0 else 0
@@ -246,24 +250,28 @@ class RebalancingEngine:
                         reason_parts.append(f"partial (signal {signal_action})")
 
                     cost = buy_quantity * price
-                    actions.append(RebalanceAction(
-                        ticker=ticker,
-                        current_weight=current_weight,
-                        target_weight=target_weight,
-                        deviation=deviation,
-                        action="BUY",
-                        quantity=buy_quantity,
-                        estimated_cost=round(cost, 2),
-                        reason="; ".join(reason_parts),
-                    ))
+                    actions.append(
+                        RebalanceAction(
+                            ticker=ticker,
+                            current_weight=current_weight,
+                            target_weight=target_weight,
+                            deviation=deviation,
+                            action="BUY",
+                            quantity=buy_quantity,
+                            estimated_cost=round(cost, 2),
+                            reason="; ".join(reason_parts),
+                        )
+                    )
                     total_turnover += cost
-                    alerts.append(RebalanceAlert(
-                        ticker=ticker,
-                        current_pct=current_weight,
-                        target_pct=target_weight,
-                        deviation_pct=deviation,
-                        reason="; ".join(reason_parts),
-                    ))
+                    alerts.append(
+                        RebalanceAlert(
+                            ticker=ticker,
+                            current_pct=current_weight,
+                            target_pct=target_weight,
+                            deviation_pct=deviation,
+                            reason="; ".join(reason_parts),
+                        )
+                    )
 
         sector_breaks = self._check_sector_limits(analysis)
         commission_rate = DEFAULT_COMMISSION_RATE
@@ -292,12 +300,14 @@ class RebalancingEngine:
         breaks: list[dict] = []
         for sector, weight in sector_map.items():
             if weight > self.max_sector_pct:
-                breaks.append({
-                    "sector": sector,
-                    "weight": round(weight, 4),
-                    "max_pct": self.max_sector_pct,
-                    "excess": round(weight - self.max_sector_pct, 4),
-                })
+                breaks.append(
+                    {
+                        "sector": sector,
+                        "weight": round(weight, 4),
+                        "max_pct": self.max_sector_pct,
+                        "excess": round(weight - self.max_sector_pct, 4),
+                    }
+                )
         return breaks
 
     def execute_plan(
@@ -353,10 +363,7 @@ class RebalancingEngine:
         ]
 
         if plan.portfolio_value > 0:
-            lines.append(
-                f"Turnover:        {plan.turnover:,.2f} RUB "
-                f"({plan.turnover / plan.portfolio_value * 100:.1f}% of portfolio)"
-            )
+            lines.append(f"Turnover:        {plan.turnover:,.2f} RUB ({plan.turnover / plan.portfolio_value * 100:.1f}% of portfolio)")
         else:
             lines.append(f"Turnover:        {plan.turnover:,.2f} RUB")
 
@@ -383,10 +390,7 @@ class RebalancingEngine:
         if plan.sector_breaks:
             lines.extend(["", "Sector Limit Breaches:", "-" * 60])
             for sb in plan.sector_breaks:
-                lines.append(
-                    f"  {sb['sector']:20s} {sb['weight']:.1%} > {sb['max_pct']:.0%} "
-                    f"(excess: {sb['excess']:+.1%})"
-                )
+                lines.append(f"  {sb['sector']:20s} {sb['weight']:.1%} > {sb['max_pct']:.0%} (excess: {sb['excess']:+.1%})")
 
         lines.extend(["", "=" * 60])
         return "\n".join(lines)

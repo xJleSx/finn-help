@@ -38,51 +38,155 @@ logger = logging.getLogger(__name__)
 
 _INTENT_MAP: dict[str, list[str]] = {
     "portfolio_value": [
-        "portfolio", "портфель", "value", "стоимость", "worth", "how much",
-        "balance", "баланс", "holdings", "позиции", "positions",
+        "portfolio",
+        "портфель",
+        "value",
+        "стоимость",
+        "worth",
+        "how much",
+        "balance",
+        "баланс",
+        "holdings",
+        "позиции",
+        "positions",
     ],
     "scenario_analysis": [
-        "scenario", "сценарий", "what if", "что если", "crash", "обвал",
-        "stress", "стресс", "macro", "макро", "shock", "шок",
+        "scenario",
+        "сценарий",
+        "what if",
+        "что если",
+        "crash",
+        "обвал",
+        "stress",
+        "стресс",
+        "macro",
+        "макро",
+        "shock",
+        "шок",
     ],
     "news_impact": [
-        "news", "новости", "новость", "impact", "влияние", "effect",
-        "sentiment", "сентимент", "affect", "повлия", "последн",
+        "news",
+        "новости",
+        "новость",
+        "impact",
+        "влияние",
+        "effect",
+        "sentiment",
+        "сентимент",
+        "affect",
+        "повлия",
+        "последн",
     ],
     "top_picks": [
-        "top", "топ", "best", "лучш", "pick", "выбор", "recommend",
-        "рекомендац", "signal", "сигнал", "buy", "купить",
+        "top",
+        "топ",
+        "best",
+        "лучш",
+        "pick",
+        "выбор",
+        "recommend",
+        "рекомендац",
+        "signal",
+        "сигнал",
+        "buy",
+        "купить",
     ],
     "risk_metrics": [
-        "risk", "риск", "var", "cvar", "value at risk", "drawdown",
-        "просадк", "volatility", "волатильност", "опасн",
+        "risk",
+        "риск",
+        "var",
+        "cvar",
+        "value at risk",
+        "drawdown",
+        "просадк",
+        "volatility",
+        "волатильност",
+        "опасн",
     ],
     "rebalance": [
-        "rebalance", "ребаланс", "rebalancing", "drift", "отклонен",
-        "target", "целев", "overweight", "перевес",
+        "rebalance",
+        "ребаланс",
+        "rebalancing",
+        "drift",
+        "отклонен",
+        "target",
+        "целев",
+        "overweight",
+        "перевес",
     ],
     "instrument_info": [
-        "instrument", "инструмент", "ticker", "тикер", "price", "цена",
-        "pe", "p/e", "market cap", "капитализация", "sector", "сектор",
-        "about", "о компании", "что такое", "кто такой", "описание",
-        "info", "информация", "характеристик",
+        "instrument",
+        "инструмент",
+        "ticker",
+        "тикер",
+        "price",
+        "цена",
+        "pe",
+        "p/e",
+        "market cap",
+        "капитализация",
+        "sector",
+        "сектор",
+        "about",
+        "о компании",
+        "что такое",
+        "кто такой",
+        "описание",
+        "info",
+        "информация",
+        "характеристик",
     ],
     "macro_query": [
-        "macro", "макро", "cbr", "цб", "ключевая ставка", "inflation",
-        "инфляция", "gdp", "ввп", "экономика", "economy", "ставка",
-        "ставку", "процент",
+        "macro",
+        "макро",
+        "cbr",
+        "цб",
+        "ключевая ставка",
+        "inflation",
+        "инфляция",
+        "gdp",
+        "ввп",
+        "экономика",
+        "economy",
+        "ставка",
+        "ставку",
+        "процент",
     ],
     "compare": [
-        "compare", "сравн", "vs", "против", "better", "лучш",
-        "difference", "разниц", "which", "какой", "или",
+        "compare",
+        "сравн",
+        "vs",
+        "против",
+        "better",
+        "лучш",
+        "difference",
+        "разниц",
+        "which",
+        "какой",
+        "или",
     ],
 }
 
 _KNOWN_SECTORS: list[str] = [
-    "финансы", "нефть", "it", "металлы", "электроэнергетика", "потреб",
-    "химия", "транспорт", "телеком", "строительство", "машиностроение",
-    "авиация", "ритейл", "здравоохран", "инфраструктур",
-    "сельское хозяйство", "добыча", "обрабатывающ", "инновации",
+    "финансы",
+    "нефть",
+    "it",
+    "металлы",
+    "электроэнергетика",
+    "потреб",
+    "химия",
+    "транспорт",
+    "телеком",
+    "строительство",
+    "машиностроение",
+    "авиация",
+    "ритейл",
+    "здравоохран",
+    "инфраструктур",
+    "сельское хозяйство",
+    "добыча",
+    "обрабатывающ",
+    "инновации",
 ]
 
 _ABBREVIATIONS: dict[str, str] = {
@@ -293,11 +397,13 @@ class NLQueryEngine:
         if user_id not in self._conversation_memory:
             self._conversation_memory[user_id] = deque(maxlen=3)
         response = self.format_response(data.get("intent", "unknown"), data)
-        self._conversation_memory[user_id].append({
-            "query": query,
-            "response": response,
-            "intent": data.get("intent", "unknown"),
-        })
+        self._conversation_memory[user_id].append(
+            {
+                "query": query,
+                "response": response,
+                "intent": data.get("intent", "unknown"),
+            }
+        )
 
     def _handle_unknown(self, query: str, db: Any, user_id: int) -> dict[str, Any]:
         entities = self._extract_entities(query, db)
@@ -313,8 +419,10 @@ class NLQueryEngine:
         rows = (
             db.execute(
                 select(
-                    Instrument.ticker, Instrument.full_name,
-                    Portfolio.quantity, Portfolio.avg_price,
+                    Instrument.ticker,
+                    Instrument.full_name,
+                    Portfolio.quantity,
+                    Portfolio.avg_price,
                 )
                 .join(Portfolio, Portfolio.instrument_id == Instrument.id)
                 .where(Portfolio.user_id == user_id)
@@ -330,13 +438,15 @@ class NLQueryEngine:
             price = float(r["avg_price"] or 0.0)
             amount = qty * price
             total += amount
-            positions.append({
-                "ticker": r["ticker"],
-                "name": r["full_name"],
-                "quantity": qty,
-                "avg_price": price,
-                "amount": round(amount, 2),
-            })
+            positions.append(
+                {
+                    "ticker": r["ticker"],
+                    "name": r["full_name"],
+                    "quantity": qty,
+                    "avg_price": price,
+                    "amount": round(amount, 2),
+                }
+            )
         return {
             "intent": "portfolio_value",
             "total": round(total, 2),
@@ -359,14 +469,9 @@ class NLQueryEngine:
     def _handle_news_impact(self, query: str, db: Any, user_id: int) -> dict[str, Any]:
         tickers = re.findall(r"\b[A-Z]{4,5}\b", query.upper())
         if not tickers:
-            rows = (
-                db.execute(
-                    select(Instrument.ticker)
-                    .join(Portfolio, Portfolio.instrument_id == Instrument.id)
-                    .where(Portfolio.user_id == user_id)
-                )
-                .all()
-            )
+            rows = db.execute(
+                select(Instrument.ticker).join(Portfolio, Portfolio.instrument_id == Instrument.id).where(Portfolio.user_id == user_id)
+            ).all()
             tickers = [r[0] for r in rows[:3]]
         cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         news_list: list[dict[str, Any]] = []
@@ -387,14 +492,16 @@ class NLQueryEngine:
             for article in rows:
                 model = NewsImpactModel(ticker)
                 impact = model.predict(db, article, horizon_days=1)
-                news_list.append({
-                    "ticker": ticker,
-                    "title": article.title,
-                    "sentiment": article.sentiment_score,
-                    "published": article.published_at.isoformat() if article.published_at else "",
-                    "predicted_return": impact.get("predicted_return", 0.0),
-                    "confidence": impact.get("confidence", 0.0),
-                })
+                news_list.append(
+                    {
+                        "ticker": ticker,
+                        "title": article.title,
+                        "sentiment": article.sentiment_score,
+                        "published": article.published_at.isoformat() if article.published_at else "",
+                        "predicted_return": impact.get("predicted_return", 0.0),
+                        "confidence": impact.get("confidence", 0.0),
+                    }
+                )
         return {
             "intent": "news_impact",
             "news": news_list,
@@ -402,15 +509,12 @@ class NLQueryEngine:
         }
 
     def _handle_top_picks(self, query: str, db: Any, user_id: int) -> dict[str, Any]:
-        rows = (
-            db.execute(
-                select(SignalModel, Instrument.ticker, Instrument.id)
-                .join(Instrument, Instrument.id == SignalModel.instrument_id)
-                .order_by(SignalModel.confidence.desc())
-                .limit(10)
-            )
-            .all()
-        )
+        rows = db.execute(
+            select(SignalModel, Instrument.ticker, Instrument.id)
+            .join(Instrument, Instrument.id == SignalModel.instrument_id)
+            .order_by(SignalModel.confidence.desc())
+            .limit(10)
+        ).all()
         signals = []
         for signal, ticker, inst_id in rows:
             entry: dict[str, Any] = {
@@ -455,11 +559,7 @@ class NLQueryEngine:
 
     def _handle_rebalance(self, query: str, db: Any, user_id: int) -> dict[str, Any]:
         instruments = db.execute(select(Instrument)).scalars().all()
-        positions = (
-            db.execute(select(Portfolio).where(Portfolio.user_id == user_id))
-            .scalars()
-            .all()
-        )
+        positions = db.execute(select(Portfolio).where(Portfolio.user_id == user_id)).scalars().all()
         inst_map = {inst.id: inst for inst in instruments}
         total_value = 0.0
         pos_data: list[dict[str, Any]] = []
@@ -469,11 +569,13 @@ class NLQueryEngine:
                 continue
             val = float(p.quantity * (p.avg_price or 0))
             total_value += val
-            pos_data.append({
-                "ticker": inst.ticker,
-                "value": round(val, 2),
-                "pct": 0.0,
-            })
+            pos_data.append(
+                {
+                    "ticker": inst.ticker,
+                    "value": round(val, 2),
+                    "pct": 0.0,
+                }
+            )
         for p in pos_data:
             p["pct"] = round(p["value"] / total_value * 100, 2) if total_value > 0 else 0.0
         return {
@@ -497,16 +599,13 @@ class NLQueryEngine:
 
         instruments = []
         for ticker in tickers[:5]:
-            row = (
-                db.execute(
-                    select(Instrument, Price)
-                    .outerjoin(Price, Price.instrument_id == Instrument.id)
-                    .where(Instrument.ticker == ticker)
-                    .order_by(Price.date.desc())
-                    .limit(1)
-                )
-                .first()
-            )
+            row = db.execute(
+                select(Instrument, Price)
+                .outerjoin(Price, Price.instrument_id == Instrument.id)
+                .where(Instrument.ticker == ticker)
+                .order_by(Price.date.desc())
+                .limit(1)
+            ).first()
             if not row:
                 continue
             inst, price = row if row else (None, None)
@@ -524,13 +623,15 @@ class NLQueryEngine:
                 "price": float(price.close) if price and price.close else None,
             }
             if fm:
-                entry.update({
-                    "pe_ratio": float(fm.pe_ratio) if fm.pe_ratio else None,
-                    "pb_ratio": float(fm.pb_ratio) if fm.pb_ratio else None,
-                    "market_cap": float(fm.market_cap) if fm.market_cap else None,
-                    "eps": float(fm.eps) if fm.eps else None,
-                    "roe": float(fm.roe) if fm.roe else None,
-                })
+                entry.update(
+                    {
+                        "pe_ratio": float(fm.pe_ratio) if fm.pe_ratio else None,
+                        "pb_ratio": float(fm.pb_ratio) if fm.pb_ratio else None,
+                        "market_cap": float(fm.market_cap) if fm.market_cap else None,
+                        "eps": float(fm.eps) if fm.eps else None,
+                        "roe": float(fm.roe) if fm.roe else None,
+                    }
+                )
             if profile:
                 try:
                     entry["profile"] = build_enriched_context_block(db, inst)
@@ -558,15 +659,9 @@ class NLQueryEngine:
     def _handle_macro_query(self, query: str, db: Any, user_id: int) -> dict[str, Any]:
         indicators: dict[str, dict[str, Any]] = {}
         for indicator_type in ["cbr_rate", "inflation", "gdp"]:
-            row = (
-                db.execute(
-                    select(MacroIndicator)
-                    .where(MacroIndicator.indicator_type == indicator_type)
-                    .order_by(MacroIndicator.date.desc())
-                    .limit(1)
-                )
-                .scalar_one_or_none()
-            )
+            row = db.execute(
+                select(MacroIndicator).where(MacroIndicator.indicator_type == indicator_type).order_by(MacroIndicator.date.desc()).limit(1)
+            ).scalar_one_or_none()
             if row:
                 indicators[indicator_type] = {
                     "value": row.value,
@@ -588,30 +683,21 @@ class NLQueryEngine:
             }
         instruments = []
         for ticker in tickers[:2]:
-            row = (
-                db.execute(
-                    select(Instrument, Price)
-                    .outerjoin(Price, Price.instrument_id == Instrument.id)
-                    .where(Instrument.ticker == ticker)
-                    .order_by(Price.date.desc())
-                    .limit(1)
-                )
-                .first()
-            )
+            row = db.execute(
+                select(Instrument, Price)
+                .outerjoin(Price, Price.instrument_id == Instrument.id)
+                .where(Instrument.ticker == ticker)
+                .order_by(Price.date.desc())
+                .limit(1)
+            ).first()
             if not row:
                 continue
             inst, price = row if row else (None, None)
             if not inst:
                 continue
-            ind = (
-                db.execute(
-                    select(Indicator)
-                    .where(Indicator.instrument_id == inst.id)
-                    .order_by(Indicator.date.desc())
-                    .limit(1)
-                )
-                .scalar_one_or_none()
-            )
+            ind = db.execute(
+                select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date.desc()).limit(1)
+            ).scalar_one_or_none()
             fm = load_fundamental_metric(db, inst.id)
             entry: dict[str, Any] = {
                 "ticker": inst.ticker,
@@ -622,12 +708,14 @@ class NLQueryEngine:
                 "atr": float(ind.atr) if ind and ind.atr else None,
             }
             if fm:
-                entry.update({
-                    "pe_ratio": float(fm.pe_ratio) if fm.pe_ratio else None,
-                    "pb_ratio": float(fm.pb_ratio) if fm.pb_ratio else None,
-                    "market_cap": float(fm.market_cap) if fm.market_cap else None,
-                    "roe": float(fm.roe) if fm.roe else None,
-                })
+                entry.update(
+                    {
+                        "pe_ratio": float(fm.pe_ratio) if fm.pe_ratio else None,
+                        "pb_ratio": float(fm.pb_ratio) if fm.pb_ratio else None,
+                        "market_cap": float(fm.market_cap) if fm.market_cap else None,
+                        "roe": float(fm.roe) if fm.roe else None,
+                    }
+                )
             instruments.append(entry)
         return {
             "intent": "compare",
@@ -655,7 +743,7 @@ class NLQueryEngine:
             lines.append(f"   \u2022 Monte Carlo: VaR95={v95:.1f}% CVaR95={cv95:.1f}%")
         bs = data.get("bootstrap")
         if bs:
-            lines.append(f"   • Bootstrap: VaR95={bs.get('var_95', 0)*100:.1f}% CVaR95={bs.get('cvar_95', 0)*100:.1f}%")
+            lines.append(f"   • Bootstrap: VaR95={bs.get('var_95', 0) * 100:.1f}% CVaR95={bs.get('cvar_95', 0) * 100:.1f}%")
         return "\n".join(lines)
 
     def _format_news_impact(self, data: dict[str, Any]) -> str:

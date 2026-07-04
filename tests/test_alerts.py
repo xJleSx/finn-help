@@ -41,12 +41,20 @@ def instrument2(db_session: Session) -> Instrument:
 @pytest.fixture
 def article_sber(db_session: Session, instrument: Instrument) -> News:
     article = News(
-        id=1, title="Sber earnings beat estimates", summary="",
-        source_type="rss", source_name="Interfax",
+        id=1,
+        title="Sber earnings beat estimates",
+        summary="",
+        source_type="rss",
+        source_name="Interfax",
         published_at=datetime.now(timezone.utc) - timedelta(hours=2),
-        sentiment="positive", sentiment_score=0.8,
-        category="COMPANY", subcategory="earnings",
-        is_relevant=True, impact_score=0.7, source_weight=0.5, source_count=3,
+        sentiment="positive",
+        sentiment_score=0.8,
+        category="COMPANY",
+        subcategory="earnings",
+        is_relevant=True,
+        impact_score=0.7,
+        source_weight=0.5,
+        source_count=3,
     )
     db_session.add(article)
     db_session.flush()
@@ -58,12 +66,20 @@ def article_sber(db_session: Session, instrument: Instrument) -> News:
 @pytest.fixture
 def article_gazp(db_session: Session, instrument2: Instrument) -> News:
     article = News(
-        id=2, title="Gazprom sanctions risk", summary="",
-        source_type="rss", source_name="RBC",
+        id=2,
+        title="Gazprom sanctions risk",
+        summary="",
+        source_type="rss",
+        source_name="RBC",
         published_at=datetime.now(timezone.utc) - timedelta(hours=6),
-        sentiment="negative", sentiment_score=-0.6,
-        category="GEOPOLITICAL", subcategory="sanctions",
-        is_relevant=True, impact_score=0.9, source_weight=0.7, source_count=5,
+        sentiment="negative",
+        sentiment_score=-0.6,
+        category="GEOPOLITICAL",
+        subcategory="sanctions",
+        is_relevant=True,
+        impact_score=0.9,
+        source_weight=0.7,
+        source_count=5,
     )
     db_session.add(article)
     db_session.flush()
@@ -81,6 +97,7 @@ def portfolio_entry(db_session: Session, instrument: Instrument) -> Portfolio:
 
 
 # --- AlertDeduplicator ---
+
 
 class TestAlertDeduplicator:
     def test_new_article_not_duplicate(self):
@@ -111,6 +128,7 @@ class TestAlertDeduplicator:
 
 # --- AlertTimer ---
 
+
 class TestAlertTimer:
     def test_first_send_allowed(self):
         timer = AlertTimer(cooldown_minutes=60)
@@ -135,6 +153,7 @@ class TestAlertTimer:
 
 # --- AlertEngine ---
 
+
 class TestAlertEngineUnit:
     def test_classify_critical(self):
         priority, reason = classify_priority(anomaly_score=0.85, pred_return=0.01, in_portfolio=False)
@@ -158,8 +177,11 @@ class TestAlertEngineUnit:
 
     def test_build_alert_structure(self):
         article = News(
-            id=42, title="Test article", category="MACRO",
-            subcategory="inflation", source_name="Interfax",
+            id=42,
+            title="Test article",
+            category="MACRO",
+            subcategory="inflation",
+            source_name="Interfax",
             published_at=datetime.now(timezone.utc),
         )
         anomaly = {"anomaly_score": 0.6, "is_anomaly": True, "details": {}}
@@ -187,8 +209,7 @@ class TestAlertEngineUnit:
 
     def test_article_tickers_no_link(self, db_session: Session):
         engine = AlertEngine()
-        orphan = News(id=999, title="orphan", source_type="rss",
-                       published_at=datetime.now(timezone.utc))
+        orphan = News(id=999, title="orphan", source_type="rss", published_at=datetime.now(timezone.utc))
         db_session.add(orphan)
         db_session.commit()
         tickers = engine._article_tickers(db_session, orphan)
@@ -203,8 +224,7 @@ class TestAlertEngineIntegration:
 
     def test_process_articles_no_tickers(self, db_session: Session):
         engine = AlertEngine()
-        orphan = News(id=1, title="orphan", source_type="rss",
-                       published_at=datetime.now(timezone.utc))
+        orphan = News(id=1, title="orphan", source_type="rss", published_at=datetime.now(timezone.utc))
         db_session.add(orphan)
         db_session.commit()
         result = engine.process_articles(db_session, [orphan])
@@ -212,38 +232,69 @@ class TestAlertEngineIntegration:
 
     def test_process_articles_dedup(self, db_session: Session, instrument: Instrument):
         engine = AlertEngine()
-        a1 = News(id=1, title="First", source_type="rss", source_name="Src",
-                   category="MACRO", subcategory="inflation",
-                   published_at=datetime.now(timezone.utc), sentiment="neutral",
-                   is_relevant=True, impact_score=0.0, source_weight=0.5, source_count=1)
-        a2 = News(id=2, title="Second (dup)", source_type="rss", source_name="Src",
-                   category="MACRO", subcategory="inflation",
-                   published_at=datetime.now(timezone.utc), sentiment="neutral",
-                   is_relevant=True, impact_score=0.0, source_weight=0.5, source_count=1)
+        a1 = News(
+            id=1,
+            title="First",
+            source_type="rss",
+            source_name="Src",
+            category="MACRO",
+            subcategory="inflation",
+            published_at=datetime.now(timezone.utc),
+            sentiment="neutral",
+            is_relevant=True,
+            impact_score=0.0,
+            source_weight=0.5,
+            source_count=1,
+        )
+        a2 = News(
+            id=2,
+            title="Second (dup)",
+            source_type="rss",
+            source_name="Src",
+            category="MACRO",
+            subcategory="inflation",
+            published_at=datetime.now(timezone.utc),
+            sentiment="neutral",
+            is_relevant=True,
+            impact_score=0.0,
+            source_weight=0.5,
+            source_count=1,
+        )
         db_session.add_all([a1, a2])
         db_session.flush()
-        db_session.add_all([
-            NewsInstrument(news_id=1, instrument_id=instrument.id),
-            NewsInstrument(news_id=2, instrument_id=instrument.id),
-        ])
+        db_session.add_all(
+            [
+                NewsInstrument(news_id=1, instrument_id=instrument.id),
+                NewsInstrument(news_id=2, instrument_id=instrument.id),
+            ]
+        )
         db_session.commit()
         result = engine.process_articles(db_session, [a1, a2])
         assert len(result) == 1  # second should be deduplicated
 
     def test_process_articles_with_portfolio(
-        self, db_session: Session, instrument: Instrument,
-        article_sber: News, article_gazp: News, portfolio_entry: Portfolio,
+        self,
+        db_session: Session,
+        instrument: Instrument,
+        article_sber: News,
+        article_gazp: News,
+        portfolio_entry: Portfolio,
     ):
         engine = AlertEngine()
         result = engine.process_portfolio_articles(
-            db_session, [article_sber, article_gazp], user_id=1,
+            db_session,
+            [article_sber, article_gazp],
+            user_id=1,
         )
         for alert in result:
             assert "priority" in alert
             assert "priority_score" in alert
 
     def test_process_articles_untrained(
-        self, db_session: Session, instrument: Instrument, article_sber: News,
+        self,
+        db_session: Session,
+        instrument: Instrument,
+        article_sber: News,
     ):
         engine = AlertEngine()
         result = engine.process_articles(db_session, [article_sber])
@@ -252,8 +303,11 @@ class TestAlertEngineIntegration:
             assert alert["priority_score"] >= 0.0
 
     def test_train_and_process(
-        self, db_session: Session, instrument: Instrument,
-        instrument2: Instrument, article_sber: News,
+        self,
+        db_session: Session,
+        instrument: Instrument,
+        instrument2: Instrument,
+        article_sber: News,
     ):
         engine = AlertEngine()
         engine.train_anomaly(db_session)

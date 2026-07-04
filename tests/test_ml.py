@@ -97,11 +97,13 @@ class TestXGBoostModel:
 
     def test_save_without_model_raises(self, model):
         import pytest
+
         with pytest.raises(ValueError, match="No trained model"):
             model.save()
 
     def test_load_nonexistent_raises(self, model):
         import pytest
+
         with pytest.raises((ValueError, FileNotFoundError)):
             model.load(version="nonexistent")
 

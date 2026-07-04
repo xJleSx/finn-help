@@ -55,11 +55,10 @@ class CompanyRiskAggregator:
         return SECTOR_BASELINE_RISK.get(sector, 5.0)
 
     @staticmethod
-    def _compute_volatility(
-        db_session: Any, instrument_id: int, days: int = 60
-    ) -> float:
+    def _compute_volatility(db_session: Any, instrument_id: int, days: int = 60) -> float:
         """Annualised volatility from daily log-returns (0-10 scale)."""
         from src.db.models import Price
+
         prices = (
             db_session.query(Price)
             .filter(
@@ -83,21 +82,12 @@ class CompanyRiskAggregator:
     def _get_market_regime(db_session: Any) -> str:
         """Determine broad market regime (normal / stress)."""
         from src.db.models import GeopoliticalRiskHistory, SectorRiskHistory
+
         today = datetime.now(timezone.utc).date()
-        geo = (
-            db_session.query(GeopoliticalRiskHistory)
-            .filter(GeopoliticalRiskHistory.date == today)
-            .first()
-        )
+        geo = db_session.query(GeopoliticalRiskHistory).filter(GeopoliticalRiskHistory.date == today).first()
         # average sector risk across all sectors today
-        sectors = (
-            db_session.query(SectorRiskHistory)
-            .filter(SectorRiskHistory.date == today)
-            .all()
-        )
-        avg_sector = (
-            sum(s.risk_score for s in sectors) / len(sectors) if sectors else 5.0
-        )
+        sectors = db_session.query(SectorRiskHistory).filter(SectorRiskHistory.date == today).all()
+        avg_sector = sum(s.risk_score for s in sectors) / len(sectors) if sectors else 5.0
         geo_score = geo.risk_score if geo else 5.0
         combined = avg_sector * 0.5 + geo_score * 0.5
         if combined >= 7.0:
@@ -147,6 +137,7 @@ class CompanyRiskAggregator:
     ) -> float:
         """Spillover from same-sector peers with high risk."""
         from src.db.models import CompanyRiskHistory, Instrument
+
         if not sector:
             return 0.0
         peers = (
@@ -175,6 +166,7 @@ class CompanyRiskAggregator:
         current_date: Optional[datetime] = None,
     ) -> float:
         from src.db.models import SectorRiskHistory
+
         if current_date is None:
             current_date = datetime.now(timezone.utc)
         if not instrument.sector:
@@ -195,13 +187,10 @@ class CompanyRiskAggregator:
         current_date: Optional[datetime] = None,
     ) -> float:
         from src.db.models import GeopoliticalRiskHistory
+
         if current_date is None:
             current_date = datetime.now(timezone.utc)
-        geo_risk = (
-            db_session.query(GeopoliticalRiskHistory)
-            .filter(GeopoliticalRiskHistory.date == current_date.date())
-            .first()
-        )
+        geo_risk = db_session.query(GeopoliticalRiskHistory).filter(GeopoliticalRiskHistory.date == current_date.date()).first()
         return geo_risk.risk_score if geo_risk else 5.0
 
     def calculate_macro_risk_component(
@@ -210,6 +199,7 @@ class CompanyRiskAggregator:
         current_date: Optional[datetime] = None,
     ) -> float:
         from src.db.models import NewsCompanyImpact
+
         if current_date is None:
             current_date = datetime.now(timezone.utc)
         macro_impacts = (
@@ -232,6 +222,7 @@ class CompanyRiskAggregator:
         current_date: Optional[datetime] = None,
     ) -> float:
         from src.db.models import NewsCompanyImpact
+
         if current_date is None:
             current_date = datetime.now(timezone.utc)
         company_impacts = (
@@ -250,10 +241,9 @@ class CompanyRiskAggregator:
 
     # ── Sentiment / recency ─────────────────────────────────────────────────
 
-    def _sentiment_multiplier(
-        self, db_session: Any, instrument_id: int, current_date: datetime
-    ) -> float:
+    def _sentiment_multiplier(self, db_session: Any, instrument_id: int, current_date: datetime) -> float:
         from src.db.models import News, NewsInstrument
+
         recent_news = (
             db_session.query(News)
             .join(NewsInstrument, NewsInstrument.news_id == News.id)
@@ -269,10 +259,9 @@ class CompanyRiskAggregator:
         ratio = negative_count / len(recent_news)
         return 0.8 + ratio * 0.4
 
-    def _recency_boost(
-        self, db_session: Any, instrument_id: int, current_date: datetime
-    ) -> float:
+    def _recency_boost(self, db_session: Any, instrument_id: int, current_date: datetime) -> float:
         from src.db.models import NewsCompanyImpact
+
         recent = (
             db_session.query(NewsCompanyImpact)
             .filter(
@@ -357,11 +346,7 @@ class CompanyRiskAggregator:
             has_geo=geo_risk > 0,
             has_sector=sector_risk > 0,
             has_company=company_risk > 0,
-            has_prices=vol_score != 5.0 or bool(
-                db_session.query(FundamentalMetric)
-                .filter(FundamentalMetric.instrument_id == instrument.id)
-                .first()
-            ),
+            has_prices=vol_score != 5.0 or bool(db_session.query(FundamentalMetric).filter(FundamentalMetric.instrument_id == instrument.id).first()),
             has_cap=cap_class_str != "unknown",
         )
 
@@ -404,13 +389,11 @@ class CompanyRiskAggregator:
         db_session: Any,
         current_date: Optional[datetime] = None,
     ) -> dict[int, dict[str, Any]]:
-        return {
-            inst.id: self.calculate_company_risk(inst, db_session, current_date)
-            for inst in instruments
-        }
+        return {inst.id: self.calculate_company_risk(inst, db_session, current_date) for inst in instruments}
 
     def store_company_risk(self, company_risk: dict[str, Any], db_session: Any) -> bool:
         from src.db.models import CompanyRiskHistory
+
         try:
             record = CompanyRiskHistory(
                 instrument_id=company_risk["instrument_id"],
@@ -437,6 +420,7 @@ class CompanyRiskAggregator:
         count: int = 20,
     ) -> list[dict[str, Any]]:
         from src.db.models import CompanyRiskHistory, Instrument
+
         today = datetime.now(timezone.utc).date()
         high_risk = (
             db_session.query(CompanyRiskHistory)
@@ -451,14 +435,16 @@ class CompanyRiskAggregator:
         results = []
         for risk in high_risk:
             instrument = db_session.query(Instrument).get(risk.instrument_id)
-            results.append({
-                "ticker": instrument.ticker if instrument else "UNKNOWN",
-                "risk_score": risk.risk_score,
-                "sector_risk": risk.sector_risk,
-                "geopolitical_risk": risk.geopolitical_risk,
-                "macro_risk": risk.macro_risk,
-                "company_specific_risk": risk.company_specific_risk,
-            })
+            results.append(
+                {
+                    "ticker": instrument.ticker if instrument else "UNKNOWN",
+                    "risk_score": risk.risk_score,
+                    "sector_risk": risk.sector_risk,
+                    "geopolitical_risk": risk.geopolitical_risk,
+                    "macro_risk": risk.macro_risk,
+                    "company_specific_risk": risk.company_specific_risk,
+                }
+            )
         return results
 
     def get_company_risk_trend(
@@ -468,6 +454,7 @@ class CompanyRiskAggregator:
         days: int = 30,
     ) -> dict[str, Any]:
         from src.db.models import CompanyRiskHistory
+
         history = (
             db_session.query(CompanyRiskHistory)
             .filter(
@@ -507,6 +494,7 @@ class CompanyRiskAggregator:
     ) -> dict[str, Any]:
         """Aggregate risk across a portfolio of instruments."""
         from src.db.models import CompanyRiskHistory
+
         if current_date is None:
             current_date = datetime.now(timezone.utc)
         date = current_date.date()

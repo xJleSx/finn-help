@@ -70,8 +70,7 @@ class NewsSummarizer:
         if client is not None:
             try:
                 articles_text = "\n\n".join(
-                    f"Title: {a.title}\nSummary: {a.summary or ''}\nSentiment: {a.sentiment or 'neutral'}"
-                    for a in cluster.articles[:10]
+                    f"Title: {a.title}\nSummary: {a.summary or ''}\nSentiment: {a.sentiment or 'neutral'}" for a in cluster.articles[:10]
                 )
                 messages = [
                     {
@@ -83,11 +82,7 @@ class NewsSummarizer:
                     },
                     {
                         "role": "user",
-                        "content": (
-                            f"Cluster topic: {cluster.topic}\n"
-                            f"Key tickers: {', '.join(cluster.key_tickers)}\n\n"
-                            f"Articles:\n{articles_text}"
-                        ),
+                        "content": (f"Cluster topic: {cluster.topic}\nKey tickers: {', '.join(cluster.key_tickers)}\n\nArticles:\n{articles_text}"),
                     },
                 ]
                 result = client.chat(messages)
@@ -107,11 +102,7 @@ class NewsSummarizer:
         total = len(cluster.articles)
         sentiment_desc = "positive" if pos > neg else "negative" if neg > pos else "mixed"
         tickers = ", ".join(cluster.key_tickers[:5])
-        return (
-            f"Cluster: {cluster.topic} ({total} articles). "
-            f"Sentiment: {sentiment_desc} ({pos}P/{neg}N/{neu}U). "
-            f"Tickers: {tickers or 'N/A'}."
-        )
+        return f"Cluster: {cluster.topic} ({total} articles). Sentiment: {sentiment_desc} ({pos}P/{neg}N/{neu}U). Tickers: {tickers or 'N/A'}."
 
     def save_clusters(self, db: Any, clusters: list[NewsCluster]) -> None:
         from src.db.models import NewsEvent
@@ -139,7 +130,9 @@ class NewsSummarizer:
             db.commit()
             logger.info(
                 "Saved cluster '%s' with %d articles (event_id=%d)",
-                cluster.topic, len(cluster.articles), event.id,
+                cluster.topic,
+                len(cluster.articles),
+                event.id,
             )
 
     def generate_daily_digest(self, db: Any, llm_client: Any | None = None) -> str:

@@ -352,9 +352,7 @@ class Favorite(Base):
     ticker = Column(String(20), nullable=False)
     created_at = Column(DateTime, default=func.now())
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "ticker", name="uq_user_favorite_ticker"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "ticker", name="uq_user_favorite_ticker"),)
 
 
 class Notification(Base):
@@ -388,9 +386,7 @@ class ChannelPreference(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "channel", name="uq_user_channel"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "channel", name="uq_user_channel"),)
 
 
 class MutedAlert(Base):
@@ -402,9 +398,7 @@ class MutedAlert(Base):
     alert_type = Column(String(20), nullable=True)
     created_at = Column(DateTime, default=func.now())
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "ticker", "alert_type", name="uq_user_muted_alert"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "ticker", "alert_type", name="uq_user_muted_alert"),)
 
 
 class SmartAlertRule(Base):
@@ -487,9 +481,7 @@ class Order(Base):
     quantity = Column(Integer, nullable=False)
     price = Column(Float, nullable=True)
     order_type = Column(String(10), default="market")  # market / limit
-    status = Column(
-        String(30), default="pending"
-    )  # pending / approved / submitted / filled / partial / rejected / cancelled
+    status = Column(String(30), default="pending")  # pending / approved / submitted / filled / partial / rejected / cancelled
     mode = Column(String(20), default="manual")  # dry_run / manual / auto
     reason = Column(Text, default="")
     order_id_ext = Column(String(100), nullable=True)  # external order ID
@@ -962,11 +954,14 @@ class CorporateEvent(Base):
     instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
 
     event_type = Column(
-        String(20), nullable=False, index=True,
+        String(20),
+        nullable=False,
+        index=True,
         comment="dividend / buyback / split / emission",
     )
     status = Column(
-        String(20), default="announced",
+        String(20),
+        default="announced",
         comment="announced / approved / executed / cancelled",
     )
 

@@ -398,11 +398,11 @@ async def test_execute_auto_exception(mock_tbank, mock_settings):
 
 @pytest.mark.asyncio
 async def test_notify_trade_calls_broadcast():
- from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock, patch
 
- import src.trading.execution.engine as eng
+    import src.trading.execution.engine as eng
 
- record = eng.OrderRecord(ticker="TEST", direction="BUY", quantity=1, price=100, mode=TradeMode.DRY_RUN)
- with patch("src.interfaces.telegram_broadcaster.broadcast_trade", new_callable=AsyncMock) as mock_broadcast:
-  await eng._notify_trade(record, reason="test")
-  mock_broadcast.assert_awaited_once()
+    record = eng.OrderRecord(ticker="TEST", direction="BUY", quantity=1, price=100, mode=TradeMode.DRY_RUN)
+    with patch("src.interfaces.telegram_broadcaster.broadcast_trade", new_callable=AsyncMock) as mock_broadcast:
+        await eng._notify_trade(record, reason="test")
+        mock_broadcast.assert_awaited_once()

@@ -245,9 +245,7 @@ class TestAnalyzeSingle:
         with (
             patch.object(service, "_load_geo", AsyncMock(return_value={"score": 0.0})),
             patch.object(service, "_load_macro", AsyncMock(return_value={})),
-            patch.object(
-                service, "_load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})
-            ),
+            patch.object(service, "_load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})),
             patch.object(service, "_compute_ml", AsyncMock(return_value=None)),
         ):
             result = await service.analyze_single(db, inst, "TEST", with_ml=False)
@@ -271,9 +269,7 @@ class TestAnalyzeSingle:
         with (
             patch.object(service, "_load_geo", AsyncMock(return_value={"score": 0.0})),
             patch.object(service, "_load_macro", AsyncMock(return_value={})),
-            patch.object(
-                service, "_load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})
-            ),
+            patch.object(service, "_load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})),
             patch.object(service, "_compute_ml", AsyncMock(return_value=ml_result)),
         ):
             result = await service.analyze_single(db, inst, "TEST", with_ml=True)
@@ -407,9 +403,7 @@ class TestAnalyzeAllSync:
         cached.fused_json = "not a dict"
         db.query.return_value.filter.return_value.first.return_value = cached
         with (
-            patch.object(
-                service, "_analyze_single_sync", return_value={"action": "HOLD", "confidence": 0.5, "ticker": "SBER"}
-            ),
+            patch.object(service, "_analyze_single_sync", return_value={"action": "HOLD", "confidence": 0.5, "ticker": "SBER"}),
             patch.object(service.fusion, "save_signal_sync", MagicMock()),
         ):
             results = service.analyze_all_sync(db)
@@ -442,9 +436,7 @@ class TestTrainModels:
         db = MagicMock()
         db.execute.return_value.scalars.return_value.all.return_value = instruments
         price_mock = MagicMock()
-        price_mock.filter_by.return_value.order_by.return_value.all.return_value = [
-            MagicMock() for _ in range(price_count)
-        ]
+        price_mock.filter_by.return_value.order_by.return_value.all.return_value = [MagicMock() for _ in range(price_count)]
         ind_mock = MagicMock()
         ind_mock.filter_by.return_value.order_by.return_value.all.return_value = [MagicMock() for _ in range(ind_count)]
 

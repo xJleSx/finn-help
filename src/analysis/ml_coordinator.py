@@ -16,21 +16,12 @@ from src.db.models import Indicator, Instrument, MarketEvent, Price
 logger = logging.getLogger(__name__)
 
 ml_inference_latency = Histogram(
-    "ml_inference_latency_seconds", "ML inference latency",
-    ["model_type", "ticker"], buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0))
-ml_prediction_count = Counter(
-    "ml_prediction_count_total", "Total ML predictions",
-    ["model_type", "ticker", "status"])
-ml_error_count = Counter(
-    "ml_error_rate_total", "ML prediction errors",
-    ["model_type", "ticker"])
-ml_model_version = Gauge(
-    "ml_model_version", "ML model version",
-    ["ticker", "model_type", "version"])
-ml_model_load_time = Histogram(
-    "ml_model_load_time_seconds", "ML model load time",
-    ["ticker", "model_type"])
-
+    "ml_inference_latency_seconds", "ML inference latency", ["model_type", "ticker"], buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
+)
+ml_prediction_count = Counter("ml_prediction_count_total", "Total ML predictions", ["model_type", "ticker", "status"])
+ml_error_count = Counter("ml_error_rate_total", "ML prediction errors", ["model_type", "ticker"])
+ml_model_version = Gauge("ml_model_version", "ML model version", ["ticker", "model_type", "version"])
+ml_model_load_time = Histogram("ml_model_load_time_seconds", "ML model load time", ["ticker", "model_type"])
 
 
 def _train_news_impact_sync(sym: str) -> bool:
@@ -118,12 +109,7 @@ class MLCoordinator:
             return None
 
     def price_df(self, prices: list[Any]) -> pd.DataFrame:
-        return pd.DataFrame(
-            [
-                {"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume}
-                for p in prices
-            ]
-        )
+        return pd.DataFrame([{"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume} for p in prices])
 
     def indicator_df(self, rows: list[Any]) -> pd.DataFrame:
         return pd.DataFrame(
@@ -217,22 +203,14 @@ class MLCoordinator:
         for inst in instruments:
             sym = str(inst.ticker or "")
 
-            result = await db.execute(
-                select(Price)
-                .where(Price.instrument_id == inst.id)
-                .order_by(Price.date)
-            )
+            result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
             prices = result.scalars().all()
             if len(prices) < 60:
                 logger.info("Skipping %s: only %d prices", sym, len(prices))
                 continue
             df = self.price_df(prices)
 
-            result = await db.execute(
-                select(Indicator)
-                .where(Indicator.instrument_id == inst.id)
-                .order_by(Indicator.date)
-            )
+            result = await db.execute(select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date))
             ind_rows = result.scalars().all()
             if len(ind_rows) < 2:
                 logger.info("Skipping %s: no indicators", sym)
@@ -255,7 +233,10 @@ class MLCoordinator:
 
             ensemble = self.get_ensemble(sym)
             ensemble_ok = await loop.run_in_executor(
-                None, ensemble.train_all, train_df, anomaly_mask,
+                None,
+                ensemble.train_all,
+                train_df,
+                anomaly_mask,
             )
 
             prophet = self.get_prophet(sym)

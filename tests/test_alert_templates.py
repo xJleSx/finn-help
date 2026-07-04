@@ -19,9 +19,13 @@ class TestRenderTelegram:
     def test_render_alert(self, renderer: AlertTemplateRenderer):
         html = renderer.render_telegram(
             "alert.md.j2",
-            ticker="SBER", title="Test", priority="HIGH",
-            priority_score=0.75, anomaly_score=0.6,
-            predicted_return=0.01, reason="anomaly detected",
+            ticker="SBER",
+            title="Test",
+            priority="HIGH",
+            priority_score=0.75,
+            anomaly_score=0.6,
+            predicted_return=0.01,
+            reason="anomaly detected",
             in_portfolio=True,
         )
         assert "SBER" in html
@@ -34,16 +38,21 @@ class TestRenderTelegram:
     def test_render_alert_low_priority(self, renderer: AlertTemplateRenderer):
         html = renderer.render_telegram(
             "alert.md.j2",
-            ticker="GAZP", title="Low",
-            priority="LOW", priority_score=0.1,
-            anomaly_score=0.0, predicted_return=0.0,
+            ticker="GAZP",
+            title="Low",
+            priority="LOW",
+            priority_score=0.1,
+            anomaly_score=0.0,
+            predicted_return=0.0,
         )
         assert PRIORITY_EMOJI["LOW"] in html
 
     def test_render_signal(self, renderer: AlertTemplateRenderer):
         html = renderer.render_telegram(
             "signal.md.j2",
-            ticker="SBER", action="BUY", confidence=0.85,
+            ticker="SBER",
+            action="BUY",
+            confidence=0.85,
             reasons=["strong momentum", "low valuation"],
             max_portfolio_pct=10,
         )
@@ -55,8 +64,11 @@ class TestRenderTelegram:
     def test_render_signal_with_prev_action(self, renderer: AlertTemplateRenderer):
         html = renderer.render_telegram(
             "signal.md.j2",
-            ticker="SBER", action="SELL", confidence=0.7,
-            prev_action="BUY", reasons=["trend reversal"],
+            ticker="SBER",
+            action="SELL",
+            confidence=0.7,
+            prev_action="BUY",
+            reasons=["trend reversal"],
             max_portfolio_pct=5,
         )
         assert "SELL" in html
@@ -66,9 +78,12 @@ class TestRenderTelegram:
     def test_render_daily(self, renderer: AlertTemplateRenderer):
         html = renderer.render_telegram(
             "daily.md.j2",
-            date="2026-07-01", total_signals=42,
-            buy_signals=8, sell_signals=3,
-            geo_risk=4.5, portfolio_value=1_500_000,
+            date="2026-07-01",
+            total_signals=42,
+            buy_signals=8,
+            sell_signals=3,
+            geo_risk=4.5,
+            portfolio_value=1_500_000,
             top_picks=["SBER", "GAZP"],
         )
         assert "2026-07-01" in html
@@ -83,9 +98,12 @@ class TestRenderEmail:
     def test_render_alert(self, renderer: AlertTemplateRenderer):
         html = renderer.render_email(
             "alert.html.j2",
-            title="Alert", body="Something happened",
-            ticker="SBER", priority="HIGH",
-            anomaly_score=0.6, predicted_return=0.01,
+            title="Alert",
+            body="Something happened",
+            ticker="SBER",
+            priority="HIGH",
+            anomaly_score=0.6,
+            predicted_return=0.01,
             priority_score=0.75,
         )
         assert "Alert" in html
@@ -96,8 +114,11 @@ class TestRenderEmail:
     def test_render_signal(self, renderer: AlertTemplateRenderer):
         html = renderer.render_email(
             "signal.html.j2",
-            ticker="SBER", action="BUY", confidence=0.85,
-            prev_action="HOLD", reasons=["good quarter"],
+            ticker="SBER",
+            action="BUY",
+            confidence=0.85,
+            prev_action="HOLD",
+            reasons=["good quarter"],
             max_portfolio_pct=10,
         )
         assert "SBER" in html
@@ -108,9 +129,12 @@ class TestRenderEmail:
     def test_render_daily(self, renderer: AlertTemplateRenderer):
         html = renderer.render_email(
             "daily.html.j2",
-            date="2026-07-01", total_signals=42,
-            buy_signals=8, sell_signals=3,
-            geo_risk=4.5, portfolio_value=1_500_000,
+            date="2026-07-01",
+            total_signals=42,
+            buy_signals=8,
+            sell_signals=3,
+            geo_risk=4.5,
+            portfolio_value=1_500_000,
             top_picks=["SBER", "GAZP"],
         )
         assert "2026-07-01" in html
@@ -123,8 +147,11 @@ class TestRenderWebpush:
     def test_render_alert(self, renderer: AlertTemplateRenderer):
         text = renderer.render_webpush(
             "alert.json.j2",
-            title="Alert", body="Test", ticker="SBER",
-            priority="HIGH", severity="HIGH",
+            title="Alert",
+            body="Test",
+            ticker="SBER",
+            priority="HIGH",
+            severity="HIGH",
         )
         assert '"Alert"' in text
         assert '"Test"' in text
@@ -134,8 +161,11 @@ class TestRenderWebpush:
     def test_render_signal(self, renderer: AlertTemplateRenderer):
         text = renderer.render_webpush(
             "signal.json.j2",
-            ticker="SBER", action="BUY", confidence=0.85,
-            reasons=["good"], timestamp="2026-07-01T00:00:00",
+            ticker="SBER",
+            action="BUY",
+            confidence=0.85,
+            reasons=["good"],
+            timestamp="2026-07-01T00:00:00",
         )
         assert '"SBER"' in text
         assert '"BUY"' in text

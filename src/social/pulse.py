@@ -12,9 +12,7 @@ from src.social.utils import async_retry, clean_text, extract_tickers
 
 logger = logging.getLogger(__name__)
 
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 PROFILE_URL = "https://www.tbank.ru/invest/social/profile/{}/"
 
 
@@ -169,9 +167,7 @@ class PulseAdapter(SocialDataSource):
         content = raw.get("content", {}) or {}
         text = content.get("text") if isinstance(content, dict) else ""
         instruments = raw.get("instruments", []) or []
-        tickers_from_instruments = [
-            inst.get("ticker", "").upper() for inst in instruments if isinstance(inst, dict) and inst.get("ticker")
-        ]
+        tickers_from_instruments = [inst.get("ticker", "").upper() for inst in instruments if isinstance(inst, dict) and inst.get("ticker")]
         return RawPost(
             source=self.source_name,
             external_id=str(raw.get("id", "")),

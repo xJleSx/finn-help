@@ -87,7 +87,8 @@ def _get_redis() -> Any:
 
             url = settings.redis_url or "redis://localhost:6379/0"
             _redis_pool = ConnectionPool.from_url(
-                url, db=1,
+                url,
+                db=1,
                 max_connections=settings.redis_max_connections,
                 socket_connect_timeout=settings.redis_socket_connect_timeout,
                 socket_timeout=settings.redis_socket_timeout,
@@ -156,12 +157,7 @@ def get_cached(
 
     db = get_session()
     try:
-        row = (
-            db.query(FeatureCache)
-            .filter_by(ticker=ticker.upper(), feature_type=feature_type)
-            .order_by(FeatureCache.date.desc())
-            .first()
-        )
+        row = db.query(FeatureCache).filter_by(ticker=ticker.upper(), feature_type=feature_type).order_by(FeatureCache.date.desc()).first()
         if not row:
             return None
         if _is_stale(row, max_age, version):
@@ -408,11 +404,7 @@ def get_stats() -> dict[str, Any]:
     db = get_session()
     try:
         total = db.query(FeatureCache).count()
-        by_type = (
-            db.query(FeatureCache.feature_type, func.count(FeatureCache.id))
-            .group_by(FeatureCache.feature_type)
-            .all()
-        )
+        by_type = db.query(FeatureCache.feature_type, func.count(FeatureCache.id)).group_by(FeatureCache.feature_type).all()
         return {
             "memory_entries": _mem.size,
             "db_entries": total,

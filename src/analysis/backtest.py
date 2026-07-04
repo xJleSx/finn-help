@@ -280,25 +280,14 @@ def backtest_allocation(
         result = BacktestResult(capital=capital, config=config)
 
         imoex_prices = (
-            db.query(Price)
-            .join(Instrument)
-            .filter(Instrument.ticker == "IMOEX")
-            .order_by(Price.date.desc())
-            .limit(lookback_days + 10)
-            .all()
+            db.query(Price).join(Instrument).filter(Instrument.ticker == "IMOEX").order_by(Price.date.desc()).limit(lookback_days + 10).all()
         )
         imoex_vals = [cast(float, p.close) for p in reversed(imoex_prices) if p.close]
 
         result.positions = picks[:8]
         portfolio_prices: dict[str, list[float]] = {}
         for p in result.positions:
-            prices = (
-                db.query(Price)
-                .filter_by(instrument_id=p["id"])
-                .order_by(Price.date.desc())
-                .limit(lookback_days + 10)
-                .all()
-            )
+            prices = db.query(Price).filter_by(instrument_id=p["id"]).order_by(Price.date.desc()).limit(lookback_days + 10).all()
             vals = [cast(float, x.close) for x in reversed(prices) if x.close]
             if vals:
                 portfolio_prices[p["ticker"]] = vals

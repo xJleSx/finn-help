@@ -52,7 +52,10 @@ class AlertHistory:
             self._memory.append(entry)
 
     def get_recent(
-        self, days: int = 7, ticker: str | None = None, alert_type: str | None = None,
+        self,
+        days: int = 7,
+        ticker: str | None = None,
+        alert_type: str | None = None,
     ) -> list[dict[str, Any]]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         results: list[dict[str, Any]] = []
@@ -78,11 +81,7 @@ class AlertHistory:
                 for r in query.all()
             ]
         cutoff_str = cutoff.isoformat()
-        memory_results = [
-            e for e in self._memory
-            if e.get("timestamp", "") >= cutoff_str
-            and e not in results
-        ]
+        memory_results = [e for e in self._memory if e.get("timestamp", "") >= cutoff_str and e not in results]
         if ticker:
             memory_results = [e for e in memory_results if e.get("ticker") == ticker]
         if alert_type:
@@ -154,19 +153,12 @@ class AlertHistory:
             if total == 0:
                 return result
 
-            type_rows = (
-                base.with_entities(AlertLog.alert_type, sa_func.count(AlertLog.id))
-                .group_by(AlertLog.alert_type)
-                .all()
-            )
+            type_rows = base.with_entities(AlertLog.alert_type, sa_func.count(AlertLog.id)).group_by(AlertLog.alert_type).all()
 
-            severity_agg = (
-                base.with_entities(
-                    sa_func.avg(AlertLog.severity),
-                    sa_func.count(AlertLog.id),
-                )
-                .first()
-            )
+            severity_agg = base.with_entities(
+                sa_func.avg(AlertLog.severity),
+                sa_func.count(AlertLog.id),
+            ).first()
 
             read_count = base.filter(AlertLog.read.is_(True)).count()
             unread_count = total - read_count

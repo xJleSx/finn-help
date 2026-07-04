@@ -35,6 +35,7 @@ class TestCollectFinancialReports:
                 mock_cls.return_value = collector
                 await collect_financial_reports(db)
                 return collector
+
         collector = asyncio.run(run())
         collector.fetch.assert_called_once_with("SBER")
         added = db.add.call_args[0][0]
@@ -63,6 +64,7 @@ class TestCollectFinancialReports:
                 mock_cls.return_value = collector
                 await collect_financial_reports(db)
                 return collector
+
         collector = asyncio.run(run())
         collector.fetch.assert_called_once_with("SBER")
         assert db.add.call_count == 0
@@ -81,6 +83,7 @@ class TestCollectFinancialReports:
                 mock_cls.return_value = collector
                 await collect_financial_reports(db)
                 return collector
+
         collector = asyncio.run(run())
         collector.fetch.assert_called_once_with("SBER")
         db.add.assert_not_called()
@@ -122,6 +125,7 @@ class TestCollectBondOfferings:
                 mock_cls.return_value = collector
                 await collect_bond_offerings(db)
                 return collector
+
         collector = asyncio.run(run())
         collector.fetch_by_ticker.assert_called_once_with("SU26238RMFS5")
         added = db.add.call_args[0][0]
@@ -144,6 +148,7 @@ class TestCollectBondOfferings:
                 mock_cls.return_value = collector
                 await collect_bond_offerings(db)
                 return collector
+
         collector = asyncio.run(run())
         collector.fetch_by_ticker.assert_called_once_with("SU26238RMFS5")
         db.add.assert_not_called()
@@ -169,6 +174,7 @@ class TestCollectBondOfferings:
                 mock_cls.return_value = collector
                 await collect_bond_offerings(db)
                 return collector
+
         collector = asyncio.run(run())
         collector.fetch_by_ticker.assert_called_once_with("SU26238RMFS5")
         db.add.assert_not_called()

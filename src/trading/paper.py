@@ -280,7 +280,12 @@ class PaperTradingEngine:
 
         logger.info(
             "PAPER %s %s %.2f @ %.2f (pnl=%.2f, balance=%.2f)",
-            direction, ticker, quantity, price, pnl, state.balance,
+            direction,
+            ticker,
+            quantity,
+            price,
+            pnl,
+            state.balance,
         )
 
         return {

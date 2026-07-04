@@ -240,9 +240,7 @@ class TestCheckVar:
         pos = MagicMock(instrument_id=1)
         prices = [MagicMock(close=i) for i in range(5)]
         mock_db.query.return_value.all.return_value = [pos]
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
-            prices
-        )
+        mock_db.query.return_value.filter_by.return_value.order_by.return_value.limit.return_value.all.return_value = prices
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             ok, reason = await loop._check_var()
@@ -257,9 +255,7 @@ class TestCheckVar:
         pos = MagicMock(instrument_id=1)
         prices = [MagicMock(close=i) for i in range(25)]
         mock_db.query.return_value.all.return_value = [pos]
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
-            prices
-        )
+        mock_db.query.return_value.filter_by.return_value.order_by.return_value.limit.return_value.all.return_value = prices
 
         with (
             patch("src.trading.execution.loop.get_session", return_value=mock_db),
@@ -278,9 +274,7 @@ class TestCheckVar:
         pos = MagicMock(instrument_id=1)
         prices = [MagicMock(close=i) for i in range(25)]
         mock_db.query.return_value.all.return_value = [pos]
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
-            prices
-        )
+        mock_db.query.return_value.filter_by.return_value.order_by.return_value.limit.return_value.all.return_value = prices
 
         with (
             patch("src.trading.execution.loop.get_session", return_value=mock_db),
@@ -313,9 +307,7 @@ class TestCheckLiquidity:
         inst = MagicMock(id=1)
         prices = [MagicMock(close=100.0, volume=1000) for _ in range(3)]
         mock_db.query.return_value.filter_by.return_value.first.return_value = inst
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
-            prices
-        )
+        mock_db.query.return_value.filter_by.return_value.order_by.return_value.limit.return_value.all.return_value = prices
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             ok, reason = await loop._check_liquidity("SBER")
@@ -330,15 +322,11 @@ class TestCheckLiquidity:
         inst = MagicMock(id=1)
         prices = [MagicMock(close=100.0, volume=1000) for _ in range(10)]
         mock_db.query.return_value.filter_by.return_value.first.return_value = inst
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
-            prices
-        )
+        mock_db.query.return_value.filter_by.return_value.order_by.return_value.limit.return_value.all.return_value = prices
 
         with (
             patch("src.trading.execution.loop.get_session", return_value=mock_db),
-            patch(
-                "src.trading.execution.loop.check_liquidity", return_value=(True, "✅ Ликвидность: 1x запас")
-            ) as mock_check,
+            patch("src.trading.execution.loop.check_liquidity", return_value=(True, "✅ Ликвидность: 1x запас")) as mock_check,
         ):
             ok, reason = await loop._check_liquidity("SBER")
             assert ok is True
@@ -366,8 +354,7 @@ class TestCheckNews:
         mock_db = MagicMock()
         inst = MagicMock(id=1)
         mock_db.query.return_value.filter_by.return_value.first.return_value = inst
-        mock_db.query.return_value.join.return_value.filter.return_value\
-            .order_by.return_value.limit.return_value.all.return_value = []
+        mock_db.query.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             ok, reason = await loop._check_news("SBER")
@@ -384,8 +371,7 @@ class TestCheckNews:
             MagicMock(sentiment_weighted=0.3, sentiment_score=0.2),
         ]
         mock_db.query.return_value.filter_by.return_value.first.return_value = inst
-        mock_db.query.return_value.join.return_value.filter.return_value\
-            .order_by.return_value.limit.return_value.all.return_value = news
+        mock_db.query.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = news
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             ok, reason = await loop._check_news("SBER")
@@ -401,8 +387,7 @@ class TestCheckNews:
             MagicMock(sentiment_weighted=-0.6, sentiment_score=-0.5),
         ]
         mock_db.query.return_value.filter_by.return_value.first.return_value = inst
-        mock_db.query.return_value.join.return_value.filter.return_value\
-            .order_by.return_value.limit.return_value.all.return_value = news
+        mock_db.query.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = news
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             ok, reason = await loop._check_news("SBER")
@@ -643,9 +628,7 @@ class TestProcessSignals:
 
         mock_db = MagicMock()
         sig = MagicMock(instrument=None, action="BUY", confidence=0.8)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         with patch("src.trading.execution.loop.get_session", return_value=mock_db):
             await loop._process_signals()
@@ -657,9 +640,7 @@ class TestProcessSignals:
         mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="BUY", confidence=0.8)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         with (
             patch("src.trading.execution.loop.get_session", return_value=mock_db),
@@ -674,9 +655,7 @@ class TestProcessSignals:
         mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="BUY", confidence=0.8)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         with (
             patch("src.trading.execution.loop.get_session", return_value=mock_db),
@@ -692,9 +671,7 @@ class TestProcessSignals:
         mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="BUY", confidence=0.8)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         with (
             patch("src.trading.execution.loop.get_session", return_value=mock_db),
@@ -711,9 +688,7 @@ class TestProcessSignals:
         mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="BUY", confidence=0.8)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         with (
             patch("src.trading.execution.loop.get_session", return_value=mock_db),
@@ -731,9 +706,7 @@ class TestProcessSignals:
         mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="BUY", confidence=0.8)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         with (
             patch("src.trading.execution.loop.get_session", return_value=mock_db),
@@ -752,9 +725,7 @@ class TestProcessSignals:
         mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="BUY", confidence=0.8)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         mock_result = MagicMock()
         mock_result.status = "filled"
@@ -781,9 +752,7 @@ class TestProcessSignals:
         mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="CAUTIOUS_BUY", confidence=0.6)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         mock_result = MagicMock()
         mock_result.status = "filled"
@@ -809,9 +778,7 @@ class TestProcessSignals:
         mock_db = MagicMock()
         inst = MagicMock(ticker="GAZP")
         sig = MagicMock(instrument=inst, action="SELL", confidence=0.7)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         mock_result = MagicMock()
         mock_result.status = "filled"
@@ -838,9 +805,7 @@ class TestProcessSignals:
         mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="HOLD", confidence=0.5)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         with (
             patch("src.trading.execution.loop.get_session", return_value=mock_db),
@@ -861,9 +826,7 @@ class TestProcessSignals:
         mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="BUY", confidence=0.8)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            sig
-        ]
+        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
 
         mock_result = MagicMock()
         mock_result.status = "failed"

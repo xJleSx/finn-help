@@ -33,7 +33,9 @@ try:
     HAS_SDK = True
 except ImportError:
     HAS_SDK = False
-    logger.warning("t-tech-investments SDK not installed. Install with: uv pip install t-tech-investments --index-url https://opensource.tbank.ru/api/v4/projects/238/packages/pypi/simple")
+    logger.warning(
+        "t-tech-investments SDK not installed. Install with: uv pip install t-tech-investments --index-url https://opensource.tbank.ru/api/v4/projects/238/packages/pypi/simple"
+    )
 
 SANDBOX_TARGET = "sandbox"
 
@@ -81,6 +83,7 @@ class TBankClient:
         **kwargs: Any,
     ) -> Any:
         cb = circuit_breaker or self._circuit_breaker
+
         async def _do_call() -> Any:
             return await fn(*args, **kwargs)
 
@@ -132,7 +135,7 @@ class TBankClient:
                 positions.append(
                     {
                         "figi": p.figi,
-                        "ticker": p.ticker if hasattr(p, 'ticker') and p.ticker else p.figi,
+                        "ticker": p.ticker if hasattr(p, "ticker") and p.ticker else p.figi,
                         "instrument_type": str(it),
                         "quantity": self._decimal(p.quantity),
                         "average_price": self._money(p.average_position_price),
@@ -169,7 +172,9 @@ class TBankClient:
         }
         ci = interval_map.get(interval, CandleInterval.CANDLE_INTERVAL_HOUR)
         now = datetime.now(timezone.utc)
-        resp = await self._call_with_retry("get_candles", self._client.market_data.get_candles,
+        resp = await self._call_with_retry(
+            "get_candles",
+            self._client.market_data.get_candles,
             figi=figi,
             from_=now - timedelta(days=days),
             to=now,
@@ -199,11 +204,7 @@ class TBankClient:
     ) -> dict[str, object]:
         if not self._client:
             raise RuntimeError("Client not initialized")
-        direction_enum = (
-            OrderDirection.ORDER_DIRECTION_BUY
-            if direction.upper() == "BUY"
-            else OrderDirection.ORDER_DIRECTION_SELL
-        )
+        direction_enum = OrderDirection.ORDER_DIRECTION_BUY if direction.upper() == "BUY" else OrderDirection.ORDER_DIRECTION_SELL
         type_enum = OrderType.ORDER_TYPE_MARKET if order_type == "market" else OrderType.ORDER_TYPE_LIMIT
         price_quotation = None
         if price is not None:
@@ -250,9 +251,7 @@ class TBankClient:
         req.amount.units = int(amount)
         req.amount.nano = int(round((amount - int(amount)) * 1e9))
         req.amount.currency = currency
-        resp = await self._client.sandbox.stub.SandboxPayIn(
-            request=req, metadata=self._client.sandbox.metadata
-        )
+        resp = await self._client.sandbox.stub.SandboxPayIn(request=req, metadata=self._client.sandbox.metadata)
         return {"units": resp.balance.units, "nano": resp.balance.nano, "currency": resp.balance.currency}
 
     async def cancel_order(self, account_id: str, order_id: str) -> bool:
@@ -315,7 +314,7 @@ class TBankClient:
     @staticmethod
     def _to_quotation(val: float) -> object:
         from t_tech.invest import Quotation
+
         units = int(val)
         nano = int(round((val - units) * 1e9))
         return Quotation(units=units, nano=nano)
-

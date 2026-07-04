@@ -101,7 +101,9 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
             if auto_remove:
                 logger.warning(
                     "Removing orphaned position %s (%d shares, ~%.0f RUB) — auto_remove_orphans=true",
-                    ticker, qty, value,
+                    ticker,
+                    qty,
+                    value,
                 )
                 db.delete(orphan)
                 stats.setdefault("removed", 0)
@@ -110,7 +112,9 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                 logger.warning(
                     "Orphaned position detected: %s (%d shares, ~%.0f RUB) — NOT removed. "
                     "Set sync.auto_remove_orphans=true in personal_settings.yaml to auto-remove.",
-                    ticker, qty, value,
+                    ticker,
+                    qty,
+                    value,
                 )
                 stats.setdefault("orphans_skipped", 0)
                 stats["orphans_skipped"] += 1

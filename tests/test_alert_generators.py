@@ -73,12 +73,18 @@ class TestReportAnomalies:
 
         today = date.today()
         current = FinancialReport(
-            instrument_id=inst.id, report_date=today - timedelta(days=30),
-            period_type="FY", net_profit=-5_000_000_000, revenue=100_000_000_000,
+            instrument_id=inst.id,
+            report_date=today - timedelta(days=30),
+            period_type="FY",
+            net_profit=-5_000_000_000,
+            revenue=100_000_000_000,
         )
         prev = FinancialReport(
-            instrument_id=inst.id, report_date=today - timedelta(days=400),
-            period_type="FY", net_profit=10_000_000_000, revenue=100_000_000_000,
+            instrument_id=inst.id,
+            report_date=today - timedelta(days=400),
+            period_type="FY",
+            net_profit=10_000_000_000,
+            revenue=100_000_000_000,
         )
         db_session.add_all([current, prev])
         db_session.commit()
@@ -101,7 +107,8 @@ class TestCorporateEventAlerts:
 
         db_session.add(
             CorporateEvent(
-                instrument_id=inst.id, event_type="dividend",
+                instrument_id=inst.id,
+                event_type="dividend",
                 announcement_date=date.today() + timedelta(days=3),
                 description="Dividend record date",
             )
@@ -126,12 +133,15 @@ class TestSignalDropAlerts:
 
         from datetime import datetime
         from datetime import timedelta as dt_td
+
         today = date.today()
         # conf goes 0.8 → 0.3 → 0.85 → 0.35: yesterday=0.3 < threshold from 0.8
         for i, conf in enumerate([0.3, 0.8, 0.35, 0.85]):
             db_session.add(
                 Signal(
-                    instrument_id=inst.id, confidence=conf, action="BUY",
+                    instrument_id=inst.id,
+                    confidence=conf,
+                    action="BUY",
                     date=datetime(today.year, today.month, today.day, 12, 0) - dt_td(days=i),
                 )
             )

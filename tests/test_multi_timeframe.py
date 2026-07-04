@@ -73,23 +73,17 @@ class TestTfSignal:
         assert result["direction"] == 0
 
     def test_overbought_rsi(self):
-        df = pd.DataFrame(
-            {"close": [100, 105], "rsi": [50, 75], "macd_hist": [0.0, 0.0], "sma_20": [120, 120], "sma_50": [120, 120]}
-        )
+        df = pd.DataFrame({"close": [100, 105], "rsi": [50, 75], "macd_hist": [0.0, 0.0], "sma_20": [120, 120], "sma_50": [120, 120]})
         result = self.mtf._tf_signal(df)
         assert result["direction"] < 0
 
     def test_oversold_rsi(self):
-        df = pd.DataFrame(
-            {"close": [100, 95], "rsi": [50, 25], "macd_hist": [0.0, 0.0], "sma_20": [90, 90], "sma_50": [90, 90]}
-        )
+        df = pd.DataFrame({"close": [100, 95], "rsi": [50, 25], "macd_hist": [0.0, 0.0], "sma_20": [90, 90], "sma_50": [90, 90]})
         result = self.mtf._tf_signal(df)
         assert result["direction"] > 0
 
     def test_macd_crossover_up(self):
-        df = pd.DataFrame(
-            {"close": [100, 102], "rsi": [50, 50], "macd_hist": [-0.5, 0.3], "sma_20": [90, 90], "sma_50": [90, 90]}
-        )
+        df = pd.DataFrame({"close": [100, 102], "rsi": [50, 50], "macd_hist": [-0.5, 0.3], "sma_20": [90, 90], "sma_50": [90, 90]})
         result = self.mtf._tf_signal(df)
         assert result["direction"] > 0
 

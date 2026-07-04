@@ -187,9 +187,7 @@ def store_company_profile(db: Any, instrument: Instrument, profile: dict[str, An
     from src.db.models import CompanyProfile
 
     try:
-        existing = db.query(CompanyProfile).filter(
-            CompanyProfile.instrument_id == instrument.id
-        ).first()
+        existing = db.query(CompanyProfile).filter(CompanyProfile.instrument_id == instrument.id).first()
 
         if existing:
             for key, value in profile.items():
@@ -212,15 +210,16 @@ def store_corporate_event(db: Any, instrument: Instrument, event: dict[str, Any]
     from src.db.models import CorporateEvent
 
     try:
-        existing = db.query(CorporateEvent).filter(
-            CorporateEvent.instrument_id == instrument.id,
-            CorporateEvent.event_type == event.get("event_type"),
-            CorporateEvent.announcement_date == (
-                datetime.fromisoformat(event["announcement_date"]).date()
-                if event.get("announcement_date")
-                else None
-            ),
-        ).first()
+        existing = (
+            db.query(CorporateEvent)
+            .filter(
+                CorporateEvent.instrument_id == instrument.id,
+                CorporateEvent.event_type == event.get("event_type"),
+                CorporateEvent.announcement_date
+                == (datetime.fromisoformat(event["announcement_date"]).date() if event.get("announcement_date") else None),
+            )
+            .first()
+        )
 
         if existing:
             return True  # already stored
@@ -229,26 +228,10 @@ def store_corporate_event(db: Any, instrument: Instrument, event: dict[str, Any]
             "instrument_id": instrument.id,
             "event_type": event.get("event_type"),
             "status": "announced",
-            "announcement_date": (
-                datetime.fromisoformat(event["announcement_date"]).date()
-                if event.get("announcement_date")
-                else None
-            ),
-            "ex_date": (
-                datetime.fromisoformat(event["ex_date"]).date()
-                if event.get("ex_date")
-                else None
-            ),
-            "record_date": (
-                datetime.fromisoformat(event["record_date"]).date()
-                if event.get("record_date")
-                else None
-            ),
-            "payment_date": (
-                datetime.fromisoformat(event["payment_date"]).date()
-                if event.get("payment_date")
-                else None
-            ),
+            "announcement_date": (datetime.fromisoformat(event["announcement_date"]).date() if event.get("announcement_date") else None),
+            "ex_date": (datetime.fromisoformat(event["ex_date"]).date() if event.get("ex_date") else None),
+            "record_date": (datetime.fromisoformat(event["record_date"]).date() if event.get("record_date") else None),
+            "payment_date": (datetime.fromisoformat(event["payment_date"]).date() if event.get("payment_date") else None),
             "description": event.get("description"),
         }
 

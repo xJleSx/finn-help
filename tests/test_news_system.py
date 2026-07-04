@@ -15,55 +15,68 @@ from src.db.models import (
 class TestModuleImports:
     def test_news_filter_import(self):
         from src.data.news_filter import NewsFilter
+
         assert NewsFilter is not None
 
     def test_news_classifier_import(self):
         from src.data.news_classifier import NewsClassifier
+
         assert NewsClassifier is not None
 
     def test_news_processor_import(self):
         from src.data.news_processor import NewsDeduplicator
+
         assert NewsDeduplicator is not None
 
     def test_sector_mapper_import(self):
         from src.data.sector_mapper import SectorMapper
+
         assert SectorMapper is not None
 
     def test_impact_matrix_import(self):
         from src.data.impact_matrix import ImpactMatrix
+
         assert ImpactMatrix is not None
 
     def test_sector_impact_engine_import(self):
         from src.data.sector_impact_engine import SectorImpactEngine
+
         assert SectorImpactEngine is not None
 
     def test_company_risk_aggregator_import(self):
         from src.data.company_risk_aggregator import CompanyRiskAggregator
+
         assert CompanyRiskAggregator is not None
 
     def test_geopolitical_risk_engine_import(self):
         from src.data.geopolitical_risk_engine import GeopoliticalRiskEngine
+
         assert GeopoliticalRiskEngine is not None
 
     def test_event_detector_import(self):
         from src.data.event_detector import EventDetector, SentimentDivergenceDetector
+
         assert EventDetector is not None
         assert SentimentDivergenceDetector is not None
 
     def test_signal_fusion_integration_import(self):
         from src.data.signal_fusion_integration import SignalFusionIntegration
+
         assert SignalFusionIntegration is not None
 
     def test_dashboard_provider_import(self):
         from src.data.dashboard_provider import DashboardDataProvider
+
         assert DashboardDataProvider is not None
 
     def test_batch_processor_import(self):
         from src.data.batch_processor import NewsBatchProcessor
+
         assert NewsBatchProcessor is not None
 
     def test_news_system_factory_import(self):
         from src.data.news_system import NewsSystemFactory, get_news_system, initialize_news_system
+
         assert NewsSystemFactory is not None
         assert initialize_news_system is not None
         assert get_news_system is not None
@@ -99,77 +112,85 @@ class TestDBModels:
 class TestNewsFilter:
     def test_basic_instantiation(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         assert f is not None
 
     def test_content_quality_short_title(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.check_content_quality("Hi", "This is a longer summary that should pass the minimum length test easily.")
         assert "title_too_short" in result["issues"]
 
     def test_content_quality_good_content(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.check_content_quality(
-            "This is a proper news title about markets",
-            "This is a summary with enough content. It has multiple sentences. And passes all checks."
+            "This is a proper news title about markets", "This is a summary with enough content. It has multiple sentences. And passes all checks."
         )
         assert result["is_quality"]
 
     def test_keyword_blacklist_detects_spam(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.check_keyword_blacklist("купить дешево", "реклама казино")
         assert result["is_spam"]
 
     def test_keyword_blacklist_clean(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.check_keyword_blacklist("Рынки растут на фоне новостей", "Нефть дорожает")
         assert not result["is_spam"]
 
     def test_evaluate_article_spam(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.evaluate_article("купить дешево", "реклама казино лотерея")
         assert not result["is_relevant"]
 
     def test_evaluate_article_good(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
-        result = f.evaluate_article(
-            "Рынки растут на фоне новостей",
-            "Нефть дорожает. Индекс Мосбиржи обновил максимум. Рубль укрепляется."
-        )
+        result = f.evaluate_article("Рынки растут на фоне новостей", "Нефть дорожает. Индекс Мосбиржи обновил максимум. Рубль укрепляется.")
         assert result["is_relevant"]
 
     def test_detect_press_release(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.detect_press_release("Компания сообщает", "пресс-релиз о результатах")
         assert result["is_press_release"]
 
     def test_evaluate_empty(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.evaluate_article("", "")
         assert not result["is_relevant"]
 
     def test_scam_keywords_detected(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.detect_financial_scam("гарантированный доход", "уникальная возможность 100%")
         assert result["is_scam"]
 
     def test_scam_keywords_clean(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.detect_financial_scam("Рынки выросли на 2%", "Нефть дорожает")
         assert not result["is_scam"]
 
     def test_evaluate_article_scam_flagged(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.evaluate_article("Гарантированный доход", "Инвестируй сейчас, никакого риска")
         assert not result["is_relevant"]
@@ -177,6 +198,7 @@ class TestNewsFilter:
 
     def test_low_quality_source_detected(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.detect_low_quality_source("t.me/some_channel")
         assert result["is_low_quality"]
@@ -184,12 +206,14 @@ class TestNewsFilter:
 
     def test_low_quality_source_clean(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.detect_low_quality_source("https://www.interfax.ru")
         assert not result["is_low_quality"]
 
     def test_evaluate_article_low_quality_source(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.evaluate_article(
             "Рынки растут",
@@ -201,12 +225,14 @@ class TestNewsFilter:
 
     def test_keyword_blacklist_expanded_spam(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.check_keyword_blacklist("заработок в интернете", "пассивный доход без вложений")
         assert result["is_spam"]
 
     def test_evaluate_article_good_with_source(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.evaluate_article(
             "Рынки растут на фоне новостей",
@@ -218,6 +244,7 @@ class TestNewsFilter:
 
     def test_relevance_score_includes_scam_penalty(self):
         from src.data.news_filter import NewsFilter
+
         f = NewsFilter()
         result = f.evaluate_article("Гарантированный доход", "Уникальная возможность, прибыль 100%")
         assert result["relevance_score"] < 0.3
@@ -226,11 +253,13 @@ class TestNewsFilter:
 class TestNewsClassifier:
     def test_basic_instantiation(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         assert c is not None
 
     def test_fallback_classification_geopolitical(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c._fallback_classification("Санкции против России", "Новые ограничения")
         assert result["category"] == "GEOPOLITICAL"
@@ -238,46 +267,54 @@ class TestNewsClassifier:
 
     def test_fallback_classification_macro(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c._fallback_classification("Ставка ЦБ", "Ключевая ставка повышена")
         assert result["category"] == "MACRO"
 
     def test_fallback_classification_sector_energy(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c._fallback_classification("Цены на нефть", "Нефть дорожает")
         assert result["category"] == "SECTOR"
 
     def test_fallback_sentiment_positive(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c._fallback_classification("Рост прибыли компании", "Прибыль выше ожиданий")
         assert result["sentiment"] == "positive"
 
     def test_fallback_sentiment_negative(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c._fallback_classification("Падение рынка", "Кризис и убытки")
         assert result["sentiment"] == "negative"
 
     def test_classify_article_uses_fallback_without_llm(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c.classify_article("Санкции", "Новые ограничения против банков")
         assert "category" in result
 
     def test_get_parent_category(self):
         from src.data.news_classifier import NewsClassifier
+
         assert NewsClassifier.get_parent_category("energy") == "SECTOR"
         assert NewsClassifier.get_parent_category("sanctions") == "GEOPOLITICAL"
         assert NewsClassifier.get_parent_category("ipo") == "MARKET"
 
     def test_get_parent_category_unknown(self):
         from src.data.news_classifier import NewsClassifier
+
         assert NewsClassifier.get_parent_category("nonexistent") is None
 
     def test_get_children(self):
         from src.data.news_classifier import NewsClassifier
+
         children = NewsClassifier.get_children("SECTOR")
         assert "energy" in children
         assert "banking" in children
@@ -285,17 +322,20 @@ class TestNewsClassifier:
 
     def test_get_subsubcategories(self):
         from src.data.news_classifier import NewsClassifier
+
         subs = NewsClassifier.get_subsubcategories("SECTOR", "energy")
         assert "oil_gas" in subs
         assert "renewable" in subs
 
     def test_get_full_path(self):
         from src.data.news_classifier import NewsClassifier
+
         assert NewsClassifier.get_full_path("SECTOR", "energy", "oil_gas") == "SECTOR/energy/oil_gas"
         assert NewsClassifier.get_full_path("MACRO", "inflation") == "MACRO/inflation"
 
     def test_get_all_categories(self):
         from src.data.news_classifier import NewsClassifier
+
         all_cats = NewsClassifier.get_all_categories()
         assert "MACRO" in all_cats
         assert "GEOPOLITICAL" in all_cats
@@ -306,11 +346,13 @@ class TestNewsClassifier:
 
     def test_get_description(self):
         from src.data.news_classifier import NewsClassifier
+
         desc = NewsClassifier.get_description("MACRO")
         assert "macro" in desc.lower()
 
     def test_hierarchical_fallback_oil(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c._hierarchical_fallback("цены на нефть выросли")
         assert result["category"] == "SECTOR"
@@ -318,6 +360,7 @@ class TestNewsClassifier:
 
     def test_hierarchical_fallback_gold(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c._hierarchical_fallback("gold prices hit新高")
         assert result["category"] == "SECTOR"
@@ -325,6 +368,7 @@ class TestNewsClassifier:
 
     def test_hierarchical_fallback_rate_hike(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c._hierarchical_fallback("цб повысил ключевую ставку")
         assert result["category"] == "MACRO"
@@ -333,6 +377,7 @@ class TestNewsClassifier:
 
     def test_hierarchical_fallback_cyber(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c._hierarchical_fallback("кибератака на банки")
         assert result["category"] == "GEOPOLITICAL"
@@ -341,6 +386,7 @@ class TestNewsClassifier:
 
     def test_classify_hierarchical_with_fallback(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c.classify_hierarchical("Ключевая ставка", "ЦБ повысил ставку")
         assert "hierarchy_path" in result
@@ -348,6 +394,7 @@ class TestNewsClassifier:
 
     def test_fallback_subsubcategory_included(self):
         from src.data.news_classifier import NewsClassifier
+
         c = NewsClassifier()
         result = c._fallback_classification("Кибератака", "Атака на банковскую систему")
         assert "subsubcategory" in result
@@ -356,16 +403,19 @@ class TestNewsClassifier:
 class TestEWMARiskCalculator:
     def test_empty_scores(self):
         from src.data.sector_impact_engine import EWMARiskCalculator
+
         c = EWMARiskCalculator()
         assert c.calculate([]) == 0.0
 
     def test_single_score(self):
         from src.data.sector_impact_engine import EWMARiskCalculator
+
         c = EWMARiskCalculator()
         assert c.calculate([5.0]) == 5.0
 
     def test_ewma_trend(self):
         from src.data.sector_impact_engine import EWMARiskCalculator
+
         c = EWMARiskCalculator(alpha=0.5)
         increasing = [1.0, 2.0, 3.0, 4.0, 5.0]
         decreasing = [5.0, 4.0, 3.0, 2.0, 1.0]
@@ -373,23 +423,27 @@ class TestEWMARiskCalculator:
 
     def test_momentum_positive(self):
         from src.data.sector_impact_engine import EWMARiskCalculator
+
         c = EWMARiskCalculator()
         scores = [1.0, 1.0, 1.0, 5.0, 6.0, 7.0]
         assert c.momentum(scores) > 0
 
     def test_momentum_negative(self):
         from src.data.sector_impact_engine import EWMARiskCalculator
+
         c = EWMARiskCalculator(momentum_window=3)
         scores = [7.0, 6.0, 5.0, 1.0, 1.0, 1.0]
         assert c.momentum(scores) < 0
 
     def test_momentum_flat(self):
         from src.data.sector_impact_engine import EWMARiskCalculator
+
         c = EWMARiskCalculator()
         assert c.momentum([3.0]) == 0.0
 
     def test_confidence(self):
         from src.data.sector_impact_engine import EWMARiskCalculator
+
         c = EWMARiskCalculator()
         assert c.confidence(0) == 0.0
         assert c.confidence(20) == 1.0
@@ -397,6 +451,7 @@ class TestEWMARiskCalculator:
 
     def test_calculate_with_weights(self):
         from src.data.sector_impact_engine import EWMARiskCalculator
+
         c = EWMARiskCalculator()
         scores = [5.0, 5.0]
         result = c.calculate(scores, weights=[0.0, 1.0])
@@ -406,11 +461,13 @@ class TestEWMARiskCalculator:
 class TestSectorCorrelationTracker:
     def test_contagion_empty(self):
         from src.data.sector_impact_engine import SectorCorrelationTracker
+
         t = SectorCorrelationTracker()
         assert t.get_contagion_risk("energy") == []
 
     def test_contagion_self_excluded(self):
         from src.data.sector_impact_engine import SectorCorrelationTracker
+
         t = SectorCorrelationTracker()
         t.matrix = {"energy": {"energy": 1.0, "banking": 0.6}}
         result = t.get_contagion_risk("energy")
@@ -421,18 +478,21 @@ class TestSectorCorrelationTracker:
 class TestSectorImpactEngineV2:
     def test_basic_instantiation(self):
         from src.data.sector_impact_engine import SectorImpactEngine
+
         assert SectorImpactEngine is not None
 
     def test_get_daily_risk_v2_structure(self, monkeypatch):
         from datetime import datetime, timezone
 
         from src.data.sector_impact_engine import SectorImpactEngine
+
         engine = SectorImpactEngine(None, None)
 
         class MockTracker:
             @staticmethod
             def load_from_history(db):
                 pass
+
             @staticmethod
             def get_contagion_risk(s):
                 return []
@@ -453,10 +513,12 @@ class TestSectorImpactEngineV2:
                 "contagion_sectors": [],
                 "total_impact": 50.0,
             }
+
         monkeypatch.setattr(engine, "calculate_daily_sector_risk", mock_risk)
 
         def mock_trend(sector, db):
             return {"trend": "up", "current_risk": 5.0}
+
         monkeypatch.setattr(engine, "get_sector_trend", mock_trend)
 
         result = engine.get_daily_risk_v2("energy", None)
@@ -465,6 +527,7 @@ class TestSectorImpactEngineV2:
 
     def test_get_risk_heatmap_structure(self, monkeypatch):
         from src.data.sector_impact_engine import SectorCorrelationTracker, SectorImpactEngine
+
         engine = SectorImpactEngine(None, None)
 
         def mock_calc(sector, db, date=None):
@@ -476,6 +539,7 @@ class TestSectorImpactEngineV2:
                 "article_count": 5,
                 "contagion_sectors": [],
             }
+
         monkeypatch.setattr(engine, "calculate_daily_sector_risk", mock_calc)
         monkeypatch.setattr(SectorCorrelationTracker, "load_from_history", lambda self, db: None)
 
@@ -488,11 +552,13 @@ class TestSectorImpactEngineV2:
 class TestSectorMapper:
     def test_basic_instantiation(self):
         from src.data.sector_mapper import SectorMapper
+
         m = SectorMapper()
         assert m is not None
 
     def test_extract_sectors_from_text(self):
         from src.data.sector_mapper import SectorMapper
+
         m = SectorMapper()
         sectors = m.extract_sectors_from_text("нефть газ золото банк")
         assert "energy" in sectors
@@ -501,6 +567,7 @@ class TestSectorMapper:
 
     def test_extract_geographic_context(self):
         from src.data.sector_mapper import SectorMapper
+
         m = SectorMapper()
         regions = m.extract_geographic_context("россия сша китай")
         assert "russia" in regions
@@ -511,11 +578,13 @@ class TestSectorMapper:
 class TestImpactMatrix:
     def test_basic_instantiation(self):
         from src.data.impact_matrix import ImpactMatrix
+
         m = ImpactMatrix()
         assert m is not None
 
     def test_get_impact(self):
         from src.data.impact_matrix import ImpactMatrix
+
         m = ImpactMatrix()
         impact = m.get_impact("sanctions", "energy", 8.0)
         assert 0 < impact <= 10
@@ -524,6 +593,7 @@ class TestImpactMatrix:
         from datetime import datetime, timezone
 
         from src.data.impact_matrix import ImpactMatrix
+
         m = ImpactMatrix()
         decay = m.calculate_decay(datetime.now(timezone.utc))
         assert decay == 1.0
@@ -532,6 +602,7 @@ class TestImpactMatrix:
         from datetime import datetime, timedelta, timezone
 
         from src.data.impact_matrix import ImpactMatrix
+
         m = ImpactMatrix()
         decay = m.calculate_decay(datetime.now(timezone.utc) - timedelta(days=120))
         assert decay < 0.1
@@ -540,38 +611,44 @@ class TestImpactMatrix:
 class TestEventDetector:
     def test_basic_instantiation(self):
         from src.data.event_detector import EventDetector
+
         d = EventDetector()
         assert d is not None
 
     def test_cosine_similarity_identical(self):
         from src.data.event_detector import EventDetector
+
         d = EventDetector()
         sim = d._cosine_similarity([1.0, 0.0, 0.0], [1.0, 0.0, 0.0])
         assert sim == 1.0
 
     def test_cosine_similarity_orthogonal(self):
         from src.data.event_detector import EventDetector
+
         d = EventDetector()
         sim = d._cosine_similarity([1.0, 0.0], [0.0, 1.0])
         assert sim == 0.0
 
     def test_cosine_similarity_empty(self):
         from src.data.event_detector import EventDetector
+
         d = EventDetector()
         sim = d._cosine_similarity([], [1.0, 0.0])
         assert sim == 0.0
 
     def test_cosine_similarity_half(self):
         from src.data.event_detector import EventDetector
+
         d = EventDetector()
         sim = d._cosine_similarity([1.0, 0.0], [0.5, 0.5])
-        expected = 0.5 / (1.0 * (0.5**2 + 0.5**2)**0.5)
+        expected = 0.5 / (1.0 * (0.5**2 + 0.5**2) ** 0.5)
         assert abs(sim - expected) < 0.01
 
 
 class TestSentimentDivergenceDetector:
     def test_basic_instantiation(self):
         from src.data.event_detector import SentimentDivergenceDetector
+
         d = SentimentDivergenceDetector()
         assert d is not None
         assert d.threshold == 0.4
@@ -580,23 +657,27 @@ class TestSentimentDivergenceDetector:
 class TestGeopoliticalRiskEngine:
     def test_basic_instantiation(self):
         from src.data.geopolitical_risk_engine import GeopoliticalRiskEngine
+
         e = GeopoliticalRiskEngine()
         assert e is not None
 
     def test_extract_region_from_news_russia(self):
         from src.data.geopolitical_risk_engine import GeopoliticalRiskEngine
+
         e = GeopoliticalRiskEngine()
         region = e.extract_region_from_news("Россия вводит ответные меры", "")
         assert region == "russia"
 
     def test_extract_region_from_news_none(self):
         from src.data.geopolitical_risk_engine import GeopoliticalRiskEngine
+
         e = GeopoliticalRiskEngine()
         region = e.extract_region_from_news("Погода на сегодня", "")
         assert region is None
 
     def test_get_risk_alert_level(self):
         from src.data.geopolitical_risk_engine import GeopoliticalRiskEngine
+
         e = GeopoliticalRiskEngine()
         assert e.get_risk_alert_level(2.0) == "low"
         assert e.get_risk_alert_level(4.0) == "medium"
@@ -607,11 +688,13 @@ class TestGeopoliticalRiskEngine:
 class TestDashboardProvider:
     def test_basic_instantiation(self):
         from src.data.dashboard_provider import DashboardDataProvider
+
         p = DashboardDataProvider()
         assert p is not None
 
     def test_get_risk_color(self):
         from src.data.dashboard_provider import DashboardDataProvider
+
         assert DashboardDataProvider._get_risk_color(1) == "green"
         assert DashboardDataProvider._get_risk_color(3) == "yellow"
         assert DashboardDataProvider._get_risk_color(6) == "orange"
@@ -619,6 +702,7 @@ class TestDashboardProvider:
 
     def test_get_risk_level(self):
         from src.data.dashboard_provider import DashboardDataProvider
+
         assert DashboardDataProvider._get_risk_level(2) == "low"
         assert DashboardDataProvider._get_risk_level(4) == "medium"
         assert DashboardDataProvider._get_risk_level(6) == "high"
@@ -628,12 +712,14 @@ class TestDashboardProvider:
 class TestNewsSystemFactory:
     def test_singleton(self):
         from src.data.news_system import NewsSystemFactory
+
         f1 = NewsSystemFactory()
         f2 = NewsSystemFactory()
         assert f1 is f2
 
     def test_initialize(self):
         from src.data.news_system import NewsSystemFactory
+
         NewsSystemFactory._instance = None
         NewsSystemFactory._components = {}
         factory = NewsSystemFactory.initialize()
@@ -644,6 +730,7 @@ class TestNewsSystemFactory:
 
     def test_get_component(self):
         from src.data.news_system import NewsSystemFactory
+
         NewsSystemFactory._instance = None
         NewsSystemFactory._components = {}
         factory = NewsSystemFactory.initialize()
@@ -653,6 +740,7 @@ class TestNewsSystemFactory:
 
     def test_get_unknown_component(self):
         from src.data.news_system import NewsSystemFactory
+
         NewsSystemFactory._instance = None
         NewsSystemFactory._components = {}
         factory = NewsSystemFactory.initialize()
@@ -663,6 +751,7 @@ class TestNewsSystemFactory:
 class TestNewsClusterer:
     def test_basic_instantiation(self):
         from src.data.news_clusterer import NewsClusterer
+
         c = NewsClusterer()
         assert c is not None
         assert c.threshold == 0.85
@@ -670,20 +759,24 @@ class TestNewsClusterer:
 
     def test_cosine_similarity_identical(self):
         from src.data.news_clusterer import _cosine_similarity
+
         sim = _cosine_similarity([1.0, 0.0, 0.0], [1.0, 0.0, 0.0])
         assert sim == 1.0
 
     def test_cosine_similarity_orthogonal(self):
         from src.data.news_clusterer import _cosine_similarity
+
         sim = _cosine_similarity([1.0, 0.0], [0.0, 1.0])
         assert sim == 0.0
 
     def test_cosine_similarity_empty(self):
         from src.data.news_clusterer import _cosine_similarity
+
         assert _cosine_similarity([], [1.0, 0.0]) == 0.0
 
     def test_generate_embedding_no_embedder(self, monkeypatch):
         from src.data.news_clusterer import NewsClusterer
+
         c = NewsClusterer()
         c._embedder = None
         emb = c.generate_embedding("test", "summary here")
@@ -692,6 +785,7 @@ class TestNewsClusterer:
 
     def test_generate_embedding_fallback_deterministic(self, monkeypatch):
         from src.data.news_clusterer import NewsClusterer
+
         c = NewsClusterer()
         c._embedder = None
         emb1 = c.generate_embedding("same text", "same summary")
@@ -700,6 +794,7 @@ class TestNewsClusterer:
 
     def test_cluster_no_articles(self, monkeypatch):
         from src.data.news_clusterer import NewsClusterer
+
         c = NewsClusterer()
         c._embedder = None
         result = c.cluster_articles([])
@@ -709,17 +804,22 @@ class TestNewsClusterer:
         import datetime
 
         from src.data.news_clusterer import NewsClusterer
-        article = type("Article", (), {
-            "id": 1,
-            "embedding": [0.1] * 768,
-            "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
-            "title": "test",
-            "summary": "",
-            "sentiment": "positive",
-            "category": "ECONOMY",
-            "subcategory": None,
-            "impact_score": 0.5,
-        })
+
+        article = type(
+            "Article",
+            (),
+            {
+                "id": 1,
+                "embedding": [0.1] * 768,
+                "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
+                "title": "test",
+                "summary": "",
+                "sentiment": "positive",
+                "category": "ECONOMY",
+                "subcategory": None,
+                "impact_score": 0.5,
+            },
+        )
         c = NewsClusterer()
         c._embedder = None
         result = c.cluster_articles([article])
@@ -732,32 +832,41 @@ class TestNewsClusterer:
         import numpy as np
 
         from src.data.news_clusterer import NewsClusterer
+
         text = "Russia raises key rate"
         h = int(hashlib.md5(text.lower().encode()).hexdigest(), 16)
         np.random.seed(h % (2**32))
         emb = np.random.randn(768).tolist()
-        a1 = type("Article", (), {
-            "id": 1,
-            "embedding": emb,
-            "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
-            "title": "Russia raises key rate",
-            "summary": "Central bank decision",
-            "sentiment": "negative",
-            "category": "ECONOMY",
-            "subcategory": None,
-            "impact_score": 0.8,
-        })
-        a2 = type("Article", (), {
-            "id": 2,
-            "embedding": emb,
-            "published_at": datetime.datetime(2025, 1, 2, tzinfo=datetime.timezone.utc),
-            "title": "Russia raises key rate",
-            "summary": "Central bank decision",
-            "sentiment": "negative",
-            "category": "ECONOMY",
-            "subcategory": None,
-            "impact_score": 0.7,
-        })
+        a1 = type(
+            "Article",
+            (),
+            {
+                "id": 1,
+                "embedding": emb,
+                "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
+                "title": "Russia raises key rate",
+                "summary": "Central bank decision",
+                "sentiment": "negative",
+                "category": "ECONOMY",
+                "subcategory": None,
+                "impact_score": 0.8,
+            },
+        )
+        a2 = type(
+            "Article",
+            (),
+            {
+                "id": 2,
+                "embedding": emb,
+                "published_at": datetime.datetime(2025, 1, 2, tzinfo=datetime.timezone.utc),
+                "title": "Russia raises key rate",
+                "summary": "Central bank decision",
+                "sentiment": "negative",
+                "category": "ECONOMY",
+                "subcategory": None,
+                "impact_score": 0.7,
+            },
+        )
         c = NewsClusterer()
         c._embedder = None
         result = c.cluster_articles([a1, a2])
@@ -771,32 +880,41 @@ class TestNewsClusterer:
         import numpy as np
 
         from src.data.news_clusterer import NewsClusterer
+
         text = "Some news"
         h = int(hashlib.md5(text.lower().encode()).hexdigest(), 16)
         np.random.seed(h % (2**32))
         emb = np.random.randn(768).tolist()
-        a1 = type("Article", (), {
-            "id": 1,
-            "embedding": emb,
-            "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
-            "title": "",
-            "summary": "",
-            "sentiment": "neutral",
-            "category": "GENERAL",
-            "subcategory": None,
-            "impact_score": 0.0,
-        })
-        a2 = type("Article", (), {
-            "id": 2,
-            "embedding": emb,
-            "published_at": datetime.datetime(2025, 1, 10, tzinfo=datetime.timezone.utc),
-            "title": "",
-            "summary": "",
-            "sentiment": "neutral",
-            "category": "GENERAL",
-            "subcategory": None,
-            "impact_score": 0.0,
-        })
+        a1 = type(
+            "Article",
+            (),
+            {
+                "id": 1,
+                "embedding": emb,
+                "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
+                "title": "",
+                "summary": "",
+                "sentiment": "neutral",
+                "category": "GENERAL",
+                "subcategory": None,
+                "impact_score": 0.0,
+            },
+        )
+        a2 = type(
+            "Article",
+            (),
+            {
+                "id": 2,
+                "embedding": emb,
+                "published_at": datetime.datetime(2025, 1, 10, tzinfo=datetime.timezone.utc),
+                "title": "",
+                "summary": "",
+                "sentiment": "neutral",
+                "category": "GENERAL",
+                "subcategory": None,
+                "impact_score": 0.0,
+            },
+        )
         c = NewsClusterer(time_window_days=3)
         c._embedder = None
         result = c.cluster_articles([a1, a2])
@@ -804,6 +922,7 @@ class TestNewsClusterer:
 
     def test_fallback_embedding_deterministic(self):
         from src.data.news_clusterer import NewsClusterer
+
         emb1 = NewsClusterer._fallback_embedding("test text")
         emb2 = NewsClusterer._fallback_embedding("test text")
         assert emb1 == emb2
@@ -811,6 +930,7 @@ class TestNewsClusterer:
 
     def test_fallback_embedding_different_texts_differ(self):
         from src.data.news_clusterer import NewsClusterer
+
         emb1 = NewsClusterer._fallback_embedding("hello world")
         emb2 = NewsClusterer._fallback_embedding("goodbye world")
         assert emb1 != emb2
@@ -819,26 +939,35 @@ class TestNewsClusterer:
         import datetime
 
         from src.data.news_clusterer import _get_or_create_event
-        a1 = type("Article", (), {
-            "id": 1,
-            "title": "Main event",
-            "summary": "details",
-            "category": "POLITICS",
-            "subcategory": "conflict",
-            "impact_score": 0.9,
-            "sentiment": "negative",
-            "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
-        })
-        a2 = type("Article", (), {
-            "id": 2,
-            "title": "Follow up",
-            "summary": "more details",
-            "category": "POLITICS",
-            "subcategory": "conflict",
-            "impact_score": 0.7,
-            "sentiment": "positive",
-            "published_at": datetime.datetime(2025, 1, 2, tzinfo=datetime.timezone.utc),
-        })
+
+        a1 = type(
+            "Article",
+            (),
+            {
+                "id": 1,
+                "title": "Main event",
+                "summary": "details",
+                "category": "POLITICS",
+                "subcategory": "conflict",
+                "impact_score": 0.9,
+                "sentiment": "negative",
+                "published_at": datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc),
+            },
+        )
+        a2 = type(
+            "Article",
+            (),
+            {
+                "id": 2,
+                "title": "Follow up",
+                "summary": "more details",
+                "category": "POLITICS",
+                "subcategory": "conflict",
+                "impact_score": 0.7,
+                "sentiment": "positive",
+                "published_at": datetime.datetime(2025, 1, 2, tzinfo=datetime.timezone.utc),
+            },
+        )
         event = _get_or_create_event(None, [a1, a2])
         assert event.title == "Main event"
         assert event.category == "POLITICS"
@@ -850,11 +979,13 @@ class TestNewsClusterer:
 class TestNewsDeduplicator:
     def test_basic_instantiation(self):
         from src.data.news_processor import NewsDeduplicator
+
         d = NewsDeduplicator()
         assert d is not None
 
     def test_fallback_embedding_produces_list(self):
         from src.data.news_processor import NewsDeduplicator
+
         d = NewsDeduplicator()
         emb = d._fallback_embedding("test text")
         assert isinstance(emb, list)
@@ -864,6 +995,7 @@ class TestNewsDeduplicator:
 class TestCompanyRiskAggregator:
     def test_basic_instantiation(self):
         from src.data.company_risk_aggregator import CompanyRiskAggregator
+
         a = CompanyRiskAggregator()
         assert a is not None
 

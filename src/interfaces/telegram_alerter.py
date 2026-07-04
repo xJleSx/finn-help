@@ -21,10 +21,19 @@ class AlertNotifier:
     async def send_alert(self, alert: dict[str, Any], chat_id: int) -> bool:
         text = _renderer.render_telegram(
             "alert.md.j2",
-            **{k: alert.get(k) for k in (
-                "ticker", "title", "priority", "priority_score",
-                "anomaly_score", "predicted_return", "reason", "in_portfolio",
-            )},
+            **{
+                k: alert.get(k)
+                for k in (
+                    "ticker",
+                    "title",
+                    "priority",
+                    "priority_score",
+                    "anomaly_score",
+                    "predicted_return",
+                    "reason",
+                    "in_portfolio",
+                )
+            },
         )
         receipt_id = self._create_receipt(alert, "telegram", text)
         try:

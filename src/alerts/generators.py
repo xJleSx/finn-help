@@ -43,14 +43,16 @@ def generate_bond_maturity_alerts(db: Any, days_threshold: int = 30) -> list[dic
             f"YTM: {offering.yield_to_maturity or '—'}%"
         )
         severity = 0.9 if days_left <= 7 else 0.6 if days_left <= 14 else 0.3
-        alerts.append({
-            "ticker": ticker,
-            "alert_type": "bond_maturity",
-            "severity": severity,
-            "title": title,
-            "message": message,
-            "user_id": None,
-        })
+        alerts.append(
+            {
+                "ticker": ticker,
+                "alert_type": "bond_maturity",
+                "severity": severity,
+                "title": title,
+                "message": message,
+                "user_id": None,
+            }
+        )
     return alerts
 
 
@@ -83,14 +85,16 @@ def generate_report_anomalies(db: Any) -> list[dict[str, Any]]:
             title = f"Аномалия в отчётности {ticker}"
             message = f"{ticker}: {'; '.join(anomalies)} за период {report.report_date}"
             severity = 0.7 if "чистый убыток" in anomalies else 0.4
-            alerts.append({
-                "ticker": ticker,
-                "alert_type": "report_anomaly",
-                "severity": severity,
-                "title": title,
-                "message": message,
-                "user_id": None,
-            })
+            alerts.append(
+                {
+                    "ticker": ticker,
+                    "alert_type": "report_anomaly",
+                    "severity": severity,
+                    "title": title,
+                    "message": message,
+                    "user_id": None,
+                }
+            )
     return alerts
 
 
@@ -128,14 +132,16 @@ def generate_corporate_event_alerts(db: Any, days_ahead: int = 30) -> list[dict[
             severity = 0.3
         else:
             continue
-        alerts.append({
-            "ticker": ticker,
-            "alert_type": "corporate_event",
-            "severity": severity,
-            "title": title,
-            "message": message,
-            "user_id": None,
-        })
+        alerts.append(
+            {
+                "ticker": ticker,
+                "alert_type": "corporate_event",
+                "severity": severity,
+                "title": title,
+                "message": message,
+                "user_id": None,
+            }
+        )
     return alerts
 
 
@@ -167,14 +173,16 @@ def generate_signal_drop_alerts(db: Any, drop_threshold: float = 0.2) -> list[di
             conf_to = today_s.confidence or 0
             message = f"{ticker}: уверенность {conf_from:.0%} → {conf_to:.0%} (падение {drop:.0%})"
             severity = min(drop * 2, 0.9)
-            alerts.append({
-                "ticker": ticker,
-                "alert_type": "signal_drop",
-                "severity": severity,
-                "title": title,
-                "message": message,
-                "user_id": None,
-            })
+            alerts.append(
+                {
+                    "ticker": ticker,
+                    "alert_type": "signal_drop",
+                    "severity": severity,
+                    "title": title,
+                    "message": message,
+                    "user_id": None,
+                }
+            )
     return alerts
 
 

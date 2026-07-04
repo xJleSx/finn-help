@@ -144,9 +144,7 @@ class GeopoliticalRiskEngine:
                     break
         return events
 
-    def calculate_event_risk(
-        self, events: list[DetectedEvent], current_date: Optional[datetime] = None
-    ) -> dict[str, Any]:
+    def calculate_event_risk(self, events: list[DetectedEvent], current_date: Optional[datetime] = None) -> dict[str, Any]:
         if current_date is None:
             current_date = datetime.now(timezone.utc)
 
@@ -163,9 +161,7 @@ class GeopoliticalRiskEngine:
 
     # ── Subcategory score ───────────────────────────────────────────────────
 
-    def calculate_subcategory_score(
-        self, subcategory: str, articles: list[Any], current_date: Optional[datetime] = None
-    ) -> dict[str, Any]:
+    def calculate_subcategory_score(self, subcategory: str, articles: list[Any], current_date: Optional[datetime] = None) -> dict[str, Any]:
         if current_date is None:
             current_date = datetime.now(timezone.utc)
 
@@ -230,16 +226,12 @@ class GeopoliticalRiskEngine:
         x = list(range(len(history)))
         y = history
         n = len(x)
-        slope = (n * sum(a * b for a, b in zip(x, y)) - sum(x) * sum(y)) / (
-            n * sum(a ** 2 for a in x) - sum(x) ** 2
-        )
+        slope = (n * sum(a * b for a, b in zip(x, y)) - sum(x) * sum(y)) / (n * sum(a**2 for a in x) - sum(x) ** 2)
         return max(0.0, min(10.0, history[-1] + slope * days_forward))
 
     # ── Daily calculation ───────────────────────────────────────────────────
 
-    def calculate_daily_geopolitical_risk(
-        self, db_session: Any, current_date: Optional[datetime] = None
-    ) -> dict[str, Any]:
+    def calculate_daily_geopolitical_risk(self, db_session: Any, current_date: Optional[datetime] = None) -> dict[str, Any]:
         from src.db.models import GeopoliticalRiskHistory, News
 
         if current_date is None:
@@ -294,10 +286,7 @@ class GeopoliticalRiskEngine:
         events = self.detect_events(geo_articles)
         event_category_scores = self.calculate_event_risk(events, current_date)
         event_score = (
-            sum(
-                event_category_scores.get(cat, 0.0) * self.weights.get(cat, 0.0)
-                for cat in self.weights
-            )
+            sum(event_category_scores.get(cat, 0.0) * self.weights.get(cat, 0.0) for cat in self.weights)
             * 0.3  # event component weighted at 30% of total
         )
         event_score = min(10.0, event_score)
@@ -331,8 +320,7 @@ class GeopoliticalRiskEngine:
 
         # Event summaries
         event_summaries = [
-            {"category": e.category, "severity": round(e.severity, 1), "region": e.region, "date": e.date.isoformat()}
-            for e in events[:20]
+            {"category": e.category, "severity": round(e.severity, 1), "region": e.region, "date": e.date.isoformat()} for e in events[:20]
         ]
 
         return {
@@ -345,8 +333,7 @@ class GeopoliticalRiskEngine:
             "forward_30d": round(forward_30d, 2),
             "confidence": round(confidence, 2),
             "subcategories": {
-                cat: subcategories.get(cat, {"risk_score": 0.0, "article_count": 0})
-                for cat in ["sanctions", "conflict", "trade_war", "diplomacy"]
+                cat: subcategories.get(cat, {"risk_score": 0.0, "article_count": 0}) for cat in ["sanctions", "conflict", "trade_war", "diplomacy"]
             },
             "total_article_count": len(geo_articles),
             "unique_sources": len(all_sources),
@@ -362,9 +349,7 @@ class GeopoliticalRiskEngine:
 
         history = (
             db_session.query(GeopoliticalRiskHistory)
-            .filter(
-                GeopoliticalRiskHistory.date >= datetime.now(timezone.utc).date() - timedelta(days=days)
-            )
+            .filter(GeopoliticalRiskHistory.date >= datetime.now(timezone.utc).date() - timedelta(days=days))
             .order_by(GeopoliticalRiskHistory.date)
             .all()
         )
@@ -403,9 +388,7 @@ class GeopoliticalRiskEngine:
         if len(scores) > 1:
             x = list(range(len(scores)))
             n = len(x)
-            slope = (n * sum(a * b for a, b in zip(x, scores_float)) - sum(x) * sum(scores_float)) / (
-                n * sum(a ** 2 for a in x) - sum(x) ** 2
-            )
+            slope = (n * sum(a * b for a, b in zip(x, scores_float)) - sum(x) * sum(scores_float)) / (n * sum(a**2 for a in x) - sum(x) ** 2)
             velocity = slope
         else:
             velocity = 0.0
@@ -479,45 +462,41 @@ class GeopoliticalRiskEngine:
         yesterday = today - timedelta(days=1)
         week_ago = today - timedelta(days=7)
 
-        today_rec = (
-            db_session.query(GeopoliticalRiskHistory).filter(GeopoliticalRiskHistory.date == today).first()
-        )
-        yesterday_rec = (
-            db_session.query(GeopoliticalRiskHistory).filter(GeopoliticalRiskHistory.date == yesterday).first()
-        )
-        week_rec = (
-            db_session.query(GeopoliticalRiskHistory).filter(GeopoliticalRiskHistory.date == week_ago).first()
-        )
+        today_rec = db_session.query(GeopoliticalRiskHistory).filter(GeopoliticalRiskHistory.date == today).first()
+        yesterday_rec = db_session.query(GeopoliticalRiskHistory).filter(GeopoliticalRiskHistory.date == yesterday).first()
+        week_rec = db_session.query(GeopoliticalRiskHistory).filter(GeopoliticalRiskHistory.date == week_ago).first()
 
         threats = []
 
         if today_rec and yesterday_rec:
             day_change = today_rec.risk_score - yesterday_rec.risk_score
             if day_change > sensitivity * 10:
-                threats.append({
-                    "type": "spike",
-                    "magnitude": round(day_change, 2),
-                    "period": "1_day",
-                    "current_level": today_rec.risk_score,
-                })
+                threats.append(
+                    {
+                        "type": "spike",
+                        "magnitude": round(day_change, 2),
+                        "period": "1_day",
+                        "current_level": today_rec.risk_score,
+                    }
+                )
 
         if today_rec and week_rec:
             week_change = today_rec.risk_score - week_rec.risk_score
             if week_change > sensitivity * 10:
-                threats.append({
-                    "type": "trend",
-                    "magnitude": round(week_change, 2),
-                    "period": "7_days",
-                    "current_level": today_rec.risk_score,
-                })
+                threats.append(
+                    {
+                        "type": "trend",
+                        "magnitude": round(week_change, 2),
+                        "period": "7_days",
+                        "current_level": today_rec.risk_score,
+                    }
+                )
 
         return threats
 
     # ── Sector geo impact ───────────────────────────────────────────────────
 
-    def sector_geo_impact(
-        self, sector: str, db_session: Any, current_date: Optional[datetime] = None
-    ) -> dict[str, Any]:
+    def sector_geo_impact(self, sector: str, db_session: Any, current_date: Optional[datetime] = None) -> dict[str, Any]:
         if current_date is None:
             current_date = datetime.now(timezone.utc)
 
@@ -541,10 +520,7 @@ class GeopoliticalRiskEngine:
         threats = self.identify_emerging_threats(db_session)
 
         sectors = list(SECTOR_GEO_SENSITIVITY.keys())
-        sector_impacts = {
-            s: self.sector_geo_impact(s, db_session, current_date)
-            for s in sectors
-        }
+        sector_impacts = {s: self.sector_geo_impact(s, db_session, current_date) for s in sectors}
         most_affected = sorted(sector_impacts.items(), key=lambda x: x[1]["adjusted_risk"], reverse=True)[:3]
 
         return {
@@ -555,7 +531,5 @@ class GeopoliticalRiskEngine:
             "forward_30d": risk.get("forward_30d"),
             "confidence": risk.get("confidence"),
             "threats": threats,
-            "most_affected_sectors": [
-                {"sector": s[0], "adjusted_risk": s[1]["adjusted_risk"]} for s in most_affected
-            ],
+            "most_affected_sectors": [{"sector": s[0], "adjusted_risk": s[1]["adjusted_risk"]} for s in most_affected],
         }

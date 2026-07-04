@@ -28,8 +28,6 @@ from src.trading.risk.guards import (
 logger = logging.getLogger(__name__)
 
 
-
-
 def _acquire_execution_lock() -> bool:
     lock_dir = Path(os.environ.get("FINN_LOCK_DIR", tempfile.gettempdir()))
     lock_dir.mkdir(parents=True, exist_ok=True)
@@ -151,13 +149,7 @@ async def _check_var() -> tuple[bool, str]:
             for p in positions:
                 if not p.instrument_id:
                     continue
-                prices = (
-                    db.query(Price.close)
-                    .filter_by(instrument_id=p.instrument_id)
-                    .order_by(Price.date.desc())
-                    .limit(60)
-                    .all()
-                )
+                prices = db.query(Price.close).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).limit(60).all()
                 vals = [r[0] for r in prices if r[0] is not None]
                 if len(vals) < 20:
                     continue
@@ -185,13 +177,7 @@ async def _check_liquidity(ticker: str) -> tuple[bool, str]:
             inst = db.query(Instrument).filter_by(ticker=ticker).first()
             if not inst or not inst.id:
                 return True, "ok"
-            prices = (
-                db.query(Price.close, Price.volume)
-                .filter_by(instrument_id=inst.id)
-                .order_by(Price.date.desc())
-                .limit(20)
-                .all()
-            )
+            prices = db.query(Price.close, Price.volume).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).limit(20).all()
             volumes = [p.volume for p in prices if p.volume is not None and p.close is not None]
             if len(volumes) < 5:
                 return True, "ok"
@@ -244,10 +230,7 @@ async def _process_signals() -> None:
     async with AsyncSessionLocal() as db:
         today = datetime.now(timezone.utc).date()
         result = await db.execute(
-            select(SignalModel)
-            .options(joinedload(SignalModel.instrument))
-            .where(SignalModel.date >= today)
-            .order_by(SignalModel.confidence.desc())
+            select(SignalModel).options(joinedload(SignalModel.instrument)).where(SignalModel.date >= today).order_by(SignalModel.confidence.desc())
         )
         signals = result.scalars().all()
         if not signals:
@@ -264,9 +247,7 @@ async def _process_signals() -> None:
             latest_prices: dict[int, float] = {}
             if inst_ids:
                 result = await db.execute(
-                    select(PriceModel.instrument_id, PriceModel.close)
-                    .where(PriceModel.instrument_id.in_(inst_ids))
-                    .order_by(PriceModel.date.desc())
+                    select(PriceModel.instrument_id, PriceModel.close).where(PriceModel.instrument_id.in_(inst_ids)).order_by(PriceModel.date.desc())
                 )
                 seen_prices: set[int] = set()
                 for row in result.all():
@@ -274,13 +255,7 @@ async def _process_signals() -> None:
                         latest_prices[row.instrument_id] = float(row.close)
                         seen_prices.add(row.instrument_id)
 
-            total_value = (
-                sum(
-                    (p.quantity or 0) * (latest_prices.get(p.instrument_id) or p.avg_price or 0)
-                    for p in port_rows
-                )
-                or 100000
-            )
+            total_value = sum((p.quantity or 0) * (latest_prices.get(p.instrument_id) or p.avg_price or 0) for p in port_rows) or 100000
 
         signal_inst_ids = [s.instrument_id for s in signals if s.instrument]
         if signal_inst_ids:
@@ -296,22 +271,13 @@ async def _process_signals() -> None:
                     seen_prices.add(row.instrument_id)
 
         # Pre-fetch liquidity and news data for all signal instruments
-        tickers_with_inst = {
-            s.instrument.ticker: s.instrument_id
-            for s in signals if s.instrument and s.instrument_id
-        }
+        tickers_with_inst = {s.instrument.ticker: s.instrument_id for s in signals if s.instrument and s.instrument_id}
         liquidity_cache: dict[str, tuple[bool, str]] = {}
         news_cache: dict[str, tuple[bool, str]] = {}
 
         ticker_inst_map: dict[str, int] = {
             inst.ticker: inst.id
-            for inst in (
-                await db.execute(
-                    select(Instrument).where(
-                        Instrument.ticker.in_(list(tickers_with_inst.keys()))
-                    )
-                )
-            ).scalars().all()
+            for inst in (await db.execute(select(Instrument).where(Instrument.ticker.in_(list(tickers_with_inst.keys()))))).scalars().all()
             if inst.id
         }
 
@@ -324,10 +290,7 @@ async def _process_signals() -> None:
 
             # Liquidity
             result = await db.execute(
-                select(PriceModel.close, PriceModel.volume)
-                .where(PriceModel.instrument_id == inst_id)
-                .order_by(PriceModel.date.desc())
-                .limit(20)
+                select(PriceModel.close, PriceModel.volume).where(PriceModel.instrument_id == inst_id).order_by(PriceModel.date.desc()).limit(20)
             )
             price_rows = result.all()
             volumes = [r.volume for r in price_rows if r.volume is not None and r.close is not None]
@@ -347,10 +310,7 @@ async def _process_signals() -> None:
                 .order_by(News.published_at.desc())
                 .limit(10)
             )
-            scores = [
-                n.sentiment_weighted or n.sentiment_score or 0
-                for n in result.all()
-            ]
+            scores = [n.sentiment_weighted or n.sentiment_score or 0 for n in result.all()]
             news_cache[ticker] = check_news_sentiment(scores)
 
     if not await market_hours_check():
@@ -417,9 +377,7 @@ async def _check_stop_losses() -> None:
     from src.db.models import Instrument, Price
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(OrderModel).where(OrderModel.status.in_(["filled", "partial"]))
-        )
+        result = await db.execute(select(OrderModel).where(OrderModel.status.in_(["filled", "partial"])))
         open_orders = result.scalars().all()
         if not open_orders:
             return
@@ -427,9 +385,7 @@ async def _check_stop_losses() -> None:
         tickers = list({o.ticker for o in open_orders if o.ticker})
         instruments_map: dict[str, Instrument] = {}
         if tickers:
-            result = await db.execute(
-                select(Instrument).where(Instrument.ticker.in_(tickers))
-            )
+            result = await db.execute(select(Instrument).where(Instrument.ticker.in_(tickers)))
             for i in result.scalars().all():
                 if i.id:
                     instruments_map[str(i.ticker)] = i
@@ -437,11 +393,7 @@ async def _check_stop_losses() -> None:
         inst_ids = [i.id for i in instruments_map.values() if i.id]
         latest_prices: dict[int, float] = {}
         if inst_ids:
-            result = await db.execute(
-                select(Price)
-                .where(Price.instrument_id.in_(inst_ids))
-                .order_by(Price.instrument_id, Price.date.desc())
-            )
+            result = await db.execute(select(Price).where(Price.instrument_id.in_(inst_ids)).order_by(Price.instrument_id, Price.date.desc()))
             all_prices = result.scalars().all()
             seen: set[int] = set()
             for p in all_prices:
@@ -479,9 +431,7 @@ async def _check_daily_pnl() -> None:
             latest_prices: dict[int, float] = {}
             if inst_ids:
                 result = await db.execute(
-                    select(PriceModel.instrument_id, PriceModel.close)
-                    .where(PriceModel.instrument_id.in_(inst_ids))
-                    .order_by(PriceModel.date.desc())
+                    select(PriceModel.instrument_id, PriceModel.close).where(PriceModel.instrument_id.in_(inst_ids)).order_by(PriceModel.date.desc())
                 )
                 rows = result.all()
                 seen: set[int] = set()

@@ -58,6 +58,7 @@ class NewsImpactModel(BaseRegressor):
 
     def _create_model(self) -> Any:
         import xgboost as xgb
+
         return xgb.XGBRegressor(
             n_estimators=settings.ml_impact_n_estimators,
             max_depth=settings.ml_impact_max_depth,
@@ -66,9 +67,7 @@ class NewsImpactModel(BaseRegressor):
             verbosity=0,
         )
 
-    def _train_lstm(
-        self, x_train: np.ndarray, y_train: np.ndarray, input_dim: int
-    ) -> Any:
+    def _train_lstm(self, x_train: np.ndarray, y_train: np.ndarray, input_dim: int) -> Any:
         import torch
         import torch.nn as nn
 
@@ -106,8 +105,11 @@ class NewsImpactModel(BaseRegressor):
 
         class _LSTMPredictor(nn.Module):
             def __init__(
-                self, input_dim: int, hidden: int = LSTM_HIDDEN,
-                layers: int = LSTM_LAYERS, dropout: float = LSTM_DROPOUT,
+                self,
+                input_dim: int,
+                hidden: int = LSTM_HIDDEN,
+                layers: int = LSTM_LAYERS,
+                dropout: float = LSTM_DROPOUT,
             ):
                 super().__init__()
                 self.lstm = nn.LSTM(input_dim, hidden, layers, batch_first=True, dropout=dropout if layers > 1 else 0)
@@ -187,16 +189,11 @@ class NewsImpactModel(BaseRegressor):
 
             if has_lstm and len(xs_val) == len(x_val[LSTM_SEQ_LEN:]):
                 xgb_ens = xgb_preds
-                lstm_ens = lstm_preds[:len(xgb_ens)]
+                lstm_ens = lstm_preds[: len(xgb_ens)]
                 ens_preds = (xgb_ens + lstm_ens) / 2.0
                 ens_rmse = float(np.sqrt(np.mean((ens_preds - y_val[LSTM_SEQ_LEN:]) ** 2)))
                 y_val_trim = y_val[LSTM_SEQ_LEN:]
-                ens_dir_acc = float(
-                    np.mean(
-                        (np.sign(ens_preds) == np.sign(y_val_trim))
-                        | (np.abs(y_val_trim) < 0.001)
-                    )
-                )
+                ens_dir_acc = float(np.mean((np.sign(ens_preds) == np.sign(y_val_trim)) | (np.abs(y_val_trim) < 0.001)))
             else:
                 ens_rmse = rmse_xgb
                 ens_dir_acc = dir_acc_xgb
@@ -216,10 +213,17 @@ class NewsImpactModel(BaseRegressor):
                 metrics["top_features"] = fi[:5]
 
             from src.model_registry import save_model
+
             save_model(xgb_model, self._model_name(h), metrics=metrics)
             logger.info(
                 "%s %dd — RMSE=%.4f LSTM=%.4f Ens=%.4f DirAcc=%.2f (n=%d)",
-                ticker, h, rmse_xgb, lstm_rmse if has_lstm else 0, ens_rmse, ens_dir_acc, len(y_val),
+                ticker,
+                h,
+                rmse_xgb,
+                lstm_rmse if has_lstm else 0,
+                ens_rmse,
+                ens_dir_acc,
+                len(y_val),
             )
             results["horizons"][h] = metrics
 

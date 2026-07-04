@@ -51,26 +51,17 @@ def load_company_profile(db: Session, instrument_id: int) -> Optional[CompanyPro
 
 
 def load_financial_report(db: Session, instrument_id: int) -> Optional[FinancialReport]:
-    return (
-        db.query(FinancialReport)
-        .filter(FinancialReport.instrument_id == instrument_id)
-        .order_by(FinancialReport.report_date.desc())
-        .first()
-    )
+    return db.query(FinancialReport).filter(FinancialReport.instrument_id == instrument_id).order_by(FinancialReport.report_date.desc()).first()
 
 
 def load_bond_offering(db: Session, instrument_id: int) -> Optional[BondOffering]:
-    return (
-        db.query(BondOffering)
-        .filter(BondOffering.instrument_id == instrument_id)
-        .order_by(BondOffering.offering_date.desc())
-        .first()
-    )
+    return db.query(BondOffering).filter(BondOffering.instrument_id == instrument_id).order_by(BondOffering.offering_date.desc()).first()
 
 
 def load_upcoming_events(db: Session, instrument_id: int, days: int = 90) -> list[CorporateEvent]:
     cutoff = date.today()
     from datetime import timedelta
+
     end = date.today() + timedelta(days=days)
     return (
         db.query(CorporateEvent)
@@ -85,12 +76,7 @@ def load_upcoming_events(db: Session, instrument_id: int, days: int = 90) -> lis
 
 
 def load_fundamental_metric(db: Session, instrument_id: int) -> Optional[FundamentalMetric]:
-    return (
-        db.query(FundamentalMetric)
-        .filter(FundamentalMetric.instrument_id == instrument_id)
-        .order_by(FundamentalMetric.date.desc())
-        .first()
-    )
+    return db.query(FundamentalMetric).filter(FundamentalMetric.instrument_id == instrument_id).order_by(FundamentalMetric.date.desc()).first()
 
 
 def build_profile_block(profile: Optional[CompanyProfile]) -> str:
@@ -234,9 +220,7 @@ def build_corporate_events_block(events: list[CorporateEvent], max_items: int = 
     return lines
 
 
-def build_fundamental_comparison(
-    fm: Optional[FundamentalMetric], sector_avg: Optional[dict[str, float]] = None
-) -> list[str]:
+def build_fundamental_comparison(fm: Optional[FundamentalMetric], sector_avg: Optional[dict[str, float]] = None) -> list[str]:
     if not fm:
         return []
     lines = []

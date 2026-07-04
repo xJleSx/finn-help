@@ -313,9 +313,7 @@ class TestAPIEdgeCases:
         assert resp.status_code in (200, 422)
 
     def test_invalid_json_body(self, mock_client, mock_db):
-        resp = mock_client.post(
-            "/api/portfolio/allocate", data="not json", headers={"Content-Type": "application/json"}
-        )
+        resp = mock_client.post("/api/portfolio/allocate", data="not json", headers={"Content-Type": "application/json"})
         assert resp.status_code in (200, 422)
 
     def test_unknown_route_returns_404(self, mock_client, mock_db):
@@ -554,9 +552,7 @@ class TestRiskGuardsEdgeCases:
     def test_compute_position_shares_zero_risk(self):
         from src.trading.risk.guards import compute_position_shares
 
-        result = compute_position_shares(
-            portfolio_value=100_000, risk_per_trade=0.02, stop_loss_pct=0.0, current_price=0.0
-        )
+        result = compute_position_shares(portfolio_value=100_000, risk_per_trade=0.02, stop_loss_pct=0.0, current_price=0.0)
         assert result >= 1
 
     def test_compute_volatility_target_zero_current(self):

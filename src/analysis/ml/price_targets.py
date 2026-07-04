@@ -105,9 +105,7 @@ def compute_support_resistance(df: pd.DataFrame, lookback: int = 60) -> tuple[fl
     return nearest_support, nearest_resistance
 
 
-def compute_take_profits(
-    entry: float, resistance: float | None, atr: float, profile: Profile = "balanced"
-) -> list[TakeProfit]:
+def compute_take_profits(entry: float, resistance: float | None, atr: float, profile: Profile = "balanced") -> list[TakeProfit]:
     cfg = PROFILES[profile]
     targets: list[TakeProfit] = []
     for i, pct in enumerate(cfg["tp_levels"]):
@@ -168,11 +166,7 @@ def build_trade_plan(
         stop_loss = compute_stop_loss(entry_price, atr, "sell", profile)
 
     cfg = PROFILES[profile]
-    trailing_after = (
-        round(entry_price * (1 + cfg["trailing_after"]), 2)
-        if side == "buy"
-        else round(entry_price * (1 - cfg["trailing_after"]), 2)
-    )
+    trailing_after = round(entry_price * (1 + cfg["trailing_after"]), 2) if side == "buy" else round(entry_price * (1 - cfg["trailing_after"]), 2)
     risk_reward = compute_risk_reward(entry_price, targets, stop_loss)
 
     prediction_interval = None

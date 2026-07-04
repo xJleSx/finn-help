@@ -48,9 +48,7 @@ class NewsBatchProcessor:
         self.geo_engine = geo_engine
         self.event_detector = event_detector
 
-    def process_new_articles(
-        self, db_session: Any, limit: int = 1000
-    ) -> dict[str, Any]:
+    def process_new_articles(self, db_session: Any, limit: int = 1000) -> dict[str, Any]:
         """Process new unclassified articles through full pipeline.
 
         Args:
@@ -76,9 +74,14 @@ class NewsBatchProcessor:
 
         try:
             # Step 1: Get unprocessed articles
-            articles = db_session.query(News).filter(
-                News.category.is_(None),  # Not yet classified
-            ).limit(limit).all()
+            articles = (
+                db_session.query(News)
+                .filter(
+                    News.category.is_(None),  # Not yet classified
+                )
+                .limit(limit)
+                .all()
+            )
 
             stats["total_processed"] = len(articles)
 
@@ -143,9 +146,7 @@ class NewsBatchProcessor:
 
             # Step 4: Cluster into events (legacy)
             try:
-                event_mapping = self.event_detector.cluster_into_events(
-                    relevant_articles, db_session
-                )
+                event_mapping = self.event_detector.cluster_into_events(relevant_articles, db_session)
                 stats["clustered"] = stats.get("clustered", 0) + len(event_mapping)
 
                 for article_id, event_id in event_mapping.items():
@@ -162,14 +163,10 @@ class NewsBatchProcessor:
             # Step 5: Calculate sector impacts and risks
             for article in relevant_articles:
                 try:
-                    sector_impacts = self.impact_engine.calculate_sector_impact_from_news(
-                        article, db_session
-                    )
+                    sector_impacts = self.impact_engine.calculate_sector_impact_from_news(article, db_session)
 
                     if sector_impacts:
-                        count = self.impact_engine.store_news_sector_impacts(
-                            article, sector_impacts, db_session
-                        )
+                        count = self.impact_engine.store_news_sector_impacts(article, sector_impacts, db_session)
                         stats["sector_impacts_calc"] += count
 
                 except Exception as e:
@@ -183,11 +180,12 @@ class NewsBatchProcessor:
 
             for article in relevant_articles:
                 try:
-                    linked_instruments = db_session.query(Instrument).join(
-                        NewsInstrument, NewsInstrument.instrument_id == Instrument.id
-                    ).filter(
-                        NewsInstrument.news_id == article.id
-                    ).all()
+                    linked_instruments = (
+                        db_session.query(Instrument)
+                        .join(NewsInstrument, NewsInstrument.instrument_id == Instrument.id)
+                        .filter(NewsInstrument.news_id == article.id)
+                        .all()
+                    )
 
                     for instrument in linked_instruments:
                         from src.db.models import NewsCompanyImpact
@@ -217,13 +215,9 @@ class NewsBatchProcessor:
                     if not sector:
                         continue
 
-                    risk = self.impact_engine.calculate_daily_sector_risk(
-                        sector, db_session
-                    )
+                    risk = self.impact_engine.calculate_daily_sector_risk(sector, db_session)
                     if risk["article_count"] > 0:
-                        self.impact_engine.store_daily_sector_risk(
-                            sector, risk, db_session
-                        )
+                        self.impact_engine.store_daily_sector_risk(sector, risk, db_session)
 
                 db_session.commit()
 
@@ -247,9 +241,7 @@ class NewsBatchProcessor:
                 instruments = db_session.query(Instrument).limit(100).all()
 
                 for instrument in instruments:
-                    company_risk = self.company_aggregator.calculate_company_risk(
-                        instrument, db_session
-                    )
+                    company_risk = self.company_aggregator.calculate_company_risk(instrument, db_session)
                     self.company_aggregator.store_company_risk(company_risk, db_session)
 
                 db_session.commit()
@@ -302,9 +294,7 @@ class NewsBatchProcessor:
             # Update company risks for top instruments
             top_instruments = db_session.query(Instrument).limit(200).all()
             for instrument in top_instruments:
-                company_risk = self.company_aggregator.calculate_company_risk(
-                    instrument, db_session
-                )
+                company_risk = self.company_aggregator.calculate_company_risk(instrument, db_session)
                 if self.company_aggregator.store_company_risk(company_risk, db_session):
                     stats["company_risks_updated"] += 1
 
@@ -333,26 +323,31 @@ class NewsBatchProcessor:
 
         # Count news by category
         categories = {}
-        news_by_cat = db_session.query(
-            News.category,
-            func.count(News.id).label("count"),
-        ).filter(
-            News.created_at >= last_week
-        ).group_by(News.category).all()
+        news_by_cat = (
+            db_session.query(
+                News.category,
+                func.count(News.id).label("count"),
+            )
+            .filter(News.created_at >= last_week)
+            .group_by(News.category)
+            .all()
+        )
 
         for cat, count in news_by_cat:
             categories[cat] = count
 
         # Event stats
-        events_last_week = db_session.query(NewsEvent).filter(
-            NewsEvent.created_at >= last_week
-        ).count()
+        events_last_week = db_session.query(NewsEvent).filter(NewsEvent.created_at >= last_week).count()
 
         # Sector risk stats
-        high_risk_sectors = db_session.query(SectorRiskHistory).filter(
-            SectorRiskHistory.date == today,
-            SectorRiskHistory.risk_score > 6,
-        ).count()
+        high_risk_sectors = (
+            db_session.query(SectorRiskHistory)
+            .filter(
+                SectorRiskHistory.date == today,
+                SectorRiskHistory.risk_score > 6,
+            )
+            .count()
+        )
 
         return {
             "date": today.isoformat(),

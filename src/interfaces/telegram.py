@@ -113,9 +113,6 @@ DETAILED_KEYWORDS = {
 TICKER, QUANTITY, PRICE = range(3)
 
 
-
-
-
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update):
         return
@@ -289,9 +286,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ntype = args[0] if args else "signal"
     valid_types = frozenset({"signal", "daily", "geo", "dividend", "trade"})
     if ntype not in valid_types:
-        await update.effective_message.reply_text(
-            f"Неизвестный тип: {html_escape(ntype)}. Допустимые: {', '.join(sorted(valid_types))}"
-        )
+        await update.effective_message.reply_text(f"Неизвестный тип: {html_escape(ntype)}. Допустимые: {', '.join(sorted(valid_types))}")
         return
 
     ns = NotificationService()
@@ -315,9 +310,7 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if ntype is not None:
         valid_types = frozenset({"signal", "daily", "geo", "dividend", "trade"})
         if ntype not in valid_types:
-            await update.effective_message.reply_text(
-                f"Неизвестный тип: {html_escape(ntype)}. Допустимые: {', '.join(sorted(valid_types))}"
-            )
+            await update.effective_message.reply_text(f"Неизвестный тип: {html_escape(ntype)}. Допустимые: {', '.join(sorted(valid_types))}")
             return
     ns = NotificationService()
     try:
@@ -383,9 +376,7 @@ async def my_authors(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     authors = ns.get_user_subscribed_authors(uid)
     if not authors:
         await update.effective_message.reply_text(
-            "У вас нет подписок на авторов.\n"
-            "Используйте /subscribe_author @name чтобы подписаться.\n"
-            "Список доступных авторов: /pulse"
+            "У вас нет подписок на авторов.\nИспользуйте /subscribe_author @name чтобы подписаться.\nСписок доступных авторов: /pulse"
         )
         return
     lines = ["👥 <b>Ваши авторы:</b>\n"]
@@ -410,9 +401,7 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             except Exception:
                 await update.effective_message.reply_text(text)
         else:
-            await update.effective_message.reply_text(
-                "Ежедневный отчёт ещё не сформирован. Он появляется после 23:50 МСК."
-            )
+            await update.effective_message.reply_text("Ежедневный отчёт ещё не сформирован. Он появляется после 23:50 МСК.")
     finally:
         db.close()
 
@@ -535,9 +524,7 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not inst:
             await update.effective_message.reply_text(f"{ticker} не найден")
             return
-        signals = (
-            db.query(SignalModel).filter_by(instrument_id=inst.id).order_by(SignalModel.date.desc()).limit(60).all()
-        )
+        signals = db.query(SignalModel).filter_by(instrument_id=inst.id).order_by(SignalModel.date.desc()).limit(60).all()
         if not signals:
             await update.effective_message.reply_text(f"Нет истории сигналов для {ticker}")
             return
@@ -640,9 +627,7 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(text, reply_markup=build_top_keyboard(), parse_mode="HTML")
     except Exception:
         logger.warning("Top command error", exc_info=True)
-        await update.effective_message.reply_text(
-            "\u274c Не удалось загрузить топ. Убедитесь, что запущен `finn update`."
-        )
+        await update.effective_message.reply_text("\u274c Не удалось загрузить топ. Убедитесь, что запущен `finn update`.")
 
 
 @guard(with_cooldown=True)
@@ -1036,9 +1021,7 @@ async def _ask_llm_general(update: Update, text: str, ticker_context: str = "") 
     except Exception:
         logger.warning("LLM error", exc_info=True)
         await msg.edit_text(
-            "Не смог ответить на вопрос. Попробуйте:\n"
-            "• /analyze SBER — анализ конкретной акции\n"
-            "• /allocate 50000 — куда вложить деньги"
+            "Не смог ответить на вопрос. Попробуйте:\n• /analyze SBER — анализ конкретной акции\n• /allocate 50000 — куда вложить деньги"
         )
 
 
@@ -1115,9 +1098,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 pnl_line = "   P&L: ~0 ₽"
 
             lines.append(
-                f"{emoji} <b>{html_escape(r['ticker'])}</b>: {qty:.0f} шт × {cur:.2f} ₽\n"
-                f"   Средняя: {avg:.2f} | Стоимость: {val:,.0f} ₽\n"
-                f"{pnl_line}"
+                f"{emoji} <b>{html_escape(r['ticker'])}</b>: {qty:.0f} шт × {cur:.2f} ₽\n   Средняя: {avg:.2f} | Стоимость: {val:,.0f} ₽\n{pnl_line}"
             )
             total_value += val
             total_cost += cost
@@ -1127,11 +1108,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         total_emoji = "🟢" if total_pnl > 0.5 else ("🔴" if total_pnl < -0.5 else "⚪")
         total_pnl_str = "" if abs(total_pnl) < 0.5 else f"{total_pnl:+,.2f}"
         total_pnl_pct_str = "" if abs(total_pnl_pct) < 0.01 else f"{total_pnl_pct:+.2f}%"
-        pnl_suffix = (
-            f" | P&L: {total_pnl_str} ₽ ({total_pnl_pct_str})"
-            if total_pnl_str and total_pnl_pct_str
-            else " | P&L: ~0 ₽"
-        )
+        pnl_suffix = f" | P&L: {total_pnl_str} ₽ ({total_pnl_pct_str})" if total_pnl_str and total_pnl_pct_str else " | P&L: ~0 ₽"
         lines.append(f"\n{total_emoji} <b>Итого:</b> {total_value:,.0f} ₽{pnl_suffix}")
         await msg.edit_text("\n".join(lines), parse_mode="HTML")
     finally:
@@ -1145,9 +1122,7 @@ async def _save_position(update: Update, ticker: str, qty: float, avg_price: flo
     try:
         inst = db.query(Instrument).filter_by(ticker=ticker).first()
         if not inst:
-            await update.effective_message.reply_text(
-                f"Инструмент {ticker} не найден в базе. Запустите `finn update {ticker}`."
-            )
+            await update.effective_message.reply_text(f"Инструмент {ticker} не найден в базе. Запустите `finn update {ticker}`.")
             return
         if avg_price is None:
             price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
@@ -1158,13 +1133,9 @@ async def _save_position(update: Update, ticker: str, qty: float, avg_price: flo
             existing.quantity += qty  # type: ignore[assignment]
             if existing.avg_price and avg_price:
                 total_qty = existing.quantity
-                existing.avg_price = float(
-                    (float(existing.avg_price) * (total_qty - qty) + avg_price * qty) / total_qty
-                )  # type: ignore[assignment]
+                existing.avg_price = float((float(existing.avg_price) * (total_qty - qty) + avg_price * qty) / total_qty)  # type: ignore[assignment]
             db.commit()
-            await update.effective_message.reply_text(
-                f"✅ {ticker}: добавлено {qty} шт. (всего {existing.quantity:.1f} шт.)"
-            )
+            await update.effective_message.reply_text(f"✅ {ticker}: добавлено {qty} шт. (всего {existing.quantity:.1f} шт.)")
         else:
             pos = PortModel(instrument_id=inst.id, quantity=qty, avg_price=avg_price)
             db.add(pos)
@@ -1215,9 +1186,7 @@ async def add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         qty = float(update.effective_message.text.strip().replace(",", "."))
         context.user_data["add_qty"] = qty
     except ValueError:
-        await update.effective_message.reply_text(
-            "Количество должно быть числом. Попробуйте ещё раз:", parse_mode="HTML"
-        )
+        await update.effective_message.reply_text("Количество должно быть числом. Попробуйте ещё раз:", parse_mode="HTML")
         return QUANTITY
     await update.effective_message.reply_text(
         "Введите <b>среднюю цену</b> (или отправьте <code>-</code> для автоматической):",
@@ -1236,9 +1205,7 @@ async def add_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         try:
             avg_price = float(text.replace(",", "."))
         except ValueError:
-            await update.effective_message.reply_text(
-                "Цена должна быть числом или <code>-</code>. Попробуйте ещё раз:", parse_mode="HTML"
-            )
+            await update.effective_message.reply_text("Цена должна быть числом или <code>-</code>. Попробуйте ещё раз:", parse_mode="HTML")
             return PRICE
 
     ticker = context.user_data.get("add_ticker", "")
@@ -1285,9 +1252,7 @@ async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if qty and qty < existing.quantity:
             existing.quantity -= qty  # type: ignore[assignment]
             db.commit()
-            await update.effective_message.reply_text(
-                f"✅ {ticker}: продано {qty} шт. (осталось {existing.quantity:.1f} шт.)"
-            )
+            await update.effective_message.reply_text(f"✅ {ticker}: продано {qty} шт. (осталось {existing.quantity:.1f} шт.)")
         else:
             db.delete(existing)
             db.commit()
@@ -1335,9 +1300,7 @@ async def pulse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         social_sources: dict[str, Any] = cast(dict[str, Any], _personal.get("social_sources", {}))
         pulse_config: dict[str, Any] = cast(dict[str, Any], social_sources.get("pulse", {}))
         authors: list[Any] = cast(list[Any], pulse_config.get("authors", []))
-        await update.effective_message.reply_text(
-            "Отслеживаемые авторы Пульса:\n" + "\n".join(f"  @{a}" for a in authors)
-        )
+        await update.effective_message.reply_text("Отслеживаемые авторы Пульса:\n" + "\n".join(f"  @{a}" for a in authors))
         return
 
     from src.social.registry import registry
@@ -1390,9 +1353,7 @@ async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 if score.score > 3
                 else "\U0001f7e2 НИЗКИЙ"
             )
-            await update.effective_message.reply_text(
-                f"\U0001f30d Геополитический риск: {score.score}/10 ({level})\nДата: {score.date}"
-            )
+            await update.effective_message.reply_text(f"\U0001f30d Геополитический риск: {score.score}/10 ({level})\nДата: {score.date}")
         else:
             await update.effective_message.reply_text("Нет данных. Запустите daily update.")
     finally:
@@ -1686,9 +1647,7 @@ async def channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         elif args[0] == "set":
             if len(args) < 3:
-                await update.effective_message.reply_text(
-                    "Использование: /channel set <telegram|email|web> <on|off>"
-                )
+                await update.effective_message.reply_text("Использование: /channel set <telegram|email|web> <on|off>")
                 return
             ch = args[1].lower()
             if ch not in ALL_CHANNELS:
@@ -1701,9 +1660,7 @@ async def channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         elif args[0] == "severity":
             if len(args) < 3:
-                await update.effective_message.reply_text(
-                    "Использование: /channel severity <telegram|email|web> <LOW|MEDIUM|HIGH|CRITICAL>"
-                )
+                await update.effective_message.reply_text("Использование: /channel severity <telegram|email|web> <LOW|MEDIUM|HIGH|CRITICAL>")
                 return
             ch = args[1].lower()
             if ch not in ALL_CHANNELS:
@@ -1720,9 +1677,7 @@ async def channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
 
         else:
-            await update.effective_message.reply_text(
-                "Команды: /channel status, /channel set <канал> <on|off>, /channel severity <канал> <уровень>"
-            )
+            await update.effective_message.reply_text("Команды: /channel status, /channel set <канал> <on|off>, /channel severity <канал> <уровень>")
     except Exception:
         logger.exception("channel_cmd_failed", user_id=uid)
         await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
@@ -1743,6 +1698,7 @@ async def mute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db = get_session()
     try:
         from src.alerts.preferences import UserAlertPreferences
+
         prefs = UserAlertPreferences()
         ok = prefs.mute_ticker(uid, ticker, db_session=db)
         if ok:
@@ -1769,6 +1725,7 @@ async def unmute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     db = get_session()
     try:
         from src.alerts.preferences import UserAlertPreferences
+
         prefs = UserAlertPreferences()
         ok = prefs.unmute_ticker(uid, ticker, db_session=db)
         if ok:
@@ -1790,6 +1747,7 @@ async def muted_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db = get_session()
     try:
         from src.alerts.preferences import UserAlertPreferences
+
         prefs = UserAlertPreferences()
         tickers = prefs.get_muted_tickers(uid, db_session=db)
         if tickers:
@@ -1815,6 +1773,7 @@ async def quiet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db = get_session()
         try:
             from src.alerts.preferences import UserAlertPreferences
+
             prefs_mgr = UserAlertPreferences()
             prefs = prefs_mgr.get_preferences(uid, db_session=db)
             sh = prefs.get("quiet_hours_start")
@@ -1837,6 +1796,7 @@ async def quiet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db = get_session()
         try:
             from src.alerts.preferences import UserAlertPreferences
+
             prefs_mgr = UserAlertPreferences()
             prefs_mgr.set_preferences(uid, db_session=db, quiet_hours_start=None, quiet_hours_end=None)
             await update.effective_message.reply_text("🌙 Тихие часы отключены")
@@ -1853,6 +1813,7 @@ async def quiet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db = get_session()
         try:
             from src.alerts.preferences import UserAlertPreferences
+
             prefs_mgr = UserAlertPreferences()
             prefs_mgr.set_preferences(uid, db_session=db, quiet_hours_start=start, quiet_hours_end=end)
             await update.effective_message.reply_text(
@@ -1867,9 +1828,7 @@ async def quiet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     await update.effective_message.reply_text(
-        "Использование: /quiet <HH:MM> <HH:MM> — установить тихие часы\n"
-        "/quiet off — отключить\n"
-        "/quiet — показать текущие"
+        "Использование: /quiet <HH:MM> <HH:MM> — установить тихие часы\n/quiet off — отключить\n/quiet — показать текущие"
     )
 
 
@@ -1906,10 +1865,7 @@ async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if args[0] == "add":
             if len(args) < 4:
-                await update.effective_message.reply_text(
-                    "Использование: /price add TICKER > 250 [название]\n"
-                    "Например: /price add SBER > 300"
-                )
+                await update.effective_message.reply_text("Использование: /price add TICKER > 250 [название]\nНапример: /price add SBER > 300")
                 return
             ticker = args[1].upper()
             condition = "gt" if args[2] == ">" else "lt" if args[2] == "<" else "gte" if args[2] == ">=" else "lte" if args[2] == "<=" else "eq"
@@ -1934,8 +1890,13 @@ async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 await update.effective_message.reply_text(f"ℹ️ Такой price-алерт уже существует (id={existing.id})")
                 return
             rule = SmartAlertRule(
-                user_id=uid, name=name, rule_type="price",
-                ticker=ticker, condition=condition, threshold=threshold, enabled=True,
+                user_id=uid,
+                name=name,
+                rule_type="price",
+                ticker=ticker,
+                condition=condition,
+                threshold=threshold,
+                enabled=True,
             )
             db.add(rule)
             db.commit()
@@ -2060,10 +2021,7 @@ async def favorite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         elif subcmd == "list":
             favs = db.query(FavoriteModel).filter_by(user_id=uid).order_by(FavoriteModel.created_at).all()
             if not favs:
-                await update.effective_message.reply_text(
-                    "У вас нет избранных инструментов.\n"
-                    "Добавьте через /favorite add TICKER"
-                )
+                await update.effective_message.reply_text("У вас нет избранных инструментов.\nДобавьте через /favorite add TICKER")
                 return
             lines = ["⭐ <b>Избранное:</b>\n"]
             for f in favs:
@@ -2116,10 +2074,7 @@ async def alloc_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await update.effective_message.reply_text("Введите число, например 100000:")
         return ALLOC_AMOUNT
 
-    await update.effective_message.reply_text(
-        "Какие тикеры исключить? (через пробел, или отправьте «-» чтобы продолжить)\n"
-        "Например: GAZP SBER"
-    )
+    await update.effective_message.reply_text("Какие тикеры исключить? (через пробел, или отправьте «-» чтобы продолжить)\nНапример: GAZP SBER")
     return ALLOC_EXCLUDE
 
 
@@ -2263,18 +2218,47 @@ async def run_bot() -> None:
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    app.add_handler(MessageHandler(filters.Text([
-        "🔍 Анализ", "📊 Портфель", "🏆 Топ",
-        "📰 Новости", "📋 Сводка", "🏭 Сектора",
-        "💰 Аллокация", "🧪 Стресс-тест", "🔄 Корреляция",
-        "➕ Добавить", "➖ Удалить", "📜 История",
-        "📤 Экспорт CSV", "⏪ Бэктест", "⚙️ Профиль",
-        "📊 P&L", "📄 Отчёт", "💱 Курсы",
-        "👥 Авторы", "📰 Соц.сен.", "🌍 Гео-риск",
-        "🔮 What-If", "📡 Статус", "🔔 Подписки",
-        "🏠 /start", "🌙 Ночн.режим", "❓ Помощь",
-        "◀️", "▶️", "🔢 1/3", "🔢 2/3", "🔢 3/3",
-    ]), reply_keyboard_handler))
+    app.add_handler(
+        MessageHandler(
+            filters.Text(
+                [
+                    "🔍 Анализ",
+                    "📊 Портфель",
+                    "🏆 Топ",
+                    "📰 Новости",
+                    "📋 Сводка",
+                    "🏭 Сектора",
+                    "💰 Аллокация",
+                    "🧪 Стресс-тест",
+                    "🔄 Корреляция",
+                    "➕ Добавить",
+                    "➖ Удалить",
+                    "📜 История",
+                    "📤 Экспорт CSV",
+                    "⏪ Бэктест",
+                    "⚙️ Профиль",
+                    "📊 P&L",
+                    "📄 Отчёт",
+                    "💱 Курсы",
+                    "👥 Авторы",
+                    "📰 Соц.сен.",
+                    "🌍 Гео-риск",
+                    "🔮 What-If",
+                    "📡 Статус",
+                    "🔔 Подписки",
+                    "🏠 /start",
+                    "🌙 Ночн.режим",
+                    "❓ Помощь",
+                    "◀️",
+                    "▶️",
+                    "🔢 1/3",
+                    "🔢 2/3",
+                    "🔢 3/3",
+                ]
+            ),
+            reply_keyboard_handler,
+        )
+    )
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 
     await app.initialize()
@@ -2304,9 +2288,7 @@ async def run_bot() -> None:
         except NetworkError as e:
             poll_attempt += 1
             delay = min(polling_retry_delay * (2 ** (poll_attempt - 1)), 300)
-            logger.warning(
-                "Telegram polling connection failed (attempt %d): %s — retrying in %ds", poll_attempt, e, delay
-            )
+            logger.warning("Telegram polling connection failed (attempt %d): %s — retrying in %ds", poll_attempt, e, delay)
             await asyncio.sleep(delay)
 
     retry_count = 0

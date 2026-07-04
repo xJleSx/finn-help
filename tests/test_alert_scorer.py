@@ -51,8 +51,11 @@ class TestClassifyPriority:
 class TestBuildAlert:
     def test_full_alert_structure(self):
         article = News(
-            id=1, title="Test article", category="COMPANY",
-            subcategory="earnings", source_name="Interfax",
+            id=1,
+            title="Test article",
+            category="COMPANY",
+            subcategory="earnings",
+            source_name="Interfax",
             published_at=datetime.now(timezone.utc),
         )
         anomaly = {"anomaly_score": 0.5, "is_anomaly": True, "details": {}}

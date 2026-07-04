@@ -257,14 +257,16 @@ def update_order_status(order_id: int, status: str, **kwargs: object) -> None:
                 old_status=old_status,
                 new_status=status,
             )
-            audit_log_order({
-                "event": "order_status_changed",
-                "order_id": order_id,
-                "ticker": o.ticker,
-                "old_status": old_status,
-                "new_status": status,
-                "changes": {k: str(v) for k, v in kwargs.items()},
-            })
+            audit_log_order(
+                {
+                    "event": "order_status_changed",
+                    "order_id": order_id,
+                    "ticker": o.ticker,
+                    "old_status": old_status,
+                    "new_status": status,
+                    "changes": {k: str(v) for k, v in kwargs.items()},
+                }
+            )
     except Exception as e:
         db.rollback()
         logger.error("order_update_failed", order_id=order_id, error=str(e))

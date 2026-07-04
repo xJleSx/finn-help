@@ -29,16 +29,31 @@ class TestNewsSummarizerIntegration:
 
         now = datetime.now(timezone.utc)
         news1 = News(
-            title="First", category="macro", subcategory="rates",
-            published_at=now, is_relevant=True, url="http://a.com/1", source_type="rss",
+            title="First",
+            category="macro",
+            subcategory="rates",
+            published_at=now,
+            is_relevant=True,
+            url="http://a.com/1",
+            source_type="rss",
         )
         news2 = News(
-            title="Second", category="macro", subcategory="rates",
-            published_at=now, is_relevant=True, url="http://a.com/2", source_type="rss",
+            title="Second",
+            category="macro",
+            subcategory="rates",
+            published_at=now,
+            is_relevant=True,
+            url="http://a.com/2",
+            source_type="rss",
         )
         news3 = News(
-            title="Third", category="commodity", subcategory="oil",
-            published_at=now, is_relevant=True, url="http://a.com/3", source_type="rss",
+            title="Third",
+            category="commodity",
+            subcategory="oil",
+            published_at=now,
+            is_relevant=True,
+            url="http://a.com/3",
+            source_type="rss",
         )
         db_session.add_all([news1, news2, news3])
         db_session.flush()
@@ -57,8 +72,13 @@ class TestNewsSummarizerIntegration:
 
     def test_fallback_summary(self, db_session):
         news = News(
-            title="Test", category="macro", published_at=datetime.now(timezone.utc),
-            is_relevant=True, url="http://a.com/4", source_type="rss", sentiment="positive",
+            title="Test",
+            category="macro",
+            published_at=datetime.now(timezone.utc),
+            is_relevant=True,
+            url="http://a.com/4",
+            source_type="rss",
+            sentiment="positive",
         )
         db_session.add(news)
         db_session.commit()
@@ -73,8 +93,12 @@ class TestNewsSummarizerIntegration:
 
     def test_generate_daily_digest_no_llm(self, db_session):
         news = News(
-            title="Digest test", category="macro", published_at=datetime.now(timezone.utc),
-            is_relevant=True, url="http://a.com/5", source_type="rss",
+            title="Digest test",
+            category="macro",
+            published_at=datetime.now(timezone.utc),
+            is_relevant=True,
+            url="http://a.com/5",
+            source_type="rss",
         )
         db_session.add(news)
         db_session.commit()

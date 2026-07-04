@@ -30,8 +30,7 @@ class AltDataSource(ABC):
     name: str
 
     @abstractmethod
-    async def fetch(self) -> dict[str, Any]:
-        ...
+    async def fetch(self) -> dict[str, Any]: ...
 
 
 class CBRSource(AltDataSource):
@@ -73,11 +72,13 @@ class CBRSource(AltDataSource):
                 logger.warning("Failed to parse CBR rate for %s: %s", code, raw)
                 continue
 
-            rates.append({
-                "indicator_name": f"cbr_{code}/RUB",
-                "value": rate,
-                "date": today,
-            })
+            rates.append(
+                {
+                    "indicator_name": f"cbr_{code}/RUB",
+                    "value": rate,
+                    "date": today,
+                }
+            )
 
         return {"rates": rates}
 
@@ -107,19 +108,19 @@ class RosstatSource(AltDataSource):
             try:
                 value = await self._fetch_indicator(client, key, label)
                 if value is not None:
-                    indicators.append({
-                        "indicator_name": f"rosstat_{key}",
-                        "value": value,
-                        "date": today,
-                    })
+                    indicators.append(
+                        {
+                            "indicator_name": f"rosstat_{key}",
+                            "value": value,
+                            "date": today,
+                        }
+                    )
             except Exception as e:
                 logger.warning("RosstatSource failed for %s: %s", key, e)
 
         return {"indicators": indicators}
 
-    async def _fetch_indicator(
-        self, client: httpx.AsyncClient, key: str, label: str
-    ) -> float | None:
+    async def _fetch_indicator(self, client: httpx.AsyncClient, key: str, label: str) -> float | None:
         url = _build_rosstat_url(key)
         try:
             resp = await client.get(url)
@@ -181,10 +182,7 @@ class GoogleTrendsSource(AltDataSource):
             self._pytrends = TrendReq(hl="ru-RU", tz=180)
             self._trends_available = True
         except ImportError:
-            logger.warning(
-                "pytrends not installed — GoogleTrendsSource will return empty data. "
-                "Install with: pip install pytrends"
-            )
+            logger.warning("pytrends not installed — GoogleTrendsSource will return empty data. Install with: pip install pytrends")
         except Exception as e:
             logger.warning("Failed to init pytrends: %s", e)
 
@@ -209,11 +207,13 @@ class GoogleTrendsSource(AltDataSource):
                 for kw in keywords[:3]:
                     if kw in df.columns:
                         avg = float(df[kw].mean())
-                        results.append({
-                            "indicator_name": f"trends_{kw}",
-                            "value": avg,
-                            "date": today,
-                        })
+                        results.append(
+                            {
+                                "indicator_name": f"trends_{kw}",
+                                "value": avg,
+                                "date": today,
+                            }
+                        )
         except Exception as e:
             logger.warning("GoogleTrendsSource fetch failed: %s", e)
 

@@ -21,9 +21,7 @@ class AuthService:
         filters = [User.username == username]
         if email is not None:
             filters.append(User.email == email)
-        result = await self.db.execute(
-            select(User).where(or_(*filters))
-        )
+        result = await self.db.execute(select(User).where(or_(*filters)))
         if result.scalar_one_or_none():
             raise HTTPException(400, "Username or email already taken")
         user = User(
@@ -37,7 +35,13 @@ class AuthService:
         await self.db.refresh(user)
         token = create_token(int(user.id), str(user.username))
         refresh_token = create_refresh_token(int(user.id), str(user.username))
-        return {"access_token": token, "refresh_token": refresh_token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
+        return {
+            "access_token": token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user_id": int(user.id),
+            "username": str(user.username),
+        }
 
     async def login(self, username: str, password: str) -> dict[str, Any]:
         result = await self.db.execute(select(User).where(User.username == username))
@@ -46,7 +50,13 @@ class AuthService:
             raise HTTPException(401, "Invalid credentials")
         token = create_token(int(user.id), str(user.username))
         refresh_token = create_refresh_token(int(user.id), str(user.username))
-        return {"access_token": token, "refresh_token": refresh_token, "token_type": "bearer", "user_id": int(user.id), "username": str(user.username)}
+        return {
+            "access_token": token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user_id": int(user.id),
+            "username": str(user.username),
+        }
 
     async def get_me(self, user: User) -> dict[str, Any]:
         return {

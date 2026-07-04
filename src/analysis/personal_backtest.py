@@ -102,13 +102,7 @@ class PersonalBacktestResult:
 
 
 def _prices_for_ticker(db: Any, ticker: str, start: date, end: date) -> list[dict[str, Any]]:
-    rows = (
-        db.query(Price)
-        .join(Instrument)
-        .filter(Instrument.ticker == ticker, Price.date >= start, Price.date <= end)
-        .order_by(Price.date)
-        .all()
-    )
+    rows = db.query(Price).join(Instrument).filter(Instrument.ticker == ticker, Price.date >= start, Price.date <= end).order_by(Price.date).all()
     return [{"date": r.date, "close": r.close} for r in rows if r.close]
 
 
@@ -263,10 +257,7 @@ def run_personal_backtest(
             equity.append(port_val)
             bench_equity.append(bench_equity[i - 1] * (1 + bench_ret))
 
-        equity_curve = [
-            {"date": portfolio_dates[i].isoformat(), "portfolio": equity[i], "benchmark": bench_equity[i]}
-            for i in range(min_len)
-        ]
+        equity_curve = [{"date": portfolio_dates[i].isoformat(), "portfolio": equity[i], "benchmark": bench_equity[i]} for i in range(min_len)]
 
         port_returns = _returns(equity)
 

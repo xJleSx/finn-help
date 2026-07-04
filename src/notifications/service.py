@@ -138,11 +138,7 @@ class NotificationService:
     def subscribe_author(self, user_id: int, chat_id: int, author_nick: str) -> None:
         db = self._get_sync_db()
         try:
-            existing = (
-                db.query(AuthorSubscription)
-                .filter_by(user_id=user_id, author_nick=author_nick)
-                .first()
-            )
+            existing = db.query(AuthorSubscription).filter_by(user_id=user_id, author_nick=author_nick).first()
             if existing:
                 return
             sub = AuthorSubscription(user_id=user_id, chat_id=chat_id, author_nick=author_nick)
@@ -157,11 +153,7 @@ class NotificationService:
     def unsubscribe_author(self, user_id: int, author_nick: str) -> None:
         db = self._get_sync_db()
         try:
-            sub = (
-                db.query(AuthorSubscription)
-                .filter_by(user_id=user_id, author_nick=author_nick)
-                .first()
-            )
+            sub = db.query(AuthorSubscription).filter_by(user_id=user_id, author_nick=author_nick).first()
             if sub:
                 db.delete(sub)
                 db.commit()
@@ -174,11 +166,7 @@ class NotificationService:
     def get_author_subscribers(self, author_nick: str) -> list[tuple[int, int]]:
         db = self._get_sync_db()
         try:
-            results = (
-                db.query(AuthorSubscription.user_id, AuthorSubscription.chat_id)
-                .filter_by(author_nick=author_nick)
-                .all()
-            )
+            results = db.query(AuthorSubscription.user_id, AuthorSubscription.chat_id).filter_by(author_nick=author_nick).all()
             return [(r.user_id, r.chat_id) for r in results]
         finally:
             db.close()
@@ -186,20 +174,14 @@ class NotificationService:
     def get_user_subscribed_authors(self, user_id: int) -> list[str]:
         db = self._get_sync_db()
         try:
-            results = (
-                db.query(AuthorSubscription.author_nick)
-                .filter_by(user_id=user_id)
-                .all()
-            )
+            results = db.query(AuthorSubscription.author_nick).filter_by(user_id=user_id).all()
             return [r.author_nick for r in results]
         finally:
             db.close()
 
     # --- Notification persistence ---
 
-    def save_notification(
-        self, user_id: int, notif_type: str, message: str, title: str | None = None, data: dict[str, Any] | None = None
-    ) -> None:
+    def save_notification(self, user_id: int, notif_type: str, message: str, title: str | None = None, data: dict[str, Any] | None = None) -> None:
         db = self._get_sync_db()
         try:
             n = Notification(
@@ -261,9 +243,7 @@ class NotificationService:
         db = self._get_sync_db()
         try:
             daily = date.today()
-            recent = (
-                db.query(SignalModel).filter(SignalModel.date >= daily).order_by(SignalModel.confidence.desc()).all()
-            )
+            recent = db.query(SignalModel).filter(SignalModel.date >= daily).order_by(SignalModel.confidence.desc()).all()
 
             changes = []
             for s in recent:
@@ -307,12 +287,7 @@ class NotificationService:
             if not today_score:
                 return None
 
-            prev = (
-                db.query(GeoRiskScore)
-                .filter(GeoRiskScore.date < today_score.date)
-                .order_by(GeoRiskScore.date.desc())
-                .first()
-            )
+            prev = db.query(GeoRiskScore).filter(GeoRiskScore.date < today_score.date).order_by(GeoRiskScore.date.desc()).first()
             return GeoRiskNotification(
                 score=float(today_score.score),
                 level=_geo_level(float(today_score.score)),
@@ -330,9 +305,7 @@ class NotificationService:
         db = self._get_sync_db()
         try:
             cutoff = date.today() + timedelta(days=days_ahead)
-            upcoming = (
-                db.query(Dividend).filter(Dividend.date.between(date.today(), cutoff)).order_by(Dividend.date).all()
-            )
+            upcoming = db.query(Dividend).filter(Dividend.date.between(date.today(), cutoff)).order_by(Dividend.date).all()
             result = []
             for d in upcoming:
                 inst = db.query(Instrument).filter_by(id=d.instrument_id).first()
@@ -434,9 +407,7 @@ class NotificationService:
             db.close()
         return alerts
 
-    def check_divergence(
-        self, ticker: str, prices: list[float], rsi_values: list[float], macd_values: list[float]
-    ) -> list[DivergenceAlert]:
+    def check_divergence(self, ticker: str, prices: list[float], rsi_values: list[float], macd_values: list[float]) -> list[DivergenceAlert]:
 
         alerts: list[DivergenceAlert] = []
         if len(prices) < 20 or len(rsi_values) < 20 or len(macd_values) < 10:

@@ -37,9 +37,7 @@ async def _ns_get_daily_summary(ns: NotificationService) -> Any:
     return await asyncio.to_thread(ns.get_daily_summary)
 
 
-async def _ns_save_notification(
-    ns: NotificationService, uid: int, notify_type: str, text: str, title: str = ""
-) -> None:
+async def _ns_save_notification(ns: NotificationService, uid: int, notify_type: str, text: str, title: str = "") -> None:
     await asyncio.to_thread(ns.save_notification, uid, notify_type, text, title)
 
 
@@ -176,7 +174,7 @@ async def broadcast_author_posts() -> None:
         cfg_authors = getattr(settings, "pulse_authors", None)
         pulse = PulseAdapter(authors=cfg_authors or [])
         try:
-            for nick in (cfg_authors or []):
+            for nick in cfg_authors or []:
                 subscribers = ns.get_author_subscribers(nick)
                 if not subscribers:
                     continue
@@ -187,10 +185,7 @@ async def broadcast_author_posts() -> None:
                     continue
                 for uid, cid in subscribers:
                     for post in posts[:3]:
-                        text = (
-                            f"👤 <b>@{html_escape(nick)}</b>\n"
-                            f"{html_escape(post.text[:300])}"
-                        )
+                        text = f"👤 <b>@{html_escape(nick)}</b>\n{html_escape(post.text[:300])}"
                         try:
                             await app.bot.send_message(chat_id=uid, text=text, parse_mode="HTML")
                         except Exception as e:
@@ -208,13 +203,7 @@ async def broadcast_today_signals() -> None:
 
     db = get_session()
     try:
-        signals = (
-            db.query(SignalModel)
-            .filter(func.date(SignalModel.date) == date.today())
-            .order_by(SignalModel.confidence.desc())
-            .limit(20)
-            .all()
-        )
+        signals = db.query(SignalModel).filter(func.date(SignalModel.date) == date.today()).order_by(SignalModel.confidence.desc()).limit(20).all()
         if not signals:
             return
 

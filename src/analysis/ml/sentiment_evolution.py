@@ -20,10 +20,17 @@ class SentimentEvolutionModel(BaseRegressor):
         super().__init__(ticker)
         self._models: dict[int, Any] = {}
         self._feature_names = [
-            "sentiment_mean", "sentiment_std", "article_count",
-            "positive_ratio", "negative_ratio",
-            "sentiment_ma_3d", "sentiment_ma_7d", "sentiment_std_5d",
-            "sentiment_change_1d", "sentiment_change_3d", "sentiment_change_7d",
+            "sentiment_mean",
+            "sentiment_std",
+            "article_count",
+            "positive_ratio",
+            "negative_ratio",
+            "sentiment_ma_3d",
+            "sentiment_ma_7d",
+            "sentiment_std_5d",
+            "sentiment_change_1d",
+            "sentiment_change_3d",
+            "sentiment_change_7d",
         ]
 
     @property
@@ -39,6 +46,7 @@ class SentimentEvolutionModel(BaseRegressor):
 
     def _create_model(self) -> Any:
         import xgboost as xgb
+
         return xgb.XGBRegressor(
             n_estimators=settings.ml_sentiment_n_estimators,
             max_depth=settings.ml_sentiment_max_depth,
@@ -70,23 +78,29 @@ class SentimentEvolutionModel(BaseRegressor):
 
         rows = []
         for a in articles:
-            rows.append({
-                "date": (a.published_at or a.created_at).date(),
-                "sentiment_score": float(a.sentiment_score or 0.0),
-                "sentiment": a.sentiment or "",
-            })
+            rows.append(
+                {
+                    "date": (a.published_at or a.created_at).date(),
+                    "sentiment_score": float(a.sentiment_score or 0.0),
+                    "sentiment": a.sentiment or "",
+                }
+            )
 
         df = pd.DataFrame(rows)
         if df.empty:
             return df
 
-        daily = df.groupby("date").agg(
-            sentiment_mean=("sentiment_score", "mean"),
-            sentiment_std=("sentiment_score", "std"),
-            article_count=("sentiment_score", "count"),
-            positive_ratio=("sentiment", lambda x: float((x == "positive").sum()) / max(len(x), 1)),
-            negative_ratio=("sentiment", lambda x: float((x == "negative").sum()) / max(len(x), 1)),
-        ).reset_index()
+        daily = (
+            df.groupby("date")
+            .agg(
+                sentiment_mean=("sentiment_score", "mean"),
+                sentiment_std=("sentiment_score", "std"),
+                article_count=("sentiment_score", "count"),
+                positive_ratio=("sentiment", lambda x: float((x == "positive").sum()) / max(len(x), 1)),
+                negative_ratio=("sentiment", lambda x: float((x == "negative").sum()) / max(len(x), 1)),
+            )
+            .reset_index()
+        )
         daily = daily.sort_values("date").reset_index(drop=True)
         daily["sentiment_std"] = daily["sentiment_std"].fillna(0.0)
 
@@ -103,7 +117,9 @@ class SentimentEvolutionModel(BaseRegressor):
         return daily
 
     def train(
-        self, db: Any, ticker: Optional[str] = None,
+        self,
+        db: Any,
+        ticker: Optional[str] = None,
     ) -> dict[str, Any]:
         ticker = (ticker or self._ticker).upper()
         df = self._build_training_data(db, ticker)
@@ -147,17 +163,26 @@ class SentimentEvolutionModel(BaseRegressor):
                 metrics["top_features"] = fi[:5]
 
             from src.model_registry import save_model
+
             save_model(model, self._model_name(h), metrics=metrics)
             logger.info(
                 "%s %dd — RMSE=%.4f MAE=%.4f DirAcc=%.2f (n=%d)",
-                ticker, h, rmse, mae, direction_acc, len(y_val),
+                ticker,
+                h,
+                rmse,
+                mae,
+                direction_acc,
+                len(y_val),
             )
             results["horizons"][h] = metrics
 
         return results
 
     def predict(
-        self, db: Any, news_article: Any, horizon_days: int = 3,
+        self,
+        db: Any,
+        news_article: Any,
+        horizon_days: int = 3,
     ) -> dict[str, Any]:
         model = self._models.get(horizon_days)
         if model is None:
@@ -167,11 +192,7 @@ class SentimentEvolutionModel(BaseRegressor):
             except (ValueError, FileNotFoundError):
                 return {"predicted_sentiment": 0.0, "direction": "stable", "confidence": 0.0}
 
-        linked = (
-            db.query(NewsInstrument)
-            .filter(NewsInstrument.news_id == news_article.id)
-            .first()
-        )
+        linked = db.query(NewsInstrument).filter(NewsInstrument.news_id == news_article.id).first()
         if not linked:
             return {"predicted_sentiment": 0.0, "direction": "stable", "confidence": 0.0}
 
@@ -207,7 +228,9 @@ class SentimentEvolutionModel(BaseRegressor):
         }
 
     def evaluate(
-        self, db: Any, ticker: Optional[str] = None,
+        self,
+        db: Any,
+        ticker: Optional[str] = None,
     ) -> dict[str, Any]:
         ticker = (ticker or self._ticker).upper()
         df = self._build_training_data(db, ticker)

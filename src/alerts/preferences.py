@@ -31,9 +31,7 @@ class UserAlertPreferences:
 
         if db_session is not None:
             try:
-                rows = db_session.query(UserSetting).filter(
-                    UserSetting.key.like(f"alert_prefs_{user_id}_%")
-                ).all()
+                rows = db_session.query(UserSetting).filter(UserSetting.key.like(f"alert_prefs_{user_id}_%")).all()
                 for row in rows:
                     key = row.key.replace(f"alert_prefs_{user_id}_", "")
                     if key == "min_severity":
@@ -45,11 +43,7 @@ class UserAlertPreferences:
                     elif key == "quiet_hours_end":
                         prefs["quiet_hours_end"] = row.value
 
-                muted_rows = (
-                    db_session.query(MutedAlert.ticker)
-                    .filter_by(user_id=user_id)
-                    .all()
-                )
+                muted_rows = db_session.query(MutedAlert.ticker).filter_by(user_id=user_id).all()
                 for row in muted_rows:
                     if row.ticker not in prefs["muted_tickers"]:
                         prefs["muted_tickers"].append(row.ticker)
@@ -60,7 +54,10 @@ class UserAlertPreferences:
         return prefs
 
     def set_preferences(
-        self, user_id: int, db_session: Any | None = None, **kwargs: Any,
+        self,
+        user_id: int,
+        db_session: Any | None = None,
+        **kwargs: Any,
     ) -> None:
         if db_session is None:
             logger.warning("set_preferences: no db_session provided")
@@ -85,11 +82,7 @@ class UserAlertPreferences:
         if db_session is None:
             return False
         ticker = ticker.upper()
-        existing = (
-            db_session.query(MutedAlert)
-            .filter_by(user_id=user_id, ticker=ticker, alert_type=None)
-            .first()
-        )
+        existing = db_session.query(MutedAlert).filter_by(user_id=user_id, ticker=ticker, alert_type=None).first()
         if existing:
             return False
         db_session.add(MutedAlert(user_id=user_id, ticker=ticker, alert_type=None))
@@ -101,11 +94,7 @@ class UserAlertPreferences:
         if db_session is None:
             return False
         ticker = ticker.upper()
-        rows = (
-            db_session.query(MutedAlert)
-            .filter_by(user_id=user_id, ticker=ticker)
-            .all()
-        )
+        rows = db_session.query(MutedAlert).filter_by(user_id=user_id, ticker=ticker).all()
         if not rows:
             return False
         for row in rows:
@@ -117,15 +106,13 @@ class UserAlertPreferences:
     def get_muted_tickers(self, user_id: int, db_session: Any | None = None) -> list[str]:
         if db_session is None:
             return []
-        rows = (
-            db_session.query(MutedAlert.ticker)
-            .filter_by(user_id=user_id)
-            .all()
-        )
+        rows = db_session.query(MutedAlert.ticker).filter_by(user_id=user_id).all()
         return list({r.ticker for r in rows})
 
     def filter_alerts(
-        self, alerts: list[dict[str, Any]], preferences: dict[str, Any],
+        self,
+        alerts: list[dict[str, Any]],
+        preferences: dict[str, Any],
     ) -> list[dict[str, Any]]:
         min_severity = preferences.get("min_severity", "LOW")
         muted = set(preferences.get("muted_tickers", []))

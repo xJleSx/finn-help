@@ -8,8 +8,10 @@ from src.db.models import News
 
 
 def build_alert(
-    article: News, ticker: str,
-    anomaly: dict[str, Any], impact: dict[str, Any],
+    article: News,
+    ticker: str,
+    anomaly: dict[str, Any],
+    impact: dict[str, Any],
     in_portfolio: bool,
 ) -> dict[str, Any]:
     anomaly_score = anomaly.get("anomaly_score", 0.0)
@@ -54,7 +56,9 @@ def build_alert(
 
 
 def classify_priority(
-    anomaly_score: float, pred_return: float, in_portfolio: bool,
+    anomaly_score: float,
+    pred_return: float,
+    in_portfolio: bool,
 ) -> tuple[str, str]:
     reasons: list[str] = []
     if anomaly_score >= 0.5:
@@ -66,13 +70,9 @@ def classify_priority(
         reasons.append("in your portfolio")
 
     abs_return = abs(pred_return)
-    if anomaly_score >= settings.alert_critical_threshold or (
-        in_portfolio and abs_return >= 0.02 and anomaly_score >= 0.5
-    ):
+    if anomaly_score >= settings.alert_critical_threshold or (in_portfolio and abs_return >= 0.02 and anomaly_score >= 0.5):
         return "CRITICAL", "; ".join(reasons) if reasons else "high anomaly score"
-    if anomaly_score >= settings.alert_high_threshold or (
-        abs_return >= 0.01 and in_portfolio
-    ):
+    if anomaly_score >= settings.alert_high_threshold or (abs_return >= 0.01 and in_portfolio):
         return "HIGH", "; ".join(reasons) if reasons else "elevated anomaly score"
     if anomaly_score >= settings.alert_medium_threshold or abs_return >= 0.005:
         return "MEDIUM", "; ".join(reasons) if reasons else "moderate signal"

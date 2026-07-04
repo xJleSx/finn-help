@@ -95,7 +95,7 @@ class StatsModelsTrendPredictor(BaseRegressor):
                 )
             fitted = model.fit()
             self._fitted_values = fitted.fittedvalues.values
-            residuals = trend_df["y"].values[:len(self._fitted_values)] - self._fitted_values
+            residuals = trend_df["y"].values[: len(self._fitted_values)] - self._fitted_values
             self._residual_std = float(np.std(residuals)) if len(residuals) > 0 else 0.0
             return fitted
         except Exception as e:
@@ -125,13 +125,15 @@ class StatsModelsTrendPredictor(BaseRegressor):
                 x = np.arange(len(all_dates))
                 log_pred = self._coeffs[0] * x + self._coeffs[1]
                 pred = np.exp(log_pred)
-                result = pd.DataFrame({
-                    "ds": all_dates,
-                    "trend": pred,
-                    "yhat": pred,
-                    "yhat_lower": pred * 0.9,
-                    "yhat_upper": pred * 1.1,
-                })
+                result = pd.DataFrame(
+                    {
+                        "ds": all_dates,
+                        "trend": pred,
+                        "yhat": pred,
+                        "yhat_lower": pred * 0.9,
+                        "yhat_upper": pred * 1.1,
+                    }
+                )
                 return result
 
         return LinearTrendModel(coeffs, trend_df)
@@ -215,12 +217,8 @@ class StatsModelsTrendPredictor(BaseRegressor):
 
         predictions = future_forecast.head(days_ahead)
         target_price = float(predictions["yhat"].iloc[-1])
-        lower_bound = float(
-            predictions["yhat_lower"].iloc[-1] if "yhat_lower" in predictions.columns else target_price * 0.95
-        )
-        upper_bound = float(
-            predictions["yhat_upper"].iloc[-1] if "yhat_upper" in predictions.columns else target_price * 1.05
-        )
+        lower_bound = float(predictions["yhat_lower"].iloc[-1] if "yhat_lower" in predictions.columns else target_price * 0.95)
+        upper_bound = float(predictions["yhat_upper"].iloc[-1] if "yhat_upper" in predictions.columns else target_price * 1.05)
 
         current_price = float(trend_df["y"].iloc[-1])
         if current_price <= 0:
@@ -263,6 +261,7 @@ class StatsModelsTrendPredictor(BaseRegressor):
 
 warnings.warn(
     "ProphetPredictor is deprecated, use StatsModelsTrendPredictor",
-    DeprecationWarning, stacklevel=2,
+    DeprecationWarning,
+    stacklevel=2,
 )
 ProphetPredictor = StatsModelsTrendPredictor

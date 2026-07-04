@@ -178,9 +178,7 @@ def run_combinatorial_purged_cv(
     fold_id = 0
     for test_idxes in test_combos:
         test_start = split_points[test_idxes[0]] if test_idxes[0] < len(split_points) else 0
-        test_end = (
-            split_points[test_idxes[-1] + 1] if test_idxes[-1] + 1 < len(split_points) else n
-        )
+        test_end = split_points[test_idxes[-1] + 1] if test_idxes[-1] + 1 < len(split_points) else n
 
         if test_start < gap:
             test_start = gap

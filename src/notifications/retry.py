@@ -36,12 +36,17 @@ def retry_sync(
                         actual_delay = delay + (random.uniform(0, delay * 0.5) if jitter else 0)
                         logger.warning(
                             "retry_attempt %s/%s failed: %s, retrying in %.1fs",
-                            attempt + 1, max_attempts, e, actual_delay,
+                            attempt + 1,
+                            max_attempts,
+                            e,
+                            actual_delay,
                         )
                         time.sleep(actual_delay)
                         delay *= backoff
             raise last_exc  # type: ignore
+
         return wrapper  # type: ignore
+
     return decorator
 
 
@@ -66,12 +71,17 @@ def retry_async(
                         actual_delay = delay + (random.uniform(0, delay * 0.5) if jitter else 0)
                         logger.warning(
                             "retry_attempt %s/%s failed: %s, retrying in %.1fs",
-                            attempt + 1, max_attempts, e, actual_delay,
+                            attempt + 1,
+                            max_attempts,
+                            e,
+                            actual_delay,
                         )
                         await asyncio.sleep(actual_delay)
                         delay *= backoff
             raise last_exc  # type: ignore
+
         return wrapper  # type: ignore
+
     return decorator
 
 
@@ -138,8 +148,11 @@ class ReceiptManager:
         )
 
     def get_receipts(
-        self, user_id: int | None = None, channel: str | None = None,
-        limit: int = 20, offset: int = 0,
+        self,
+        user_id: int | None = None,
+        channel: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
     ) -> list[NotificationReceipt]:
         query = self._db.query(NotificationReceipt)
         if user_id is not None:

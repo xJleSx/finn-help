@@ -247,8 +247,10 @@ class EnsemblePredictor:
         if self._meta_model is None:
             return True
         from src.config import settings
+
         ttl_hours = getattr(settings, "ml_meta_ttl_hours", 24)
         import time
+
         return (time.time() - self._meta_trained_at) > ttl_hours * 3600
 
     def _train_meta_oof(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> None:
@@ -333,6 +335,7 @@ class EnsemblePredictor:
                 return
 
             import time
+
             self._meta_trained_at = time.time()
             logger.info("OOF meta-learner trained: acc=%.3f, models=%d", val_acc, active_models)
         except Exception as e:

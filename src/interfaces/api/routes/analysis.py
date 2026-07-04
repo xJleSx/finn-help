@@ -50,7 +50,6 @@ async def run_scenario_analysis(
         raise HTTPException(500, f"Scenario analysis failed: {e}")
 
 
-
 def _custom_scenario_sync(ticker: str, shock_pct: float, user_id: int) -> dict[str, Any]:
     db = get_session()
     try:
@@ -100,9 +99,7 @@ async def news_impact_attribution(
         raise HTTPException(404, "News article not found")
 
     ticker_result = await db.execute(
-        select(Instrument.ticker)
-        .join(NewsInstrument, NewsInstrument.instrument_id == Instrument.id)
-        .where(NewsInstrument.news_id == news_id)
+        select(Instrument.ticker).join(NewsInstrument, NewsInstrument.instrument_id == Instrument.id).where(NewsInstrument.news_id == news_id)
     )
     tickers = [r[0] for r in ticker_result.all()]
     if not tickers:
@@ -141,9 +138,7 @@ def _get_alerts_sync(user_id: int, limit: int) -> list[dict[str, Any]]:
     db = get_session()
     try:
         engine = AlertEngine()
-        articles = db.execute(
-            select(News).order_by(News.published_at.desc()).limit(200)
-        ).scalars().all()
+        articles = db.execute(select(News).order_by(News.published_at.desc()).limit(200)).scalars().all()
         alerts = engine.process_portfolio_articles(db, articles, user_id)
         return alerts[:limit]
     finally:
@@ -164,15 +159,12 @@ async def get_alerts(
         raise HTTPException(500, f"Failed to get alerts: {e}")
 
 
-
 def _refresh_alerts_sync(user_id: int) -> int:
     db = get_session()
     try:
         engine = AlertEngine()
         engine.train_anomaly(db)
-        articles = db.execute(
-            select(News).order_by(News.published_at.desc()).limit(200)
-        ).scalars().all()
+        articles = db.execute(select(News).order_by(News.published_at.desc()).limit(200)).scalars().all()
         alerts = engine.process_portfolio_articles(db, articles, user_id)
         return len(alerts)
     finally:
@@ -219,6 +211,7 @@ async def get_alert_analytics(
 
 # ── Risk explorer endpoints ──────────────────────────────────────────────
 
+
 def _risk_portfolio_summary_sync(user_id: int) -> dict[str, Any]:
     from src.analysis.risk_explorer import RiskExplorer
 
@@ -254,7 +247,6 @@ async def risk_portfolio_summary(
         raise HTTPException(500, f"Risk portfolio summary failed: {e}")
 
 
-
 @router.get("/api/risk/deep-dive/{ticker}")
 async def risk_ticker_deep_dive(
     ticker: str,
@@ -269,8 +261,8 @@ async def risk_ticker_deep_dive(
         raise HTTPException(500, f"Risk deep dive failed: {e}")
 
 
-
 # ── Causal inference endpoint ────────────────────────────────────────────
+
 
 def _causal_analysis_sync(ticker: str, target_ticker: str | None) -> dict[str, Any]:
     from src.analysis.inference.causal import GrangerCausality, InstrumentCausalGraph
@@ -302,4 +294,3 @@ async def causal_analysis(
     except Exception as e:
         logger.exception("causal_analysis_failed", ticker=ticker)
         raise HTTPException(500, f"Causal analysis failed: {e}")
-

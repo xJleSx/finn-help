@@ -49,9 +49,11 @@ def _msk_now() -> datetime:
 
 def _retry_failed_receipts() -> None:
     from src.db.connection import get_session
+
     db = get_session()
     try:
         from src.notifications.retry import ReceiptManager
+
         mgr = ReceiptManager(db)
         pending = mgr.get_pending_retries(limit=20)
         if not pending:
@@ -61,6 +63,7 @@ def _retry_failed_receipts() -> None:
             try:
                 if receipt.channel == "email" and receipt.title:
                     from src.notifications.channels import EmailPushChannel, PushMessage
+
                     channel = EmailPushChannel(db=db)
                     msg = PushMessage(
                         title=receipt.title or "",
@@ -85,10 +88,12 @@ def _retry_failed_receipts() -> None:
 
 def _check_smart_rules() -> None:
     from src.db.connection import get_session
+
     db = get_session()
     try:
         from src.alerts.history import AlertHistory
         from src.alerts.smart import SmartAlertEngine
+
         engine = SmartAlertEngine()
         triggered = engine.evaluate_rules(db)
         if triggered:
@@ -191,9 +196,7 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
                             for uid, cid in ns.get_subscribers("daily"):
                                 target = cid or uid
                                 try:
-                                    await bot_app.bot.send_message(
-                                        chat_id=target, text=report.report_text, parse_mode="HTML"
-                                    )
+                                    await bot_app.bot.send_message(chat_id=target, text=report.report_text, parse_mode="HTML")
                                 except Exception as e:
                                     logger.warning("Failed to send daily report to %d: %s", target, e)
                         else:

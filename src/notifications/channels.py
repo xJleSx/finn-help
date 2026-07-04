@@ -140,7 +140,9 @@ class EmailPushChannel:
     @retry_sync(max_attempts=3, base_delay=5.0, backoff=2.0)
     def _do_send_email(self, to_email: str, msg: PushMessage) -> None:
         email_template_name = self._resolve_email_template(msg)
-        html = _renderer.render_email(email_template_name, **msg.data, title=msg.title, body=msg.body, ticker=msg.ticker, alert_type=msg.alert_type, priority=msg.priority)
+        html = _renderer.render_email(
+            email_template_name, **msg.data, title=msg.title, body=msg.body, ticker=msg.ticker, alert_type=msg.alert_type, priority=msg.priority
+        )
         mime = MIMEMultipart("alternative")
         mime["Subject"] = f"[Finn] {msg.title}"
         mime["From"] = self._from_email

@@ -28,11 +28,7 @@ class SentimentAnomalyDetector:
         df = sentiment_features_per_day(db, t)
         if df.empty or len(df) < settings.ml_anomaly_min_samples:
             return {"trained": False, "reason": "insufficient data"}
-        self._feature_cols = [
-            c
-            for c in df.columns
-            if c not in ("sentiment_mean", "article_count")
-        ]
+        self._feature_cols = [c for c in df.columns if c not in ("sentiment_mean", "article_count")]
         x = df[self._feature_cols].values
         self._model = IsolationForest(
             n_estimators=100,
@@ -48,6 +44,7 @@ class SentimentAnomalyDetector:
 
         def _sync_train() -> dict[str, Any]:
             from src.db.connection import get_session
+
             sync_db = get_session()
             try:
                 return self.train(sync_db, ticker)
@@ -59,9 +56,7 @@ class SentimentAnomalyDetector:
     def predict(self, features: dict[str, float]) -> float:
         if self._model is None:
             return 0.0
-        vec = np.array(
-            [[features.get(c, 0.0) for c in self._feature_cols]], dtype=np.float32
-        )
+        vec = np.array([[features.get(c, 0.0) for c in self._feature_cols]], dtype=np.float32)
         score = self._model.score_samples(vec)[0]
         anomaly_score = float(np.clip(-score / 10.0, 0.0, 1.0))
         return anomaly_score
@@ -78,6 +73,7 @@ class SentimentAnomalyDetector:
 
         def _sync_predict() -> float:
             from src.db.connection import get_session
+
             sync_db = get_session()
             try:
                 return self.predict_article(sync_db, news_article)

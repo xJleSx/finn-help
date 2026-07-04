@@ -52,12 +52,8 @@ class FundamentalAnalyzer:
             growth_rates = []
             for i in range(1, len(annual)):
                 if annual.iloc[i - 1]["close"] > 0:
-                    growth_rates.append(
-                        (annual.iloc[i]["close"] - annual.iloc[i - 1]["close"]) / annual.iloc[i - 1]["close"] * 100
-                    )
-            if len(growth_rates) >= 2 and all(
-                growth_rates[i] < growth_rates[i - 1] for i in range(1, len(growth_rates))
-            ):
+                    growth_rates.append((annual.iloc[i]["close"] - annual.iloc[i - 1]["close"]) / annual.iloc[i - 1]["close"] * 100)
+            if len(growth_rates) >= 2 and all(growth_rates[i] < growth_rates[i - 1] for i in range(1, len(growth_rates))):
                 anomalies.append("темп роста замедляется 3+ года подряд")
                 risk_score += 0.3
 

@@ -173,10 +173,8 @@ def build_top_keyboard() -> InlineKeyboardMarkup:
 
 def build_help_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("🔍 Анализ", callback_data="action:top"),
-         InlineKeyboardButton("💰 Аллокация", callback_data="action:portfolio")],
-        [InlineKeyboardButton("📊 Портфель", callback_data="action:portfolio"),
-         InlineKeyboardButton("📰 Новости", callback_data="action:news")],
+        [InlineKeyboardButton("🔍 Анализ", callback_data="action:top"), InlineKeyboardButton("💰 Аллокация", callback_data="action:portfolio")],
+        [InlineKeyboardButton("📊 Портфель", callback_data="action:portfolio"), InlineKeyboardButton("📰 Новости", callback_data="action:news")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -323,10 +321,7 @@ def _find_excluded_tickers(text: str) -> set[str]:
             ]
         ):
             exclude.add(ticker)
-        elif any(
-            re.search(rf"\b{re.escape(t_lower)}\s*{kw}\b", text_lower)
-            for kw in ["нет", "нету", "отсутств", "недоступ", "исключ"]
-        ):
+        elif any(re.search(rf"\b{re.escape(t_lower)}\s*{kw}\b", text_lower) for kw in ["нет", "нету", "отсутств", "недоступ", "исключ"]):
             exclude.add(ticker)
     rev_map = {v.lower(): v for v in RUSSIAN_NAMES.values()}
     for t_lower, ticker in rev_map.items():
@@ -500,9 +495,7 @@ def get_portfolio_positions(db: Any) -> list[dict[str, Any]]:
             n = inst.nominal or 1000
             last_price = last_price * n / 100
         current_value = float(last_price * p.quantity) if last_price and p.quantity else 0
-        profit_pct = (
-            round(((last_price / p.avg_price) - 1) * 100, 2) if last_price and p.avg_price and p.avg_price > 0 else 0
-        )
+        profit_pct = round(((last_price / p.avg_price) - 1) * 100, 2) if last_price and p.avg_price and p.avg_price > 0 else 0
         rows.append(
             {
                 "ticker": inst.ticker if inst else "?",

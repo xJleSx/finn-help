@@ -34,9 +34,7 @@ def social_update() -> None:
                 try:
                     new_count = 0
                     for post in posts:
-                        exists = (
-                            db.query(SocialPost).filter_by(source=post.source, external_id=post.external_id).first()
-                        )
+                        exists = db.query(SocialPost).filter_by(source=post.source, external_id=post.external_id).first()
                         if exists:
                             continue
                         sp = SocialPost(

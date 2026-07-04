@@ -36,8 +36,13 @@ class ModelPerformance:
 
 class SelfLearningEngine:
     def record_prediction(
-        self, db: Any, ticker: str, model_name: str,
-        predicted: float, actual: float, horizon: int,
+        self,
+        db: Any,
+        ticker: str,
+        model_name: str,
+        predicted: float,
+        actual: float,
+        horizon: int,
         features_hash: str = "",
     ) -> ModelFeedback:
         record = ModelFeedback(
@@ -55,7 +60,10 @@ class SelfLearningEngine:
         return record
 
     def evaluate_performance(
-        self, db: Any, model_name: str, days_back: int = 30,
+        self,
+        db: Any,
+        model_name: str,
+        days_back: int = 30,
     ) -> ModelPerformance:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
         rows = (
@@ -78,9 +86,7 @@ class SelfLearningEngine:
         preds = np.array([r.predicted_return for r in rows])
         actuals = np.array([r.actual_return for r in rows])
         mae = float(np.mean(np.abs(preds - actuals)))
-        direction_acc = float(np.mean(
-            (np.sign(preds) == np.sign(actuals)) | (np.abs(actuals) < 0.001)
-        ))
+        direction_acc = float(np.mean((np.sign(preds) == np.sign(actuals)) | (np.abs(actuals) < 0.001)))
         last = max(r.created_at or r.prediction_date for r in rows)
 
         return ModelPerformance(
@@ -92,8 +98,11 @@ class SelfLearningEngine:
         )
 
     def should_retrain(
-        self, db: Any, model_name: str,
-        min_samples: int = 30, max_error: float = 0.05,
+        self,
+        db: Any,
+        model_name: str,
+        min_samples: int = 30,
+        max_error: float = 0.05,
     ) -> bool:
         perf = self.evaluate_performance(db, model_name)
         if perf.samples < min_samples:
@@ -107,7 +116,7 @@ class SelfLearningEngine:
         try:
             from src.analysis.ml.news_impact import NewsImpactModel
 
-            rest = model_name[len("news_impact_"):]
+            rest = model_name[len("news_impact_") :]
             parts = rest.rsplit("_", 1)
             horizon_str = parts[-1]
             ticker = parts[0] if len(parts) > 1 else ""
@@ -127,7 +136,10 @@ class SelfLearningEngine:
             return {"model_name": model_name, "retrained": False, "reason": str(e)}
 
     def compare_models(
-        self, db: Any, model_a: str, model_b: str,
+        self,
+        db: Any,
+        model_a: str,
+        model_b: str,
     ) -> dict[str, Any]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=90)
         rows_a = (
@@ -170,16 +182,10 @@ class SelfLearningEngine:
         for fh in common:
             for ra in by_hash_a[fh]:
                 err_a.append(abs(ra.predicted_return - ra.actual_return))
-                dir_a.append(
-                    np.sign(ra.predicted_return) == np.sign(ra.actual_return)
-                    or abs(ra.actual_return) < 0.001
-                )
+                dir_a.append(np.sign(ra.predicted_return) == np.sign(ra.actual_return) or abs(ra.actual_return) < 0.001)
             for rb in by_hash_b[fh]:
                 err_b.append(abs(rb.predicted_return - rb.actual_return))
-                dir_b.append(
-                    np.sign(rb.predicted_return) == np.sign(rb.actual_return)
-                    or abs(rb.actual_return) < 0.001
-                )
+                dir_b.append(np.sign(rb.predicted_return) == np.sign(rb.actual_return) or abs(rb.actual_return) < 0.001)
 
         mae_a = float(np.mean(err_a))
         mae_b = float(np.mean(err_b))

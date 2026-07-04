@@ -130,9 +130,7 @@ class AnalysisService:
         return self.loader.load_fundamental_metrics_sync(db, instrument_id)
 
     @staticmethod
-    def _augment_with_sector_avg(
-        db: Any, fund_metrics: dict[str, Any] | None, inst: Instrument
-    ) -> dict[str, Any] | None:
+    def _augment_with_sector_avg(db: Any, fund_metrics: dict[str, Any] | None, inst: Instrument) -> dict[str, Any] | None:
         return DataLoader.augment_with_sector_avg(db, fund_metrics, inst)
 
     # ── Core orchestration ───────────────────────────────────────────
@@ -140,9 +138,7 @@ class AnalysisService:
     def _build_event_features(self, events: list[MarketEvent], dates: pd.Series) -> pd.DataFrame:
         return self.events.build_features(events, dates)
 
-    def _build_trade_plan(
-        self, df: pd.DataFrame, ind_df: pd.DataFrame, tech_signal: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    def _build_trade_plan(self, df: pd.DataFrame, ind_df: pd.DataFrame, tech_signal: dict[str, Any]) -> dict[str, Any] | None:
         if df.empty or len(df) < 20 or ind_df.empty:
             return None
         latest = df.iloc[-1]
@@ -209,18 +205,14 @@ class AnalysisService:
             fused["bond_offering"] = bond_offering
         return fused
 
-    async def analyze_single(
-        self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True
-    ) -> dict[str, Any]:
+    async def analyze_single(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> dict[str, Any]:
         price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
         prices = price_result.scalars().all()
         if len(prices) < 50:
             raise ValueError(f"Not enough price data for {ticker}")
         df = self._price_df(prices)
 
-        ind_result = await db.execute(
-            select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date)
-        )
+        ind_result = await db.execute(select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date))
         ind_rows = ind_result.scalars().all()
         if len(ind_rows) < 2:
             raise ValueError(f"Not enough indicator data for {ticker}")
@@ -292,9 +284,7 @@ class AnalysisService:
             ),
         )
 
-    async def analyze_all(
-        self, db: AsyncSession, updated_ids: set[int] | None = None, with_ml: bool = True
-    ) -> list[dict[str, Any]]:
+    async def analyze_all(self, db: AsyncSession, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict[str, Any]]:
         q = select(Instrument)
         if updated_ids is not None:
             q = q.where(Instrument.id.in_(updated_ids))
@@ -324,9 +314,7 @@ class AnalysisService:
                 continue
         return signals
 
-    async def analyze_with_advice(
-        self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True
-    ) -> tuple[dict[str, Any], str]:
+    async def analyze_with_advice(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> tuple[dict[str, Any], str]:
         fused = await self.analyze_single(db, inst, ticker, with_ml=with_ml)
         advice = await llm.advise(fused)
         return fused, advice
@@ -389,9 +377,7 @@ class AnalysisService:
             bond_offering=bond_offering,
         )
 
-    def analyze_all_sync(
-        self, db: Any, updated_ids: set[int] | None = None, with_ml: bool = True
-    ) -> list[dict[str, Any]]:
+    def analyze_all_sync(self, db: Any, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict[str, Any]]:
         instruments = db.query(Instrument)
         if updated_ids is not None:
             instruments = instruments.filter(Instrument.id.in_(updated_ids))
@@ -431,6 +417,7 @@ class AnalysisService:
 
     def train_models(self, db: Any, ticker: str | None = None) -> dict[str, bool]:
         import time
+
         _train_start = time.monotonic()
         from sqlalchemy import select as sa_select
 

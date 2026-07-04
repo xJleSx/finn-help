@@ -36,6 +36,7 @@ class PositionTracker:
                 logger.debug("Restore attempt %d/3 failed: %s", attempt + 1, e)
                 if attempt < 2:
                     import time as _time
+
                     _time.sleep(0.5 * (attempt + 1))
                 else:
                     logger.warning("Failed to restore positions from DB after 3 attempts")
@@ -90,6 +91,7 @@ class PositionTracker:
                 logger.debug("SL/TP persist attempt %d/3 failed for %s: %s", attempt + 1, ticker, e)
                 if attempt < 2:
                     import time as _time
+
                     _time.sleep(0.3 * (attempt + 1))
                 else:
                     logger.warning("Failed to persist SL/TP for %s after 3 attempts", ticker)

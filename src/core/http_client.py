@@ -48,9 +48,7 @@ class ResilientClient:
             self._client = httpx.AsyncClient(timeout=self._timeout)
         return self._client
 
-    async def request(
-        self, method: str, url: str, **kwargs: Any
-    ) -> httpx.Response:
+    async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         async def _do_request() -> httpx.Response:
             client = await self._get_client()
             resp = await client.request(method, url, **kwargs)
@@ -60,9 +58,7 @@ class ResilientClient:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(self._max_retries),
             wait=wait_exponential(multiplier=self._base_wait, max=self._max_wait),
-            retry=retry_if_exception_type(
-                (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException)
-            ),
+            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException)),
             before=before_log(logger, logging.DEBUG),
             reraise=True,
         ):
@@ -79,9 +75,7 @@ class ResilientClient:
                         raise
                     raise
 
-    async def get_json(
-        self, url: str, params: Optional[dict[str, Any]] = None
-    ) -> dict[str, Any]:
+    async def get_json(self, url: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         if params:
             separator = "&" if "?" in url else "?"
             url = f"{url}{separator}{urlencode(params, doseq=True)}"

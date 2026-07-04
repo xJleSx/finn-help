@@ -70,9 +70,7 @@ class AutoencoderAnomalyDetector:
         tensor_x = torch.from_numpy(x)
         loader = torch.utils.data.DataLoader(tensor_x, batch_size=32, shuffle=True)
 
-        optimizer = optim.Adam(
-            self._model.parameters(), lr=settings.ml_anomaly_autoencoder_lr
-        )
+        optimizer = optim.Adam(self._model.parameters(), lr=settings.ml_anomaly_autoencoder_lr)
         criterion = nn.MSELoss()
 
         self._model.train()
@@ -92,9 +90,7 @@ class AutoencoderAnomalyDetector:
         with torch.no_grad():
             recon = self._model(tensor_x)
             errors = torch.mean((recon - tensor_x) ** 2, dim=1).numpy()
-        self._threshold = float(
-            np.percentile(errors, (1 - settings.ml_anomaly_autoencoder_contamination) * 100)
-        )
+        self._threshold = float(np.percentile(errors, (1 - settings.ml_anomaly_autoencoder_contamination) * 100))
         self._trained = True
         return {
             "trained": True,

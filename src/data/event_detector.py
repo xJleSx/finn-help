@@ -22,9 +22,7 @@ class EventDetector:
         """
         self.threshold = similarity_threshold
 
-    def detect_related_articles(
-        self, reference_article: Any, candidate_articles: list[Any]
-    ) -> list[Any]:
+    def detect_related_articles(self, reference_article: Any, candidate_articles: list[Any]) -> list[Any]:
         """Find articles related to a reference article.
 
         Args:
@@ -69,17 +67,15 @@ class EventDetector:
             return 0.0
 
         dot_product = sum(a * b for a, b in zip(vec_a, vec_b))
-        mag_a = sum(a ** 2 for a in vec_a) ** 0.5
-        mag_b = sum(b ** 2 for b in vec_b) ** 0.5
+        mag_a = sum(a**2 for a in vec_a) ** 0.5
+        mag_b = sum(b**2 for b in vec_b) ** 0.5
 
         if mag_a == 0 or mag_b == 0:
             return 0.0
 
         return dot_product / (mag_a * mag_b)
 
-    def cluster_into_events(
-        self, articles: list[Any], db_session: Any, time_window_days: int = 3
-    ) -> dict[int, int]:
+    def cluster_into_events(self, articles: list[Any], db_session: Any, time_window_days: int = 3) -> dict[int, int]:
         """Cluster articles into events based on similarity and time.
 
         Args:
@@ -113,10 +109,7 @@ class EventDetector:
                     continue
 
                 # Check time window
-                time_diff = abs(
-                    (articles[j].published_at or datetime.now(timezone.utc))
-                    - (article.published_at or datetime.now(timezone.utc))
-                ).days
+                time_diff = abs((articles[j].published_at or datetime.now(timezone.utc)) - (article.published_at or datetime.now(timezone.utc))).days
 
                 if time_diff > time_window_days:
                     continue
@@ -193,9 +186,7 @@ class SentimentDivergenceDetector:
         """
         self.threshold = divergence_threshold
 
-    def analyze_sector_sentiment_divergence(
-        self, sector: str, db_session: Any, days: int = 7
-    ) -> dict[str, Any]:
+    def analyze_sector_sentiment_divergence(self, sector: str, db_session: Any, days: int = 7) -> dict[str, Any]:
         """Analyze sentiment divergence for a sector.
 
         Args:
@@ -222,13 +213,16 @@ class SentimentDivergenceDetector:
 
         # Get recent news for these instruments
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-        news_items = db_session.query(News).join(
-            NewsInstrument, NewsInstrument.news_id == News.id
-        ).filter(
-            NewsInstrument.instrument_id.in_(instrument_ids),
-            News.published_at >= cutoff_date,
-            News.is_relevant,
-        ).all()
+        news_items = (
+            db_session.query(News)
+            .join(NewsInstrument, NewsInstrument.news_id == News.id)
+            .filter(
+                NewsInstrument.instrument_id.in_(instrument_ids),
+                News.published_at >= cutoff_date,
+                News.is_relevant,
+            )
+            .all()
+        )
 
         if not news_items:
             return {
@@ -248,7 +242,7 @@ class SentimentDivergenceDetector:
         # Calculate divergence (standard deviation of sentiment distribution)
         # High divergence = lots of conflicting sentiment
         ratios = [positive / total, negative / total, neutral / total]
-        divergence = sum((r - 1/3) ** 2 for r in ratios) ** 0.5  # Euclidean from uniform
+        divergence = sum((r - 1 / 3) ** 2 for r in ratios) ** 0.5  # Euclidean from uniform
 
         # Determine consensus (if not divergent)
         if positive > negative and positive > neutral:
@@ -272,9 +266,7 @@ class SentimentDivergenceDetector:
             "signal_strength": "HIGH" if has_divergence else "LOW",
         }
 
-    def analyze_company_sentiment_divergence(
-        self, instrument: Any, db_session: Any, days: int = 7
-    ) -> dict[str, Any]:
+    def analyze_company_sentiment_divergence(self, instrument: Any, db_session: Any, days: int = 7) -> dict[str, Any]:
         """Analyze sentiment divergence for a specific company.
 
         Args:
@@ -289,13 +281,16 @@ class SentimentDivergenceDetector:
 
         # Get recent news
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-        news_items = db_session.query(News).join(
-            NewsInstrument, NewsInstrument.news_id == News.id
-        ).filter(
-            NewsInstrument.instrument_id == instrument.id,
-            News.published_at >= cutoff_date,
-            News.is_relevant,
-        ).all()
+        news_items = (
+            db_session.query(News)
+            .join(NewsInstrument, NewsInstrument.news_id == News.id)
+            .filter(
+                NewsInstrument.instrument_id == instrument.id,
+                News.published_at >= cutoff_date,
+                News.is_relevant,
+            )
+            .all()
+        )
 
         if not news_items:
             return {
@@ -314,7 +309,7 @@ class SentimentDivergenceDetector:
 
         # Calculate divergence
         ratios = [positive / total, negative / total, neutral / total]
-        divergence = sum((r - 1/3) ** 2 for r in ratios) ** 0.5
+        divergence = sum((r - 1 / 3) ** 2 for r in ratios) ** 0.5
 
         # Determine consensus
         if positive > negative and positive > neutral:
@@ -339,9 +334,7 @@ class SentimentDivergenceDetector:
             "actionable": has_divergence,
         }
 
-    def find_all_divergences(
-        self, db_session: Any, min_articles: int = 5
-    ) -> list[dict[str, Any]]:
+    def find_all_divergences(self, db_session: Any, min_articles: int = 5) -> list[dict[str, Any]]:
         """Find all sectors/companies with significant sentiment divergence.
 
         Args:
@@ -366,12 +359,7 @@ class SentimentDivergenceDetector:
                 divergences.append(div)
 
         # Analyze top instruments by volume
-        top_instruments = (
-            db_session.query(Instrument)
-            .order_by(Instrument.id)
-            .limit(100)
-            .all()
-        )
+        top_instruments = db_session.query(Instrument).order_by(Instrument.id).limit(100).all()
 
         for instrument in top_instruments:
             div = self.analyze_company_sentiment_divergence(instrument, db_session)

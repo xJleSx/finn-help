@@ -30,6 +30,7 @@ async def run_backtest(
 ) -> dict[str, Any]:
     try:
         import asyncio
+
         loop = asyncio.get_running_loop()
 
         def _run() -> dict[str, Any]:
@@ -61,7 +62,9 @@ async def run_backtest(
                     "var_95": result.monte_carlo.var_95,
                     "cvar_95": result.monte_carlo.cvar_95,
                     "upside_pct": result.monte_carlo.upside_pct,
-                } if result.monte_carlo else None,
+                }
+                if result.monte_carlo
+                else None,
             }
 
         return await loop.run_in_executor(None, _run)
@@ -87,6 +90,7 @@ async def personal_backtest(
 ) -> dict[str, Any]:
     try:
         import asyncio
+
         loop = asyncio.get_running_loop()
 
         def _run() -> dict[str, Any]:
@@ -153,6 +157,7 @@ async def walk_forward(
 ) -> dict[str, Any]:
     try:
         import asyncio
+
         loop = asyncio.get_running_loop()
 
         def _run() -> dict[str, Any]:
@@ -161,12 +166,7 @@ async def walk_forward(
                 inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
                 if not inst:
                     raise HTTPException(404, f"Instrument {ticker} not found")
-                prices = (
-                    db.query(Price)
-                    .filter_by(instrument_id=inst.id)
-                    .order_by(Price.date.asc())
-                    .all()
-                )
+                prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.asc()).all()
                 price_vals = [float(p.close) for p in prices if p.close]
                 if len(price_vals) < 100:
                     raise HTTPException(400, f"Not enough price data for {ticker}")
@@ -230,6 +230,7 @@ async def sensitivity_analysis(
 ) -> dict[str, Any]:
     try:
         import asyncio
+
         loop = asyncio.get_running_loop()
 
         def _run() -> dict[str, Any]:
@@ -238,12 +239,7 @@ async def sensitivity_analysis(
                 inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
                 if not inst:
                     raise HTTPException(404, f"Instrument {ticker} not found")
-                prices = (
-                    db.query(Price)
-                    .filter_by(instrument_id=inst.id)
-                    .order_by(Price.date.asc())
-                    .all()
-                )
+                prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.asc()).all()
                 equity = [float(p.close) for p in prices if p.close]
                 if len(equity) < 20:
                     raise HTTPException(400, f"Not enough price data for {ticker}")
@@ -271,6 +267,7 @@ async def ticker_metrics(
 ) -> dict[str, Any]:
     try:
         import asyncio
+
         loop = asyncio.get_running_loop()
 
         def _run() -> dict[str, Any]:
@@ -279,12 +276,7 @@ async def ticker_metrics(
                 inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
                 if not inst:
                     raise HTTPException(404, f"Instrument {ticker} not found")
-                prices = (
-                    db.query(Price)
-                    .filter_by(instrument_id=inst.id)
-                    .order_by(Price.date.asc())
-                    .all()
-                )
+                prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.asc()).all()
                 equity = [float(p.close) for p in prices if p.close]
                 if len(equity) < 20:
                     return {"ticker": ticker, "error": "Not enough data"}

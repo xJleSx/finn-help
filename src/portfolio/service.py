@@ -25,9 +25,7 @@ class PortfolioService:
         for p in positions:
             inst_result = await self.db.execute(select(Instrument).where(Instrument.id == p.instrument_id))
             inst = inst_result.scalar_one_or_none()
-            price_result = await self.db.execute(
-                select(Price).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc()).limit(1)
-            )
+            price_result = await self.db.execute(select(Price).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc()).limit(1))
             last_price = price_result.scalar_one_or_none()
             current_price = last_price.close if last_price else 0
             output.append(
@@ -38,9 +36,7 @@ class PortfolioService:
                     "avg_price": float(p.avg_price) if p.avg_price else 0,
                     "current_price": float(current_price),
                     "value": float(current_price * p.quantity) if current_price and p.quantity else 0,
-                    "profit_pct": round(((current_price / p.avg_price) - 1) * 100, 2)
-                    if current_price and p.avg_price
-                    else 0,
+                    "profit_pct": round(((current_price / p.avg_price) - 1) * 100, 2) if current_price and p.avg_price else 0,
                 }
             )
         return output
@@ -51,9 +47,7 @@ class PortfolioService:
         if not inst:
             raise HTTPException(404, "Instrument not found")
 
-        existing_result = await self.db.execute(
-            select(Portfolio).where(Portfolio.user_id == user_id, Portfolio.instrument_id == inst.id)
-        )
+        existing_result = await self.db.execute(select(Portfolio).where(Portfolio.user_id == user_id, Portfolio.instrument_id == inst.id))
         existing = existing_result.scalar_one_or_none()
         if existing:
             existing.quantity += quantity
@@ -87,9 +81,7 @@ class PortfolioService:
         for p in positions_raw:
             inst_result = await self.db.execute(select(Instrument).where(Instrument.id == p.instrument_id))
             inst = inst_result.scalar_one_or_none()
-            price_result = await self.db.execute(
-                select(Price).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc()).limit(1)
-            )
+            price_result = await self.db.execute(select(Price).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc()).limit(1))
             last_price = price_result.scalar_one_or_none()
             current_price = last_price.close if last_price else 0
             positions.append(
@@ -100,9 +92,7 @@ class PortfolioService:
                     "avg_price": float(p.avg_price) if p.avg_price else 0,
                     "current_price": float(current_price),
                     "value": float(current_price * p.quantity) if current_price and p.quantity else 0,
-                    "profit_pct": round(((current_price / p.avg_price) - 1) * 100, 2)
-                    if current_price and p.avg_price
-                    else 0,
+                    "profit_pct": round(((current_price / p.avg_price) - 1) * 100, 2) if current_price and p.avg_price else 0,
                 }
             )
         return positions

@@ -114,9 +114,7 @@ class TestMOEXCollectorUnit:
     @pytest.mark.asyncio
     async def test_get_history_with_board_bond(self, collector, httpx_mock):
         httpx_mock.add_response(
-            url=re.compile(
-                r".*/history/engines/stock/markets/bonds/boards/(TQCB|TQBD|TQOB)/securities/SU26238RMFS5.json.*"
-            ),
+            url=re.compile(r".*/history/engines/stock/markets/bonds/boards/(TQCB|TQBD|TQOB)/securities/SU26238RMFS5.json.*"),
             json={
                 "history": {
                     "columns": ["TRADEDATE", "CLOSE"],

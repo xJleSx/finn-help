@@ -54,8 +54,10 @@ class ScenarioEngine:
         rows = (
             db.execute(
                 select(
-                    Instrument.ticker, Instrument.sector,
-                    Portfolio.quantity, Portfolio.avg_price,
+                    Instrument.ticker,
+                    Instrument.sector,
+                    Portfolio.quantity,
+                    Portfolio.avg_price,
                 )
                 .join(Portfolio, Portfolio.instrument_id == Instrument.id)
                 .where(Portfolio.user_id == user_id)
@@ -69,13 +71,15 @@ class ScenarioEngine:
             qty = float(r["quantity"])
             price = float(r["avg_price"] or 0.0)
             amount = qty * price
-            self.positions.append({
-                "ticker": r["ticker"],
-                "sector": r["sector"] or "Прочее",
-                "quantity": qty,
-                "avg_price": price,
-                "amount": amount,
-            })
+            self.positions.append(
+                {
+                    "ticker": r["ticker"],
+                    "sector": r["sector"] or "Прочее",
+                    "quantity": qty,
+                    "avg_price": price,
+                    "amount": amount,
+                }
+            )
         self._total = sum(p["amount"] for p in self.positions)
         return self
 
@@ -83,13 +87,15 @@ class ScenarioEngine:
         self.positions = []
         for p in positions:
             amount = p.get("amount", 0) or (p.get("quantity", 0) * p.get("avg_price", 0))
-            self.positions.append({
-                "ticker": p.get("ticker", ""),
-                "sector": p.get("sector", "Прочее"),
-                "quantity": float(p.get("quantity", 0)),
-                "avg_price": float(p.get("avg_price", 0)),
-                "amount": float(amount),
-            })
+            self.positions.append(
+                {
+                    "ticker": p.get("ticker", ""),
+                    "sector": p.get("sector", "Прочее"),
+                    "quantity": float(p.get("quantity", 0)),
+                    "avg_price": float(p.get("avg_price", 0)),
+                    "amount": float(amount),
+                }
+            )
         self._total = sum(p["amount"] for p in self.positions)
         return self
 
@@ -99,17 +105,14 @@ class ScenarioEngine:
         self._returns = {}
 
         for ticker in self._tickers:
-            rows = (
-                db.execute(
-                    select(Price.date, Price.close)
-                    .join(Instrument, Instrument.id == Price.instrument_id)
-                    .where(Instrument.ticker == ticker)
-                    .where(Price.date >= cutoff)
-                    .where(Price.close.isnot(None))
-                    .order_by(Price.date)
-                )
-                .all()
-            )
+            rows = db.execute(
+                select(Price.date, Price.close)
+                .join(Instrument, Instrument.id == Price.instrument_id)
+                .where(Instrument.ticker == ticker)
+                .where(Price.date >= cutoff)
+                .where(Price.close.isnot(None))
+                .order_by(Price.date)
+            ).all()
             closes = np.array([float(r.close) for r in rows if r.close and r.close > 0], dtype=float)
             if len(closes) < 20:
                 self._returns[ticker] = np.array([])
@@ -140,8 +143,10 @@ class ScenarioEngine:
     def run_monte_carlo(self, n_simulations: int = 10000, periods: int = 252) -> ScenarioResult:
         if self._cov_matrix is None or self._weights is None:
             return ScenarioResult(
-                name="Monte Carlo", total_before=self._total,
-                loss_pct=0.0, scenario_type="monte_carlo",
+                name="Monte Carlo",
+                total_before=self._total,
+                loss_pct=0.0,
+                scenario_type="monte_carlo",
             )
         n_assets = len(self._weights)
         mean_ret = np.zeros(n_assets)
@@ -174,8 +179,10 @@ class ScenarioEngine:
     def run_historical_bootstrap(self, n_simulations: int = 10000, periods: int = 252) -> ScenarioResult:
         if not self._tickers:
             return ScenarioResult(
-                name="Historical Bootstrap", total_before=self._total,
-                loss_pct=0.0, scenario_type="bootstrap",
+                name="Historical Bootstrap",
+                total_before=self._total,
+                loss_pct=0.0,
+                scenario_type="bootstrap",
             )
         weights_list = []
         for p in self.positions:
@@ -187,8 +194,10 @@ class ScenarioEngine:
         tickers_with_data = [t for t in self._tickers if len(self._returns.get(t, [])) >= 20]
         if not tickers_with_data:
             return ScenarioResult(
-                name="Historical Bootstrap", total_before=self._total,
-                loss_pct=0.0, scenario_type="bootstrap",
+                name="Historical Bootstrap",
+                total_before=self._total,
+                loss_pct=0.0,
+                scenario_type="bootstrap",
             )
         min_len = min(len(self._returns[t]) for t in tickers_with_data)
         aligned = np.column_stack([self._returns[t][-min_len:] for t in tickers_with_data])
@@ -232,13 +241,15 @@ class ScenarioEngine:
             shock = shocks.get(sector, overall)
             shocked_val = p["amount"] * (1 + shock)
             total_after += shocked_val
-            details.append({
-                "ticker": p["ticker"],
-                "sector": sector,
-                "before": round(p["amount"], 2),
-                "after": round(shocked_val, 2),
-                "change_pct": shock,
-            })
+            details.append(
+                {
+                    "ticker": p["ticker"],
+                    "sector": sector,
+                    "before": round(p["amount"], 2),
+                    "after": round(shocked_val, 2),
+                    "change_pct": shock,
+                }
+            )
 
         details.sort(key=lambda x: x["change_pct"])
         loss = total_after - self._total
@@ -280,13 +291,15 @@ class ScenarioEngine:
                     total_after=round(total_after, 2),
                     loss=round(loss, 2),
                     loss_pct=loss_pct,
-                    details=[{
-                        "ticker": ticker,
-                        "sector": p["sector"],
-                        "before": p["amount"],
-                        "after": round(shocked, 2),
-                        "change_pct": shock_pct,
-                    }],
+                    details=[
+                        {
+                            "ticker": ticker,
+                            "sector": p["sector"],
+                            "before": p["amount"],
+                            "after": round(shocked, 2),
+                            "change_pct": shock_pct,
+                        }
+                    ],
                     sector_breakdown=self._get_sector_amounts(),
                     scenario_type="custom",
                 )
@@ -304,20 +317,24 @@ class ScenarioEngine:
             "bootstrap": None,
         }
         for scenario in self.run_crash_scenarios():
-            results["scenarios"].append({
-                "name": scenario.name,
-                "loss_pct": scenario.loss_pct,
-                "loss": scenario.loss,
-                "total_after": scenario.total_after,
-                "var_95": scenario.var_95,
-            })
+            results["scenarios"].append(
+                {
+                    "name": scenario.name,
+                    "loss_pct": scenario.loss_pct,
+                    "loss": scenario.loss,
+                    "total_after": scenario.total_after,
+                    "var_95": scenario.var_95,
+                }
+            )
         for scenario in self.run_macro_scenarios():
-            results["scenarios"].append({
-                "name": scenario.name,
-                "loss_pct": scenario.loss_pct,
-                "loss": scenario.loss,
-                "total_after": scenario.total_after,
-            })
+            results["scenarios"].append(
+                {
+                    "name": scenario.name,
+                    "loss_pct": scenario.loss_pct,
+                    "loss": scenario.loss,
+                    "total_after": scenario.total_after,
+                }
+            )
         mc = self.run_monte_carlo()
         results["monte_carlo"] = {
             "var_95": mc.var_95,

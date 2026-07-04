@@ -79,10 +79,7 @@ class TestGrangerCausality:
 
         # Price query mock
         today = datetime.now().date()
-        prices = [
-            _make_mock_price(today - timedelta(days=30 - i), 100.0 + i * 0.5)
-            for i in range(31)
-        ]
+        prices = [_make_mock_price(today - timedelta(days=30 - i), 100.0 + i * 0.5) for i in range(31)]
         price_query = MagicMock()
         price_query.filter.return_value.order_by.return_value.all.return_value = prices
 
@@ -96,14 +93,9 @@ class TestGrangerCausality:
         news_query = MagicMock()
         news_query.join.return_value.filter.return_value.order_by.return_value.all.return_value = mock_news
 
-        mock_db.query.side_effect = _query_side_effect(
-            Instrument=inst_query, Price=price_query, News=news_query
-        )
+        mock_db.query.side_effect = _query_side_effect(Instrument=inst_query, Price=price_query, News=news_query)
 
-        mock_granger = {
-            lag: [{"ssr_chi2test": (3.0, 0.08 if lag != 2 else 0.003)}]
-            for lag in range(1, 11)
-        }
+        mock_granger = {lag: [{"ssr_chi2test": (3.0, 0.08 if lag != 2 else 0.003)}] for lag in range(1, 11)}
 
         with (
             patch("src.analysis.inference.causal._HAS_STATSMODELS", True),
@@ -130,10 +122,7 @@ class TestGrangerCausality:
         inst_query.filter.return_value.first.return_value = mock_inst
 
         today = datetime.now().date()
-        prices = [
-            _make_mock_price(today - timedelta(days=30 - i), 100.0 + i * 0.5)
-            for i in range(31)
-        ]
+        prices = [_make_mock_price(today - timedelta(days=30 - i), 100.0 + i * 0.5) for i in range(31)]
         price_query = MagicMock()
         price_query.filter.return_value.order_by.return_value.all.return_value = prices
 
@@ -146,13 +135,9 @@ class TestGrangerCausality:
         news_query = MagicMock()
         news_query.join.return_value.filter.return_value.order_by.return_value.all.return_value = mock_news
 
-        mock_db.query.side_effect = _query_side_effect(
-            Instrument=inst_query, Price=price_query, News=news_query
-        )
+        mock_db.query.side_effect = _query_side_effect(Instrument=inst_query, Price=price_query, News=news_query)
 
-        mock_granger = {
-            lag: [{"ssr_chi2test": (0.5, 0.5)}] for lag in range(1, 11)
-        }
+        mock_granger = {lag: [{"ssr_chi2test": (0.5, 0.5)}] for lag in range(1, 11)}
 
         with (
             patch("src.analysis.inference.causal._HAS_STATSMODELS", True),
@@ -176,14 +161,8 @@ class TestCausalImpactAnalyzer:
         inst_query.filter.return_value.first.return_value = mock_inst
 
         today = datetime.now().date()
-        before_prices = [
-            _make_mock_price(today - timedelta(days=35 - i), 100.0 + i * 0.2)
-            for i in range(30)
-        ]
-        after_prices = [
-            _make_mock_price(today + timedelta(days=1 + i), 106.0 + i * 0.1)
-            for i in range(30)
-        ]
+        before_prices = [_make_mock_price(today - timedelta(days=35 - i), 100.0 + i * 0.2) for i in range(30)]
+        after_prices = [_make_mock_price(today + timedelta(days=1 + i), 106.0 + i * 0.1) for i in range(30)]
 
         price_query = MagicMock()
         price_query.filter.return_value.order_by.return_value.all.side_effect = [
@@ -224,22 +203,10 @@ class TestCausalImpactAnalyzer:
         inst_query.filter.return_value = inst_filter
 
         today = datetime.now().date()
-        before_prices = [
-            _make_mock_price(today - timedelta(days=35 - i), 100.0 + i * 0.2)
-            for i in range(30)
-        ]
-        after_prices = [
-            _make_mock_price(today + timedelta(days=1 + i), 106.0 + i * 0.1)
-            for i in range(30)
-        ]
-        peer_before = [
-            _make_mock_price(today - timedelta(days=35 - i), 200.0 + i * 0.3)
-            for i in range(30)
-        ]
-        peer_after = [
-            _make_mock_price(today + timedelta(days=1 + i), 205.0 + i * 0.2)
-            for i in range(30)
-        ]
+        before_prices = [_make_mock_price(today - timedelta(days=35 - i), 100.0 + i * 0.2) for i in range(30)]
+        after_prices = [_make_mock_price(today + timedelta(days=1 + i), 106.0 + i * 0.1) for i in range(30)]
+        peer_before = [_make_mock_price(today - timedelta(days=35 - i), 200.0 + i * 0.3) for i in range(30)]
+        peer_after = [_make_mock_price(today + timedelta(days=1 + i), 205.0 + i * 0.2) for i in range(30)]
 
         price_query = MagicMock()
         price_query.filter.return_value.order_by.return_value.all.side_effect = [
@@ -287,14 +254,8 @@ class TestCausalImpactAnalyzer:
         inst_query.filter.return_value = inst_filter
 
         today = datetime.now().date()
-        before_prices = [
-            _make_mock_price(today - timedelta(days=35 - i), 100.0 + i * 0.2)
-            for i in range(30)
-        ]
-        after_prices = [
-            _make_mock_price(today + timedelta(days=1 + i), 106.0 + i * 0.1)
-            for i in range(30)
-        ]
+        before_prices = [_make_mock_price(today - timedelta(days=35 - i), 100.0 + i * 0.2) for i in range(30)]
+        after_prices = [_make_mock_price(today + timedelta(days=1 + i), 106.0 + i * 0.1) for i in range(30)]
 
         price_query = MagicMock()
         price_query.filter.return_value.order_by.return_value.all.side_effect = [
@@ -338,14 +299,8 @@ class TestInstrumentCausalGraph:
         inst_query.filter.return_value.first.side_effect = [src, tgt]
 
         today = datetime.now().date()
-        src_prices = [
-            _make_mock_price(today - timedelta(days=40 - i), 100.0 + i * 0.3)
-            for i in range(35)
-        ]
-        tgt_prices = [
-            _make_mock_price(today - timedelta(days=40 - i), 200.0 + i * 0.5)
-            for i in range(35)
-        ]
+        src_prices = [_make_mock_price(today - timedelta(days=40 - i), 100.0 + i * 0.3) for i in range(35)]
+        tgt_prices = [_make_mock_price(today - timedelta(days=40 - i), 200.0 + i * 0.5) for i in range(35)]
 
         price_query = MagicMock()
         price_query.filter.return_value.order_by.return_value.all.side_effect = [
@@ -358,10 +313,7 @@ class TestInstrumentCausalGraph:
             Price=price_query,
         )
 
-        mock_granger = {
-            lag: [{"ssr_chi2test": (2.0, 0.05 if lag != 3 else 0.01)}]
-            for lag in range(1, 11)
-        }
+        mock_granger = {lag: [{"ssr_chi2test": (2.0, 0.05 if lag != 3 else 0.01)}] for lag in range(1, 11)}
 
         with (
             patch("src.analysis.inference.causal._HAS_STATSMODELS", True),
@@ -394,10 +346,7 @@ class TestInstrumentCausalGraph:
         inst_query = MagicMock()
         inst_query.filter.return_value.first.return_value = mock_inst
 
-        peers = [
-            _make_mock_instrument(ticker=f"PEER{i}", sector="Finance")
-            for i in range(5)
-        ]
+        peers = [_make_mock_instrument(ticker=f"PEER{i}", sector="Finance") for i in range(5)]
         for i, p in enumerate(peers):
             p.id = 10 + i
 

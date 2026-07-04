@@ -206,7 +206,8 @@ async def execute_order(
             if orders_cb.is_open:
                 logger.warning(
                     "tbank_orders circuit breaker OPEN — falling back to DRY_RUN for %s %s",
-                    direction, ticker,
+                    direction,
+                    ticker,
                 )
                 record.status = "simulated"
                 record.order_id = f"dry_cb_{datetime.now(timezone.utc).timestamp()}"
@@ -216,7 +217,11 @@ async def execute_order(
                 await _notify_trade(record, reason=f"CB_OPEN_FALLBACK {reason}")
                 logger.info(
                     "CB-FALLBACK DRY_RUN %s %d %s at %.2f (%s)",
-                    direction, quantity, ticker, requested_price, reason,
+                    direction,
+                    quantity,
+                    ticker,
+                    requested_price,
+                    reason,
                 )
                 return record
 
@@ -340,12 +345,7 @@ async def approve_order(ticker: str, direction: str, quantity: int) -> Optional[
         return None
     async with _mode_lock:
         for r in reversed(_execution_log):
-            if (
-                r.ticker == ticker
-                and r.direction == direction
-                and r.quantity == quantity
-                and r.status == "pending_approval"
-            ):
+            if r.ticker == ticker and r.direction == direction and r.quantity == quantity and r.status == "pending_approval":
                 result = await execute_order(
                     ticker=r.ticker,
                     direction=r.direction,

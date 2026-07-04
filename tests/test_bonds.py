@@ -15,6 +15,7 @@ class TestBondOfferingCollector:
             collector = BondOfferingCollector()
             collector._get_moex = AsyncMock(return_value=moex)
             return await collector.fetch_by_ticker("SU26238RMFS5")
+
         result = asyncio.run(run())
         assert result == {}
 
@@ -38,6 +39,7 @@ class TestBondOfferingCollector:
             collector = BondOfferingCollector()
             collector._get_moex = AsyncMock(return_value=moex)
             return await collector.fetch_by_ticker("SU26238RMFS5")
+
         result = asyncio.run(run())
         assert result["isin"] == "RU000A101X55"
         assert result["nominal_price"] == 1000.0
@@ -71,6 +73,7 @@ class TestBondOfferingCollector:
             collector = BondOfferingCollector()
             collector._get_moex = AsyncMock(return_value=moex)
             return await collector.fetch_by_ticker("SU26238RMFS5")
+
         result = asyncio.run(run())
         assert result["has_amortization"] is True
         assert result["has_offer"] is True
@@ -88,6 +91,7 @@ class TestBondOfferingCollector:
             collector = BondOfferingCollector()
             collector._get_moex = AsyncMock(return_value=moex)
             return await collector.fetch_by_ticker("SU26238RMFS5")
+
         result = asyncio.run(run())
         assert result["isin"] == "RU000A101X55"
         assert result.get("yield_to_maturity") is None
@@ -100,6 +104,7 @@ class TestBondOfferingCollector:
             collector = BondOfferingCollector()
             collector._get_moex = AsyncMock(return_value=moex)
             return await collector.fetch_all()
+
         result = asyncio.run(run())
         assert result == []
 
@@ -110,6 +115,7 @@ class TestBondOfferingCollector:
             collector = BondOfferingCollector()
             collector._get_moex = AsyncMock(return_value=moex)
             return await collector.fetch_all()
+
         result = asyncio.run(run())
         assert result == []
 
@@ -120,21 +126,26 @@ class TestBondOfferingCollector:
             collector._moex = moex
             await collector.close()
             moex.__aexit__.assert_called_once()
+
         asyncio.run(run())
 
     def test_parse_date_none(self):
         from src.collectors.bonds import _parse_date
+
         assert _parse_date(None) is None
 
     def test_parse_date_empty_string(self):
         from src.collectors.bonds import _parse_date
+
         assert _parse_date("") is None
 
     def test_parse_date_iso(self):
         from src.collectors.bonds import _parse_date
+
         assert _parse_date("2023-06-15") == date(2023, 6, 15)
 
     def test_parse_date_date_obj(self):
         from src.collectors.bonds import _parse_date
+
         d = date(2023, 6, 15)
         assert _parse_date(d) == d

@@ -36,9 +36,7 @@ class MarketService:
 
         output = []
         for inst in instruments:
-            price_result = await self.db.execute(
-                select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()).limit(1)
-            )
+            price_result = await self.db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()).limit(1))
             last_price = price_result.scalar_one_or_none()
             output.append(
                 {
@@ -76,9 +74,7 @@ class MarketService:
             raise HTTPException(404, "Instrument not found")
 
         cutoff = date.today() - timedelta(days=days)
-        price_result = await self.db.execute(
-            select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date)
-        )
+        price_result = await self.db.execute(select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date))
         prices = price_result.scalars().all()
         return [
             {
@@ -164,12 +160,7 @@ class MarketService:
         if len(prices) < 20:
             raise HTTPException(400, "Not enough price data")
 
-        df = pd.DataFrame(
-            [
-                {"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume}
-                for p in prices
-            ]
-        )
+        df = pd.DataFrame([{"date": p.date, "open": p.open, "high": p.high, "low": p.low, "close": p.close, "volume": p.volume} for p in prices])
         ind_result = await self.db.execute(select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date))
         inds = ind_result.scalars().all()
         ind_df = pd.DataFrame(
@@ -290,9 +281,7 @@ class MarketService:
             raise HTTPException(404, "Instrument not found")
 
         cutoff = date.today() - timedelta(days=90)
-        price_result = await self.db.execute(
-            select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date)
-        )
+        price_result = await self.db.execute(select(Price).where(Price.instrument_id == inst.id, Price.date >= cutoff).order_by(Price.date))
         prices = price_result.scalars().all()
         closes = [float(p.close) for p in prices if p.close]
 
@@ -304,10 +293,7 @@ class MarketService:
         macd_vals = [float(i.macd_hist) for i in indicators if i.macd_hist is not None]
 
         alerts = self._notifications.check_divergence(ticker, closes, rsi_vals, macd_vals)
-        return [
-            {"ticker": a.ticker, "divergence_type": a.divergence_type, "indicator": a.indicator, "strength": a.strength}
-            for a in alerts
-        ]
+        return [{"ticker": a.ticker, "divergence_type": a.divergence_type, "indicator": a.indicator, "strength": a.strength} for a in alerts]
 
     async def get_rebalance_alerts(self) -> list[dict[str, Any]]:
         alerts = await self._notifications.check_rebalance_async()

@@ -292,9 +292,7 @@ class TestCalculateCompanyRisk:
     def test_basic(self, aggregator, mock_instrument):
         db = MagicMock()
         # mock FundamentalMetric query — filter().order_by().first()
-        db.query.return_value.filter.return_value.order_by.return_value.first.return_value = (
-            MagicMock(market_cap=1e12)
-        )
+        db.query.return_value.filter.return_value.order_by.return_value.first.return_value = MagicMock(market_cap=1e12)
 
         with (
             patch.object(aggregator, "_get_market_regime", return_value="normal"),
@@ -302,15 +300,9 @@ class TestCalculateCompanyRisk:
             patch.object(aggregator, "_contagion_boost", return_value=0.0),
             patch.object(aggregator, "_sentiment_multiplier", return_value=1.0),
             patch.object(aggregator, "_recency_boost", return_value=1.0),
-            patch.object(
-                aggregator, "calculate_sector_risk_component", return_value=4.0
-            ),
-            patch.object(
-                aggregator, "calculate_geopolitical_risk_component", return_value=3.0
-            ),
-            patch.object(
-                aggregator, "calculate_macro_risk_component", return_value=5.0
-            ),
+            patch.object(aggregator, "calculate_sector_risk_component", return_value=4.0),
+            patch.object(aggregator, "calculate_geopolitical_risk_component", return_value=3.0),
+            patch.object(aggregator, "calculate_macro_risk_component", return_value=5.0),
             patch.object(
                 aggregator,
                 "calculate_company_specific_risk_component",
@@ -330,9 +322,7 @@ class TestCalculateCompanyRisk:
 
     def test_high_risk_scenario(self, aggregator, mock_instrument):
         db = MagicMock()
-        db.query.return_value.filter.return_value.order_by.return_value.first.return_value = (
-            MagicMock(market_cap=1e9)
-        )
+        db.query.return_value.filter.return_value.order_by.return_value.first.return_value = MagicMock(market_cap=1e9)
 
         with (
             patch.object(aggregator, "_get_market_regime", return_value="stress"),
@@ -340,15 +330,9 @@ class TestCalculateCompanyRisk:
             patch.object(aggregator, "_contagion_boost", return_value=0.3),
             patch.object(aggregator, "_sentiment_multiplier", return_value=1.2),
             patch.object(aggregator, "_recency_boost", return_value=1.15),
-            patch.object(
-                aggregator, "calculate_sector_risk_component", return_value=8.0
-            ),
-            patch.object(
-                aggregator, "calculate_geopolitical_risk_component", return_value=9.0
-            ),
-            patch.object(
-                aggregator, "calculate_macro_risk_component", return_value=7.0
-            ),
+            patch.object(aggregator, "calculate_sector_risk_component", return_value=8.0),
+            patch.object(aggregator, "calculate_geopolitical_risk_component", return_value=9.0),
+            patch.object(aggregator, "calculate_macro_risk_component", return_value=7.0),
             patch.object(
                 aggregator,
                 "calculate_company_specific_risk_component",
@@ -372,9 +356,7 @@ class TestBatchCalculate:
         inst1 = MagicMock(id=1, ticker="SBER", sector="Финансы")
         inst2 = MagicMock(id=2, ticker="GAZP", sector="Нефть")
         db = MagicMock()
-        db.query.return_value.filter.return_value.order_by.return_value.first.return_value = (
-            MagicMock(market_cap=1e12)
-        )
+        db.query.return_value.filter.return_value.order_by.return_value.first.return_value = MagicMock(market_cap=1e12)
 
         with (
             patch.object(aggregator, "_get_market_regime", return_value="normal"),
@@ -382,15 +364,9 @@ class TestBatchCalculate:
             patch.object(aggregator, "_contagion_boost", return_value=0.0),
             patch.object(aggregator, "_sentiment_multiplier", return_value=1.0),
             patch.object(aggregator, "_recency_boost", return_value=1.0),
-            patch.object(
-                aggregator, "calculate_sector_risk_component", return_value=5.0
-            ),
-            patch.object(
-                aggregator, "calculate_geopolitical_risk_component", return_value=5.0
-            ),
-            patch.object(
-                aggregator, "calculate_macro_risk_component", return_value=5.0
-            ),
+            patch.object(aggregator, "calculate_sector_risk_component", return_value=5.0),
+            patch.object(aggregator, "calculate_geopolitical_risk_component", return_value=5.0),
+            patch.object(aggregator, "calculate_macro_risk_component", return_value=5.0),
             patch.object(
                 aggregator,
                 "calculate_company_specific_risk_component",
@@ -416,7 +392,14 @@ class TestStoreCompanyRisk:
             "ticker": "SBER",
             "date": datetime.now(timezone.utc).date(),
             "risk_score": 5.5,
-            "decomposition": {"sector_risk": 4.0, "geopolitical_risk": 3.0, "macro_risk": 5.0, "company_specific_risk": 2.0, "volatility_contribution": 1.0, "contagion_contribution": 0.0},
+            "decomposition": {
+                "sector_risk": 4.0,
+                "geopolitical_risk": 3.0,
+                "macro_risk": 5.0,
+                "company_specific_risk": 2.0,
+                "volatility_contribution": 1.0,
+                "contagion_contribution": 0.0,
+            },
             "recent_news_count": 10,
         }
         result = aggregator.store_company_risk(risk_data, db)
@@ -432,7 +415,14 @@ class TestStoreCompanyRisk:
             "ticker": "SBER",
             "date": datetime.now(timezone.utc).date(),
             "risk_score": 5.5,
-            "decomposition": {"sector_risk": 4.0, "geopolitical_risk": 3.0, "macro_risk": 5.0, "company_specific_risk": 2.0, "volatility_contribution": 1.0, "contagion_contribution": 0.0},
+            "decomposition": {
+                "sector_risk": 4.0,
+                "geopolitical_risk": 3.0,
+                "macro_risk": 5.0,
+                "company_specific_risk": 2.0,
+                "volatility_contribution": 1.0,
+                "contagion_contribution": 0.0,
+            },
             "recent_news_count": 10,
         }
         result = aggregator.store_company_risk(risk_data, db)

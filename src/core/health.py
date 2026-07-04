@@ -1,4 +1,5 @@
 """Central health check registry for all FinAdvisor modules."""
+
 from __future__ import annotations
 
 import logging
@@ -11,15 +12,18 @@ health_registry: dict[str, Callable[[], Coroutine[Any, Any, Any]]] = {}
 
 def register_module_health(name: str) -> Callable:
     """Decorator to register an async health check function."""
+
     def decorator(fn: Callable[[], Coroutine[Any, Any, Any]]) -> Callable:
         health_registry[name] = fn
         return fn
+
     return decorator
 
 
 @register_module_health("ml")
 async def check_ml_health() -> dict[str, Any]:
     from src.analysis.ml_coordinator import ml_coordinator
+
     try:
         len(ml_coordinator._prophet_cache) > 0 or len(ml_coordinator._ensemble_cache) > 0
         return {"status": "ok", "models_loaded": len(ml_coordinator._prophet_cache) + len(ml_coordinator._ensemble_cache)}
@@ -31,6 +35,7 @@ async def check_ml_health() -> dict[str, Any]:
 async def check_llm_health() -> dict[str, Any]:
     try:
         from src.llm.router import llm
+
         if llm is None:
             return {"status": "not_configured"}
         # Quick ping via a minimal completion
@@ -45,9 +50,11 @@ async def check_llm_health() -> dict[str, Any]:
 async def check_telegram_health() -> dict[str, Any]:
     try:
         from src.config import settings
+
         if not settings.telegram_bot_token:
             return {"status": "not_configured"}
         import telegram
+
         bot = telegram.Bot(token=settings.telegram_bot_token)
         me = await bot.get_me()
         return {"status": "ok", "username": me.username if me else "unknown"}
@@ -59,9 +66,11 @@ async def check_telegram_health() -> dict[str, Any]:
 async def check_tbank_health() -> dict[str, Any]:
     try:
         from src.config import settings
+
         if not settings.tinkoff_token:
             return {"status": "not_configured"}
         from src.trading.brokers.tbank import TBankClient
+
         client = TBankClient(token=settings.tinkoff_token, sandbox=settings.tinkoff_sandbox)
         accounts = client.get_accounts()
         has_accounts = len(accounts) > 0 if accounts else False

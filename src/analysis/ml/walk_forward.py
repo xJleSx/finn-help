@@ -138,9 +138,7 @@ def model_weight_from_oos(oos_metrics: dict[str, Any]) -> float:
     return float(round((acc - 0.5) * 4 * min(folds / 3, 1), 3))
 
 
-def baseline_accuracy(
-    close_series: pd.Series, y: np.ndarray, mask: np.ndarray, val_slice: slice, y_val: np.ndarray
-) -> float:
+def baseline_accuracy(close_series: pd.Series, y: np.ndarray, mask: np.ndarray, val_slice: slice, y_val: np.ndarray) -> float:
     close_vals: np.ndarray = np.asarray(close_series.iloc[: len(y)].values).astype(float)
     prev_close = np.roll(close_vals, 1)
     prev_close[0] = close_vals[0]

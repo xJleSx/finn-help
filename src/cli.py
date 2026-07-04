@@ -109,11 +109,7 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> 
 
         board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
         last_date = db.query(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-        from_date = (
-            (last_date[0] + timedelta(days=1)).isoformat()
-            if last_date
-            else (date.today() - timedelta(days=365)).isoformat()
-        )
+        from_date = (last_date[0] + timedelta(days=1)).isoformat() if last_date else (date.today() - timedelta(days=365)).isoformat()
 
         history = await moex.get_history(tk, from_date=from_date, board=board)
         if not history:
@@ -171,11 +167,7 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> 
                     if reporting_date_str:
                         rdate = date.fromisoformat(reporting_date_str)
                         # Check if report for this date already exists
-                        existing = (
-                            db.query(FinancialReport)
-                            .filter_by(instrument_id=inst.id, report_date=rdate, period_type=period_type)
-                            .first()
-                        )
+                        existing = db.query(FinancialReport).filter_by(instrument_id=inst.id, report_date=rdate, period_type=period_type).first()
                         if not existing:
                             fr = FinancialReport(instrument_id=inst.id, report_date=rdate, period_type=period_type)
                             for key, val in fin_data.items():
@@ -369,12 +361,7 @@ def macro() -> None:
             "m2": "M2 (млрд руб)",
         }
         for indicator_type in labels:
-            row = (
-                db.query(MacroIndicator)
-                .filter_by(indicator_type=indicator_type)
-                .order_by(MacroIndicator.date.desc())
-                .first()
-            )
+            row = db.query(MacroIndicator).filter_by(indicator_type=indicator_type).order_by(MacroIndicator.date.desc()).first()
             if row:
                 table.add_row(labels[indicator_type], str(row.value), str(row.date))
             else:
@@ -431,9 +418,7 @@ def financials(
     year: int = typer.Option(2026, "--year", "-y", help="Год отчёта"),
     net_profit: Optional[float] = typer.Option(None, "--net-profit", help="Чистая прибыль (RUB)"),
     revenue: Optional[float] = typer.Option(None, "--revenue", help="Выручка (RUB)"),
-    net_interest_income: Optional[float] = typer.Option(
-        None, "--interest-income", help="Чистые процентные доходы (RUB)"
-    ),
+    net_interest_income: Optional[float] = typer.Option(None, "--interest-income", help="Чистые процентные доходы (RUB)"),
     total_assets: Optional[float] = typer.Option(None, "--assets", help="Активы (RUB)"),
     total_liabilities: Optional[float] = typer.Option(None, "--liabilities", help="Обязательства (RUB)"),
     total_equity: Optional[float] = typer.Option(None, "--equity", help="Собственный капитал (RUB)"),
@@ -449,12 +434,7 @@ def financials(
             return
 
         if view:
-            reports = (
-                db.query(FinancialReport)
-                .filter_by(instrument_id=inst.id)
-                .order_by(FinancialReport.report_date.desc())
-                .all()
-            )
+            reports = db.query(FinancialReport).filter_by(instrument_id=inst.id).order_by(FinancialReport.report_date.desc()).all()
             if not reports:
                 console.print(f"[yellow]Нет данных для {ticker}[/yellow]")
                 return
@@ -483,19 +463,13 @@ def financials(
         ]
         if not any(fields):
             console.print("[red]Укажите хотя бы один финансовый показатель[/red]")
-            console.print(
-                "Пример: finn financials SBER --net-profit 162.49e9 --assets 8620.3e9 --period Q1 --year 2026"
-            )
+            console.print("Пример: finn financials SBER --net-profit 162.49e9 --assets 8620.3e9 --period Q1 --year 2026")
             return
 
         from datetime import date as dt_date
 
         report_date = dt_date(year, 1, 1)
-        existing = (
-            db.query(FinancialReport)
-            .filter_by(instrument_id=inst.id, report_date=report_date, period_type=period)
-            .first()
-        )
+        existing = db.query(FinancialReport).filter_by(instrument_id=inst.id, report_date=report_date, period_type=period).first()
         if existing:
             console.print("[yellow]Отчёт за этот период уже существует, обновляю...[/yellow]")
 
@@ -551,12 +525,7 @@ def bond(
             return
 
         if view:
-            offerings = (
-                db.query(BondOffering)
-                .filter_by(instrument_id=inst.id)
-                .order_by(BondOffering.offering_date.desc())
-                .all()
-            )
+            offerings = db.query(BondOffering).filter_by(instrument_id=inst.id).order_by(BondOffering.offering_date.desc()).all()
             if not offerings:
                 console.print(f"[yellow]Нет данных для {ticker}[/yellow]")
                 return
@@ -619,8 +588,7 @@ def scan(ticker: str = typer.Argument(..., help="Тикер для массов�
             matches = [
                 s
                 for s in stocks + etfs + bonds
-                if ticker.upper() in str(s.get("SECID", "")).upper()
-                or ticker.upper() in str(s.get("SHORTNAME", "")).upper()
+                if ticker.upper() in str(s.get("SECID", "")).upper() or ticker.upper() in str(s.get("SHORTNAME", "")).upper()
             ]
 
             if not matches:
@@ -767,10 +735,7 @@ def prune_models(max_versions: int = 5) -> None:
     from src.model_registry import prune_models as _prune
 
     result = _prune(max_versions=max_versions)
-    console.print(
-        f"[green]✓[/green] Pruned: {result['registry_pruned']} versions, "
-        f"{result['orphan_files_removed']} orphans"
-    )
+    console.print(f"[green]✓[/green] Pruned: {result['registry_pruned']} versions, {result['orphan_files_removed']} orphans")
 
 
 @app.command()
@@ -886,11 +851,16 @@ def history(
     table.add_column("Баланс", justify="right")
     table.add_column("Причина")
     for t in reversed(trades):
-        pnl_str = f"{t['pnl']:+,.2f}" if t['pnl'] else "-"
+        pnl_str = f"{t['pnl']:+,.2f}" if t["pnl"] else "-"
         table.add_row(
-            t["timestamp"][:19], t["ticker"], t["direction"],
-            f"{t['quantity']:.0f}", f"{t['price']:.2f}",
-            pnl_str, f"{t['balance_after']:,.0f}", t["reason"],
+            t["timestamp"][:19],
+            t["ticker"],
+            t["direction"],
+            f"{t['quantity']:.0f}",
+            f"{t['price']:.2f}",
+            pnl_str,
+            f"{t['balance_after']:,.0f}",
+            t["reason"],
         )
     console.print(table)
 

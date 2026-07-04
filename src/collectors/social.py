@@ -10,28 +10,109 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 MOEX_TICKERS: set[str] = {
-    "SBER", "GAZP", "LKOH", "VTBR", "MOEX", "NLMK", "MGNT", "MTSS",
-    "SNGS", "SNGSP", "TATN", "TATNP", "RTKM", "RTKMP", "PHOR", "AFKS",
-    "YNDX", "PLZL", "CHMF", "MAGN", "ROSN", "FIVE", "ALRS", "GMKN",
-    "AFLT", "IRAO", "RUAL", "TRNFP", "BANE", "BANEP", "FEES", "HYDR",
-    "MRKS", "MSNG", "PIKK", "POLY", "RSTI", "SVAV", "TCSG", "TGKA",
-    "TLKM", "UNKL", "UPRO", "USBN", "VSMO",
+    "SBER",
+    "GAZP",
+    "LKOH",
+    "VTBR",
+    "MOEX",
+    "NLMK",
+    "MGNT",
+    "MTSS",
+    "SNGS",
+    "SNGSP",
+    "TATN",
+    "TATNP",
+    "RTKM",
+    "RTKMP",
+    "PHOR",
+    "AFKS",
+    "YNDX",
+    "PLZL",
+    "CHMF",
+    "MAGN",
+    "ROSN",
+    "FIVE",
+    "ALRS",
+    "GMKN",
+    "AFLT",
+    "IRAO",
+    "RUAL",
+    "TRNFP",
+    "BANE",
+    "BANEP",
+    "FEES",
+    "HYDR",
+    "MRKS",
+    "MSNG",
+    "PIKK",
+    "POLY",
+    "RSTI",
+    "SVAV",
+    "TCSG",
+    "TGKA",
+    "TLKM",
+    "UNKL",
+    "UPRO",
+    "USBN",
+    "VSMO",
 }
 
 POSITIVE_WORDS: set[str] = {
-    "рост", "прибыль", "доход", "выручка", "дивиденд", "увеличение",
-    "повышение", "укрепление", "рекорд", "успех", "позитивный",
-    "оптимизм", "восстановление", "buyback", "buy",
-    "bullish", "outperform", "rally", "surge", "growth", "profit",
-    "gain", "rise", "upgrade", "breakthrough", "recovery",
+    "рост",
+    "прибыль",
+    "доход",
+    "выручка",
+    "дивиденд",
+    "увеличение",
+    "повышение",
+    "укрепление",
+    "рекорд",
+    "успех",
+    "позитивный",
+    "оптимизм",
+    "восстановление",
+    "buyback",
+    "buy",
+    "bullish",
+    "outperform",
+    "rally",
+    "surge",
+    "growth",
+    "profit",
+    "gain",
+    "rise",
+    "upgrade",
+    "breakthrough",
+    "recovery",
 }
 
 NEGATIVE_WORDS: set[str] = {
-    "падение", "снижение", "убыток", "долг", "кризис", "санкция",
-    "обвал", "крах", "дефолт", "банкротство", "инфляция",
-    "рецессия", "потеря", "запрет", "эмбарго",
-    "bearish", "decline", "crash", "loss", "downgrade", "drop",
-    "plunge", "slump", "debt", "penalty", "restriction",
+    "падение",
+    "снижение",
+    "убыток",
+    "долг",
+    "кризис",
+    "санкция",
+    "обвал",
+    "крах",
+    "дефолт",
+    "банкротство",
+    "инфляция",
+    "рецессия",
+    "потеря",
+    "запрет",
+    "эмбарго",
+    "bearish",
+    "decline",
+    "crash",
+    "loss",
+    "downgrade",
+    "drop",
+    "plunge",
+    "slump",
+    "debt",
+    "penalty",
+    "restriction",
 }
 
 
@@ -44,7 +125,10 @@ class SocialMediaCollector:
         self._min_interval: float = 0.34
 
     async def collect_telegram(
-        self, db: Any, channel_username: str, limit: int = 50,
+        self,
+        db: Any,
+        channel_username: str,
+        limit: int = 50,
     ) -> list[dict[str, Any]]:
         try:
             from telethon import TelegramClient
@@ -65,15 +149,17 @@ class SocialMediaCollector:
                 if not msg.text:
                     continue
                 parsed = self.parse_message(msg.text)
-                messages.append({
-                    "external_id": str(msg.id),
-                    "text": msg.text,
-                    "published_at": msg.date.replace(tzinfo=timezone.utc) if msg.date else None,
-                    "tickers": parsed["tickers"],
-                    "sentiment": parsed["sentiment"],
-                    "sentiment_score": parsed["sentiment_score"],
-                    "content_hash": hashlib.sha256(msg.text.encode("utf-8")).hexdigest(),
-                })
+                messages.append(
+                    {
+                        "external_id": str(msg.id),
+                        "text": msg.text,
+                        "published_at": msg.date.replace(tzinfo=timezone.utc) if msg.date else None,
+                        "tickers": parsed["tickers"],
+                        "sentiment": parsed["sentiment"],
+                        "sentiment_score": parsed["sentiment_score"],
+                        "content_hash": hashlib.sha256(msg.text.encode("utf-8")).hexdigest(),
+                    }
+                )
 
             if not messages:
                 return messages
@@ -116,7 +202,10 @@ class SocialMediaCollector:
         return {"tickers": tickers, "sentiment": sentiment, "sentiment_score": score}
 
     def save_messages(
-        self, db: Any, messages: list[dict[str, Any]], instrument_map: dict[str, int],
+        self,
+        db: Any,
+        messages: list[dict[str, Any]],
+        instrument_map: dict[str, int],
     ) -> None:
         from src.db.models import News, NewsInstrument
 
@@ -152,4 +241,5 @@ class SocialMediaCollector:
     @staticmethod
     def _build_instrument_map(db: Any) -> dict[str, int]:
         from src.db.models import Instrument
+
         return {r.ticker.upper(): r.id for r in db.query(Instrument).all()}

@@ -79,9 +79,7 @@ class PortfolioAllocator:
         for p in positions:
             inst_result = await db.execute(select(Instrument).where(Instrument.id == p.instrument_id))
             inst = inst_result.scalar_one_or_none()
-            price_result = await db.execute(
-                select(Price).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc())
-            )
+            price_result = await db.execute(select(Price).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc()))
             price = price_result.scalars().first()
             current_price = price.close if price else 0
             value = current_price * p.quantity if current_price else 0
@@ -95,12 +93,13 @@ class PortfolioAllocator:
             )
         return result_list
 
-
-
     async def _allocate_from_data_core(
-        self, capital: float, existing: list[dict[str, Any]],
+        self,
+        capital: float,
+        existing: list[dict[str, Any]],
         instruments_data: list[dict[str, Any]],
-        score_fn: Any, risk_fn: Any,
+        score_fn: Any,
+        risk_fn: Any,
     ) -> dict[str, Any]:
         plan = {}
         total_allocated = 0.0
@@ -185,25 +184,33 @@ class PortfolioAllocator:
         }
 
     def _allocate_from_data(
-        self, capital: float, existing: list[dict[str, Any]],
-        instruments_data: list[dict[str, Any]], db: Any,
+        self,
+        capital: float,
+        existing: list[dict[str, Any]],
+        instruments_data: list[dict[str, Any]],
+        db: Any,
     ) -> dict[str, Any]:
         async def score_fn(data, cat, budget, _existing):
             return self._score_candidates(data, cat, budget, _existing, db)
+
         async def risk_fn(item):
             return item_risk(item, db, capital)
-        return asyncio.run(
-            self._allocate_from_data_core(capital, existing, instruments_data, score_fn, risk_fn)
-        )
+
+        return asyncio.run(self._allocate_from_data_core(capital, existing, instruments_data, score_fn, risk_fn))
 
     async def _allocate_from_data_async(
-        self, capital: float, existing: list[dict[str, Any]],
-        instruments_data: list[dict[str, Any]], db: AsyncSession,
+        self,
+        capital: float,
+        existing: list[dict[str, Any]],
+        instruments_data: list[dict[str, Any]],
+        db: AsyncSession,
     ) -> dict[str, Any]:
         async def score(data, cat, budget, _existing):
             return await self._score_candidates_async(data, cat, budget, _existing, db)
+
         async def risk(item):
             return await item_risk_async(item, db, capital)
+
         return await self._allocate_from_data_core(capital, existing, instruments_data, score, risk)
 
     def allocate(self, capital: float, db: Any = None) -> dict[str, Any]:
@@ -248,13 +255,7 @@ class PortfolioAllocator:
 
             div_yield = 0.0
             one_year_ago = date.today() - timedelta(days=365)
-            divs = (
-                db.query(Dividend)
-                .filter_by(instrument_id=inst.id)
-                .filter(Dividend.date >= one_year_ago)
-                .order_by(Dividend.date.desc())
-                .all()
-            )
+            divs = db.query(Dividend).filter_by(instrument_id=inst.id).filter(Dividend.date >= one_year_ago).order_by(Dividend.date.desc()).all()
             if divs and last_price and last_price > 0:
                 div_yield = sum(d.amount for d in divs) / last_price * 100
                 if div_yield > 25:
@@ -267,12 +268,7 @@ class PortfolioAllocator:
                     )
                     div_yield = 25.0
 
-            fm = (
-                db.query(FundamentalMetric)
-                .filter_by(instrument_id=inst.id)
-                .order_by(FundamentalMetric.date.desc())
-                .first()
-            )
+            fm = db.query(FundamentalMetric).filter_by(instrument_id=inst.id).order_by(FundamentalMetric.date.desc()).first()
             upcoming_div = (
                 db.query(CorporateEvent)
                 .filter(
@@ -316,18 +312,14 @@ class PortfolioAllocator:
         result = []
         one_year_ago = date.today() - timedelta(days=365)
         for inst in instruments:
-            price_result = await db.execute(
-                select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc())
-            )
+            price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()))
             price = price_result.scalars().first()
             last_price = price.close if price else None
             sector = SECTOR_NAMES.get(inst.ticker, inst.sector or "")
 
             div_yield = 0.0
             divs_result = await db.execute(
-                select(Dividend).where(
-                    (Dividend.instrument_id == inst.id) & (Dividend.date >= one_year_ago)
-                ).order_by(Dividend.date.desc())
+                select(Dividend).where((Dividend.instrument_id == inst.id) & (Dividend.date >= one_year_ago)).order_by(Dividend.date.desc())
             )
             divs = divs_result.scalars().all()
             if divs and last_price and last_price > 0:
@@ -357,7 +349,6 @@ class PortfolioAllocator:
             )
         return result
 
-
     def _filter_candidates_by_category(self, instruments: list[dict[str, Any]], category: str) -> list[dict[str, Any]]:
         if category == "etf":
             return [i for i in instruments if i["type"] == "etf" and i["last_price"]]
@@ -383,7 +374,12 @@ class PortfolioAllocator:
         if not candidates:
             return []
         return await self._score_candidates_core_async(
-            candidates, category, budget, existing_tickers, existing_tickers_list, db,
+            candidates,
+            category,
+            budget,
+            existing_tickers,
+            existing_tickers_list,
+            db,
         )
 
     def _score_candidates_core(
@@ -548,6 +544,7 @@ class PortfolioAllocator:
                 reason_parts.append("уже в портфеле")
 
             from src.analysis.correlation import correlation as corr_analyzer
+
             penalty = await corr_analyzer.diversification_penalty_async(c["ticker"], existing_tickers_list, db)
             if penalty > 0:
                 score -= penalty
@@ -631,7 +628,6 @@ class PortfolioAllocator:
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates
 
-
     def _score_candidates(
         self,
         instruments: list[dict[str, Any]],
@@ -683,7 +679,6 @@ class PortfolioAllocator:
             existing_tickers_list,
             db,
         )
-
 
     def _upcoming_dividend_score(self, inst: dict[str, Any], db: Any) -> dict[str, Any]:
         try:
@@ -807,9 +802,7 @@ class PortfolioAllocator:
             inst = inst_result.scalar_one_or_none()
             if not inst:
                 return False
-            prices_result = await db.execute(
-                select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()).limit(22)
-            )
+            prices_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()).limit(22))
             prices = prices_result.scalars().all()
             if not prices or len(prices) < 5:
                 return False
@@ -830,9 +823,7 @@ class PortfolioAllocator:
 
     async def _momentum_score_async(self, inst: dict[str, Any], db: AsyncSession) -> dict[str, Any]:
         try:
-            prices_result = await db.execute(
-                select(Price).where(Price.instrument_id == inst["id"]).order_by(Price.date.desc()).limit(21)
-            )
+            prices_result = await db.execute(select(Price).where(Price.instrument_id == inst["id"]).order_by(Price.date.desc()).limit(21))
             prices = prices_result.scalars().all()
             if not prices or len(prices) < 5:
                 return {"bonus": 0.0, "reason": ""}
@@ -871,9 +862,7 @@ class PortfolioAllocator:
 
     async def _upcoming_dividend_score_async(self, inst: dict[str, Any], db: AsyncSession) -> dict[str, Any]:
         try:
-            divs_result = await db.execute(
-                select(Dividend).where(Dividend.instrument_id == inst["id"]).order_by(Dividend.date.desc()).limit(2)
-            )
+            divs_result = await db.execute(select(Dividend).where(Dividend.instrument_id == inst["id"]).order_by(Dividend.date.desc()).limit(2))
             divs = divs_result.scalars().all()
             if not divs:
                 return {"bonus": 0.0, "reason": ""}
@@ -906,9 +895,7 @@ class PortfolioAllocator:
 
     async def _volume_score_async(self, inst: dict[str, Any], db: AsyncSession) -> float:
         try:
-            prices_result = await db.execute(
-                select(Price).where(Price.instrument_id == inst["id"]).order_by(Price.date.desc()).limit(20)
-            )
+            prices_result = await db.execute(select(Price).where(Price.instrument_id == inst["id"]).order_by(Price.date.desc()).limit(20))
             prices = prices_result.scalars().all()
             if not prices:
                 return 0.0
@@ -921,7 +908,6 @@ class PortfolioAllocator:
         except Exception:
             logger.warning("Failed to get liquidity score", exc_info=True)
             return 0.0
-
 
     def recommend(self, capital: float = 0, db: Any = None, exclude: set[str] | None = None) -> list[dict[str, Any]]:
         self._load_profile_from_db()
@@ -961,6 +947,7 @@ class PortfolioAllocator:
     async def allocate_async(self, capital: float, db: AsyncSession | None = None) -> dict[str, Any]:
         if db is None:
             from src.db.connection import AsyncSessionLocal
+
             async with AsyncSessionLocal() as session:
                 existing = await self._get_current_portfolio_async(session)
                 instruments_data = await self._load_instruments_async(session)
@@ -968,7 +955,6 @@ class PortfolioAllocator:
         existing = await self._get_current_portfolio_async(db)
         instruments_data = await self._load_instruments_async(db)
         return await self._allocate_from_data_async(capital, existing, instruments_data, db)
-
 
 
 allocator = PortfolioAllocator()

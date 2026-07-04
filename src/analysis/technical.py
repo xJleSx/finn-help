@@ -70,9 +70,7 @@ class TechnicalAnalyzer:
         df["atr"] = tr.rolling(window=period).mean()
         return df
 
-    def _add_momentum_scores(
-        self, df: pd.DataFrame, score: float, max_score: float, reasons: list[str]
-    ) -> tuple[float, float]:
+    def _add_momentum_scores(self, df: pd.DataFrame, score: float, max_score: float, reasons: list[str]) -> tuple[float, float]:
         latest = df.iloc[-1]
         close = latest.get("close")
 

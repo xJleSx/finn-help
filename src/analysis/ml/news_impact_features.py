@@ -14,13 +14,23 @@ logger = logging.getLogger(__name__)
 
 CATEGORY_VALUES = ["MACRO", "GEOPOLITICAL", "SECTOR", "COMPANY", "MARKET"]
 SUBCATEGORY_VALUES = [
-    "sanctions", "conflict", "earnings", "merger_acquisition",
-    "monetary_policy", "inflation", "energy", "banking",
+    "sanctions",
+    "conflict",
+    "earnings",
+    "merger_acquisition",
+    "monetary_policy",
+    "inflation",
+    "energy",
+    "banking",
 ]
 
 NEWS_FEATURE_COLS = [
-    "sentiment_score", "impact_score", "source_weight", "source_count",
-    "sentiment_positive", "sentiment_negative",
+    "sentiment_score",
+    "impact_score",
+    "source_weight",
+    "source_count",
+    "sentiment_positive",
+    "sentiment_negative",
 ]
 for c in CATEGORY_VALUES:
     NEWS_FEATURE_COLS.append(f"cat_{c}")
@@ -29,14 +39,18 @@ for s in SUBCATEGORY_VALUES:
 NEWS_FEATURE_COLS += ["hour_of_day", "day_of_week"]
 
 MARKET_FEATURE_COLS = [
-    "return_5d_before", "volatility_20d", "volume_change_5d",
+    "return_5d_before",
+    "volatility_20d",
+    "volume_change_5d",
 ]
 
 ALL_FEATURE_COLS = NEWS_FEATURE_COLS + MARKET_FEATURE_COLS
 
 
 def extract_features(
-    db: Any, news_article: News, days_market: int = 30,
+    db: Any,
+    news_article: News,
+    days_market: int = 30,
 ) -> dict[str, float]:
     ts = news_article.published_at or news_article.created_at or datetime.now(timezone.utc)
     score = float(news_article.sentiment_score or 0.0)
@@ -58,11 +72,7 @@ def extract_features(
     for s in SUBCATEGORY_VALUES:
         features[f"subcat_{s}"] = 1.0 if sub == s else 0.0
 
-    linked = (
-        db.query(NewsInstrument)
-        .filter(NewsInstrument.news_id == news_article.id)
-        .first()
-    )
+    linked = db.query(NewsInstrument).filter(NewsInstrument.news_id == news_article.id).first()
     if linked:
         mkt = _market_features(db, linked.instrument_id, ts, days_market)
         features.update(mkt)
@@ -74,7 +84,10 @@ def extract_features(
 
 
 def _market_features(
-    db: Any, instrument_id: int, before: datetime, days: int,
+    db: Any,
+    instrument_id: int,
+    before: datetime,
+    days: int,
 ) -> dict[str, float]:
     cutoff = before - timedelta(days=days)
     prices = (
@@ -113,17 +126,15 @@ def _market_features(
 
 
 def forward_return(
-    db: Any, instrument_id: int, after: datetime, days: int,
+    db: Any,
+    instrument_id: int,
+    after: datetime,
+    days: int,
 ) -> float:
     start = after.date()
     end = start + timedelta(days=days + 1)
 
-    p0 = (
-        db.query(Price)
-        .filter(Price.instrument_id == instrument_id, Price.date >= start)
-        .order_by(Price.date)
-        .first()
-    )
+    p0 = db.query(Price).filter(Price.instrument_id == instrument_id, Price.date >= start).order_by(Price.date).first()
     p1 = (
         db.query(Price)
         .filter(
@@ -140,8 +151,10 @@ def forward_return(
 
 
 def build_training_data(
-    db: Any, ticker: str,
-    max_articles: int = 500, days_back: Optional[int] = None,
+    db: Any,
+    ticker: str,
+    max_articles: int = 500,
+    days_back: Optional[int] = None,
 ) -> pd.DataFrame:
     if days_back is None:
         days_back = settings.ml_impact_days_back

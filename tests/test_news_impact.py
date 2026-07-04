@@ -105,10 +105,15 @@ class TestExtractFeatures:
 
     def test_extract_unknown_subcategory(self, db_session, instrument):
         article = News(
-            id=100, title="Test", summary="", source_type="rss",
+            id=100,
+            title="Test",
+            summary="",
+            source_type="rss",
             published_at=datetime.now(timezone.utc),
-            sentiment="neutral", is_relevant=True,
-            category="COMPANY", subcategory="unknown_sub",
+            sentiment="neutral",
+            is_relevant=True,
+            category="COMPANY",
+            subcategory="unknown_sub",
         )
         db_session.add(article)
         db_session.flush()
@@ -138,9 +143,13 @@ class TestExtractFeatures:
 
     def test_no_linked_instrument(self, db_session):
         article = News(
-            id=200, title="orphan", summary="", source_type="rss",
+            id=200,
+            title="orphan",
+            summary="",
+            source_type="rss",
             published_at=datetime.now(timezone.utc),
-            sentiment="neutral", is_relevant=True,
+            sentiment="neutral",
+            is_relevant=True,
             category="MACRO",
         )
         db_session.add(article)
@@ -211,9 +220,14 @@ class TestNewsImpactModel:
     def test_predict_no_model(self, db_session):
         model = NewsImpactModel("UNIQUE_TICKER_NO_COLLISION_12345")
         article = News(
-            id=9999, title="Test", summary="", source_type="rss",
+            id=9999,
+            title="Test",
+            summary="",
+            source_type="rss",
             published_at=datetime.now(timezone.utc),
-            sentiment="neutral", is_relevant=True, category="MACRO",
+            sentiment="neutral",
+            is_relevant=True,
+            category="MACRO",
         )
         db_session.add(article)
         db_session.commit()

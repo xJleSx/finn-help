@@ -61,6 +61,7 @@ async def _check_cooldown(update: Update) -> bool:
 
 def guard(with_cooldown: bool = False):
     """Декоратор: проверка доступа, effective_message, опционально cooldown."""
+
     def decorator(handler: Callable) -> Callable:
         @wraps(handler)
         async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -71,7 +72,9 @@ def guard(with_cooldown: bool = False):
             if with_cooldown and not await _check_cooldown(update):
                 return
             return await handler(update, context)
+
         return wrapper
+
     return decorator
 
 
@@ -83,6 +86,7 @@ _ANTI_FLOOD_COOLDOWN = float(__import__("src.config", fromlist=["settings"]).set
 def anti_flood_check(user_id: int) -> bool:
     """Returns True if message should be processed, False if flood detected."""
     import time
+
     now = time.monotonic()
     last = _last_message_time.get(user_id, 0.0)
     if now - last < _ANTI_FLOOD_COOLDOWN:
