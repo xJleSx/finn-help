@@ -39,3 +39,6 @@ logs/
 # ML model weights
 *.pt
 *.pth
+
+# Temp files
+tmp/
