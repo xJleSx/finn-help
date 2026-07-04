@@ -35,8 +35,8 @@ class NewsAttribution:
                 explainer = shap.TreeExplainer(xgb_model)
                 self._explainers[horizon_days] = explainer
                 return explainer
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("SHAP explainer failed: %s", e)
         return None
 
     def explain(
@@ -63,8 +63,8 @@ class NewsAttribution:
                 ]
                 attributions.sort(key=lambda x: x["importance"], reverse=True)
                 return attributions
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("SHAP attribution failed: %s", e)
 
         return self._coefficient_attribution(horizon_days)
 

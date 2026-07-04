@@ -11,6 +11,7 @@ from src.core.context import (
     get_request_id,
     set_request_id,
 )
+from src.core.resilience import CircuitBreakerOpenError, get_circuit_breaker
 from src.trading.brokers.tbank import TBankClient
 from src.trading.execution.audit import log_trade, save_order
 from src.trading.execution.stoploss import position_tracker
@@ -18,20 +19,18 @@ from src.trading.execution.stoploss import position_tracker
 logger = logging.getLogger(__name__)
 
 
-def _notify_trade(record: "OrderRecord", reason: str = "") -> None:
+async def _notify_trade(record: "OrderRecord", reason: str = "") -> None:
     try:
         from src.interfaces.telegram_broadcaster import broadcast_trade
 
-        asyncio.ensure_future(
-            broadcast_trade(
-                ticker=record.ticker,
-                direction=record.direction,
-                quantity=record.quantity,
-                price=record.price,
-                status=record.status,
-                reason=reason,
-                order_id=record.order_id or "",
-            )
+        await broadcast_trade(
+            ticker=record.ticker,
+            direction=record.direction,
+            quantity=record.quantity,
+            price=record.price,
+            status=record.status,
+            reason=reason,
+            order_id=record.order_id or "",
         )
     except Exception:
         logger.exception("Failed to schedule trade broadcast")
@@ -142,7 +141,7 @@ async def execute_order(
         position_tracker.update(ticker, direction, quantity, record.price)
         _execution_log.append(record)
         record.db_id = save_order(record)
-        _notify_trade(record, reason)
+        await _notify_trade(record, reason)
         return record
 
     if effective_mode == TradeMode.AUTO:
@@ -151,14 +150,14 @@ async def execute_order(
             logger.error("Trading disabled — set ENABLE_TRADING=true to use AUTO mode")
             _execution_log.append(record)
             record.db_id = save_order(record)
-            _notify_trade(record, reason)
+            await _notify_trade(record, reason)
             return record
         if not settings.tinkoff_token:
             record.status = "failed"
             logger.error("No TINKOFF_TOKEN set — cannot execute AUTO mode order")
             _execution_log.append(record)
             record.db_id = save_order(record)
-            _notify_trade(record, reason)
+            await _notify_trade(record, reason)
             return record
 
         # AUTO mode execution
@@ -183,7 +182,7 @@ async def execute_order(
                 logger.warning("No FIGI found for %s, cannot place order", ticker)
                 _execution_log.append(record)
                 record.db_id = save_order(record)
-                _notify_trade(record, reason)
+                await _notify_trade(record, reason)
                 return record
 
             quantity_lots = quantity // lot_size
@@ -192,7 +191,7 @@ async def execute_order(
                 logger.warning("Quantity %d is less than one lot (%d) for %s", quantity, lot_size, ticker)
                 _execution_log.append(record)
                 record.db_id = save_order(record)
-                _notify_trade(record, reason)
+                await _notify_trade(record, reason)
                 return record
 
             exec_cfg = personal.get("execution", {})
@@ -202,6 +201,25 @@ async def execute_order(
 
             use_sandbox = settings.tinkoff_sandbox
             requested_price = record.price
+
+            orders_cb = get_circuit_breaker("tbank_orders")
+            if orders_cb.is_open:
+                logger.warning(
+                    "tbank_orders circuit breaker OPEN — falling back to DRY_RUN for %s %s",
+                    direction, ticker,
+                )
+                record.status = "simulated"
+                record.order_id = f"dry_cb_{datetime.now(timezone.utc).timestamp()}"
+                position_tracker.update(ticker, direction, quantity, record.price)
+                _execution_log.append(record)
+                record.db_id = save_order(record)
+                await _notify_trade(record, reason=f"CB_OPEN_FALLBACK {reason}")
+                logger.info(
+                    "CB-FALLBACK DRY_RUN %s %d %s at %.2f (%s)",
+                    direction, quantity, ticker, requested_price, reason,
+                )
+                return record
+
             async with TBankClient(use_sandbox=use_sandbox) as client:
                 accounts = await client.get_accounts()
                 if not accounts:
@@ -209,18 +227,31 @@ async def execute_order(
                     logger.warning("No accounts found")
                     _execution_log.append(record)
                     record.db_id = save_order(record)
-                    _notify_trade(record, reason)
+                    await _notify_trade(record, reason)
                     return record
 
                 account_id = str(accounts[0]["id"])
 
-                result = await client.place_order(
-                    figi=resolved_figi,
-                    quantity=quantity_lots,
-                    direction=direction,
-                    account_id=account_id,
-                    idempotency_key=record.idempotency_key,
-                )
+                try:
+                    result = await client.place_order(
+                        figi=resolved_figi,
+                        quantity=quantity_lots,
+                        direction=direction,
+                        account_id=account_id,
+                        idempotency_key=record.idempotency_key,
+                    )
+                except CircuitBreakerOpenError:
+                    logger.warning(
+                        "Circuit breaker OPEN during place_order for %s — falling back to DRY_RUN",
+                        ticker,
+                    )
+                    record.status = "simulated"
+                    record.order_id = f"dry_cb_{datetime.now(timezone.utc).timestamp()}"
+                    position_tracker.update(ticker, direction, quantity, record.price)
+                    _execution_log.append(record)
+                    record.db_id = save_order(record)
+                    await _notify_trade(record, reason=f"CB_OPEN_FALLBACK {reason}")
+                    return record
                 _order_id = result.get("order_id")
                 record.order_id = str(_order_id) if _order_id is not None else None
                 record.status = str(result.get("status", "unknown"))
@@ -287,7 +318,7 @@ async def execute_order(
 
         _execution_log.append(record)
         record.db_id = save_order(record)
-        _notify_trade(record, reason)
+        await _notify_trade(record, reason)
         return record
 
     if effective_mode == TradeMode.MANUAL:
@@ -299,7 +330,7 @@ async def execute_order(
 
     _execution_log.append(record)
     record.db_id = save_order(record)
-    _notify_trade(record, reason)
+    await _notify_trade(record, reason)
     return record
 
 

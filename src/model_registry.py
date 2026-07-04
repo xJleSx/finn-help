@@ -244,3 +244,56 @@ def cleanup_old_versions(name: str, keep: int = 3) -> None:
     registry[name]["latest"] = versions[0]["version"]
     _save_registry(registry)
     logger.info("Cleaned up %s old versions of %s, keeping %s", len(versions) - keep, name, keep)
+
+
+def prune_models(max_versions: int = 5, model_dir: Optional[Path] = None) -> dict[str, int]:
+    """Remove stale model versions and orphaned .pt / .pkl files.
+
+    Args:
+        max_versions: Maximum number of versions to keep per model.
+        model_dir: Directory to scan for orphaned model files. Defaults to MODEL_DIR.
+
+    Returns:
+        Dict with 'registry_pruned' and 'orphan_files_removed' counts.
+    """
+    registry = _load_registry()
+    registry_pruned = 0
+    for name in list(registry.keys()):
+        versions = sorted(registry[name]["versions"], key=lambda v: v["version"], reverse=True)
+        if len(versions) > max_versions:
+            for v in versions[max_versions:]:
+                p = Path(v["path"])
+                if p.exists():
+                    p.unlink()
+            registry[name]["versions"] = versions[:max_versions]
+            registry[name]["latest"] = versions[0]["version"]
+            registry_pruned += len(versions) - max_versions
+    _save_registry(registry)
+
+    orphan_removed = 0
+    scan_dir = model_dir or MODEL_DIR
+    if scan_dir.exists():
+        known_paths = set()
+        for data in registry.values():
+            for v in data.get("versions", []):
+                known_paths.add(str(Path(v["path"]).resolve()))
+
+        for f in scan_dir.iterdir():
+            if f.is_file() and f.suffix in (".pkl", ".pt", ".pth"):
+                if str(f.resolve()) not in known_paths:
+                    try:
+                        f.unlink()
+                        orphan_removed += 1
+                        logger.info("Removed orphaned model file: %s", f)
+                    except OSError as e:
+                        logger.warning("Failed to remove orphaned file %s: %s", f, e)
+
+    if registry_pruned > 0 or orphan_removed > 0:
+        logger.info(
+            "Prune complete: %d registry versions removed, %d orphan files cleaned",
+            registry_pruned, orphan_removed,
+        )
+    else:
+        logger.info("Prune: nothing to clean")
+
+    return {"registry_pruned": registry_pruned, "orphan_files_removed": orphan_removed}

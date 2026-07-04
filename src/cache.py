@@ -50,8 +50,8 @@ def cached(
                     data = r.get(key)
                     if data is not None:
                         return json.loads(data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Redis get failed: %s", e)
             else:
                 entry = _memory_cache.get(key)
                 if entry and time.time() - entry[0] < ttl:
@@ -62,8 +62,8 @@ def cached(
             if r:
                 try:
                     r.setex(key, ttl, json.dumps(result, default=str))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Redis set failed: %s", e)
             else:
                 _memory_cache[key] = (time.time(), result)
 
@@ -86,8 +86,8 @@ def invalidate(pattern: str) -> None:
                     r.delete(*keys)
                 if cursor == 0:
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Redis invalidate failed: %s", e)
     keys_to_delete = [k for k in _memory_cache if k.startswith(key.replace("*", ""))]
     for k in keys_to_delete:
         _memory_cache.pop(k, None)

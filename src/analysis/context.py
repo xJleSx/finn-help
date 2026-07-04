@@ -8,7 +8,6 @@ from src.analysis.fundamental import FundamentalAnalyzer
 from src.collectors.news import NewsCollector
 from src.constants import NEWS_STALE_HOURS
 from src.db.models import Dividend, Indicator, Instrument, News, NewsInstrument, Price
-from src.signals.engine import compute_risk_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,6 @@ class TickerContextBuilder:
 
     def build(self, db: Any, ticker: str) -> str:
         from src.analysis.loader import data_loader
-        from src.analysis.ml_coordinator import ml_coordinator
 
         inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
         if not inst:
@@ -166,8 +164,8 @@ class TickerContextBuilder:
                     lines.append("Обоснование:")
                     for r in rr[:5]:
                         lines.append(f"  • {r}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Context analysis service failed: %s", e)
 
         return "\n".join(lines)
 

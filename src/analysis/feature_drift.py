@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-import json
 import logging
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import Any
 
-import numpy as np
 from scipy.stats import ks_2samp
-
 from sqlalchemy import func
 
+from src.analysis.feature_store import bump_version, invalidate
 from src.db.connection import get_session
-from src.db.models import FeatureCache, Price
-from src.analysis.feature_store import FEATURE_TYPE_TTL, bump_version, invalidate
+from src.db.models import FeatureCache
 
 logger = logging.getLogger(__name__)
 

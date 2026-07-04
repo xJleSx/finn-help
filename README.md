@@ -22,7 +22,7 @@ AI-финансовый ассистент для MOEX. Анализирует �
 finn-help/
 ├── src/                          # Python backend (FastAPI)
 │   ├── analysis/
-│   │   ├── ml/                   # XGBoost, LightGBM, CatBoost, Ensemble, Prophet, SentimentEvolution
+│   │   ├── ml/                   # XGBoost, LightGBM, CatBoost, Ensemble, StatsModels, SentimentEvolution
 │   │   ├── inference/            # Granger causality, causal impact, instrument graph
 │   │   ├── backtest.py           # Monte-Carlo backtesting engine
 │   │   ├── fundamental.py        # Мультипликаторы, аномалии, сравнение с сектором
@@ -56,7 +56,7 @@ finn-help/
 │   ├── cache.py                  # Redis-кэш с in-memory fallback
 │   └── user_profile.py           # Risk profiles + персонализация
 ├── web/                          # Next.js dashboard
-├── tests/                        # 1207 pytest тестов
+├── tests/                        # 1200+ pytest тестов
 ├── tools/                        # audit_formatters.py
 └── Dockerfile / docker-compose.yml
 ```
@@ -183,7 +183,7 @@ npm run dev
 ```bash
 uv sync --group dev
 uv run pytest -v
-# 1207 тестов (2026-06-29)
+# 1207+ тестов (2026-07-03)
 ```
 
 ## Переменные окружения
@@ -201,7 +201,7 @@ uv run pytest -v
 - **Backend**: Python 3.13, FastAPI, SQLAlchemy, SQLite, XGBoost, LightGBM, CatBoost
 - **Frontend**: Next.js 16, React 19, Tailwind CSS, lightweight-charts
 - **Auth**: JWT (python-jose), bcrypt
-- **ML**: Stacking ensemble, walk-forward validation, Prophet
+- **ML**: Stacking ensemble, walk-forward validation, StatsModels (ExponentialSmoothing)
 - **Deploy**: Docker multi-stage build, docker-compose, healthcheck
 
 ## Лицензия

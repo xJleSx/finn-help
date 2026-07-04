@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from src.analysis.anomaly.features import rolling_volume_features
 from src.config import settings
@@ -17,7 +21,7 @@ class VolumeAnomalyDetector:
         self._trained = False
         self._feature_cols: list[str] = []
 
-    def train(self, db: Any, ticker: str | None = None) -> dict[str, Any]:
+    def train(self, db: Session, ticker: str | None = None) -> dict[str, Any]:
         t = ticker or self.ticker
         if not t:
             return {"trained": False, "reason": "no ticker"}
@@ -35,6 +39,19 @@ class VolumeAnomalyDetector:
         self._trained = True
         return {"trained": True, "samples": len(x), "features": len(self._feature_cols)}
 
+    async def async_train(self, db: AsyncSession, ticker: str | None = None) -> dict[str, Any]:
+        loop = asyncio.get_running_loop()
+
+        def _sync_train() -> dict[str, Any]:
+            from src.db.connection import get_session
+            sync_db = get_session()
+            try:
+                return self.train(sync_db, ticker)
+            finally:
+                sync_db.close()
+
+        return await loop.run_in_executor(None, _sync_train)
+
     def predict(self, features: dict[str, float]) -> float:
         if self._model is None:
             return 0.0
@@ -45,17 +62,28 @@ class VolumeAnomalyDetector:
         anomaly_score = float(np.clip(-score / 10.0, 0.0, 1.0))
         return anomaly_score
 
-    def predict_article(self, db: Any, news_article: Any) -> float:
+    def predict_article(self, db: Session, news_article: Any) -> float:
         published = news_article.published_at
         if published is None:
             published = datetime.now(timezone.utc)
         features = self._build_single_day_features(db, published)
         return self.predict(features)
 
-    def _build_single_day_features(self, db: Any, day: datetime) -> dict[str, float]:
-        from datetime import timedelta
+    async def async_predict_article(self, db: AsyncSession, news_article: Any) -> float:
+        loop = asyncio.get_running_loop()
 
-        from sqlalchemy import func, select
+        def _sync_predict() -> float:
+            from src.db.connection import get_session
+            sync_db = get_session()
+            try:
+                return self.predict_article(sync_db, news_article)
+            finally:
+                sync_db.close()
+
+        return await loop.run_in_executor(None, _sync_predict)
+
+    def _build_single_day_features(self, db: Session, day: datetime) -> dict[str, float]:
+        from datetime import timedelta
 
         from src.db.models import Instrument, News, NewsInstrument
 

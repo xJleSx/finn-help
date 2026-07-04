@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import structlog
 
 from src.core.context import context_extra
 from src.db.connection import get_session
@@ -15,9 +17,10 @@ if TYPE_CHECKING:
     from src.trading.execution.engine import OrderRecord
 from src.db.models import TradeLog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 AUDIT_DIR = Path(__file__).resolve().parents[2] / "data" / "audit"
+MAX_AUDIT_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 def _ensure_audit_dir() -> None:
@@ -29,18 +32,54 @@ def _audit_log_file() -> Path:
     return AUDIT_DIR / f"orders_{datetime.now(timezone.utc).strftime('%Y_%m')}.jsonl"
 
 
-def audit_log_order(entry: dict[str, object]) -> None:
-    file_path = _audit_log_file()
-    entry["_timestamp"] = datetime.now(timezone.utc).isoformat()
-    entry["_id"] = f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}_{os.urandom(4).hex()}"
-    entry.update(context_extra())
+def _rotate_if_needed(file_path: Path) -> None:
     try:
+        if file_path.exists() and file_path.stat().st_size > MAX_AUDIT_BYTES:
+            index = 1
+            while True:
+                rotated = file_path.with_name(f"{file_path.stem}_{index}{file_path.suffix}")
+                if not rotated.exists():
+                    break
+                index += 1
+            file_path.rename(rotated)
+            logger.info("audit_rotated", src=str(file_path), dst=str(rotated))
+    except OSError as e:
+        logger.error("audit_rotation_failed: %s", e)
+
+
+def _build_audit_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Build a standardized audit entry with full context."""
+    now = datetime.now(timezone.utc)
+    entry["_timestamp"] = now.isoformat()
+    entry["_event_id"] = str(uuid.uuid4())
+    entry["_event_date"] = now.strftime("%Y-%m-%d")
+    entry["_event_time"] = now.strftime("%H:%M:%S.%f")[:-3]
+    entry["_source"] = "finn-help"
+    entry["_version"] = "0.1.0"
+
+    # Add execution context
+    entry.update(context_extra())
+
+    # Ensure all trade-critical fields are present
+    if "order_id" not in entry and "id" in entry:
+        entry["order_id"] = entry["id"]
+    return entry
+
+
+def audit_log_order(entry: dict[str, object]) -> None:
+    entry = _build_audit_entry(dict(entry))
+    file_path = _audit_log_file()
+    _rotate_if_needed(file_path)
+    try:
+        line = json.dumps(entry, ensure_ascii=False, default=str)
         with open(file_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+            f.write(line + "\n")
             f.flush()
             os.fsync(f.fileno())
+        # Also log to structlog for real-time observability
+        logger.info("audit.order", **entry)
     except Exception as e:
-        logger.error("Failed to write audit log: %s", e)
+        logger.error("Failed to write audit log", error=str(e))
 
 
 def save_order(order: "OrderRecord") -> int:
@@ -59,26 +98,36 @@ def save_order(order: "OrderRecord") -> int:
         )
         db.add(o)
         db.commit()
-        logger.info("Order saved to DB: %s %s %d @ %.2f", order.direction, order.ticker, order.quantity, order.price)
-
-        audit_log_order(
-            {
-                "event": "order_saved",
-                "id": o.id,
-                "ticker": order.ticker,
-                "direction": order.direction,
-                "quantity": order.quantity,
-                "price": order.price,
-                "status": order.status,
-                "mode": order.mode.value if hasattr(order.mode, "value") else str(order.mode),
-                "reason": order.reason,
-            }
+        logger.info(
+            "order_saved",
+            ticker=order.ticker,
+            direction=order.direction,
+            quantity=order.quantity,
+            price=order.price,
+            status=order.status,
+            mode=order.mode.value if hasattr(order.mode, "value") else str(order.mode),
         )
+
+        audit_entry = {
+            "event": "order_saved",
+            "order_type": "market",
+            "id": o.id,
+            "ticker": order.ticker,
+            "direction": order.direction,
+            "quantity": order.quantity,
+            "price": order.price,
+            "status": order.status,
+            "mode": order.mode.value if hasattr(order.mode, "value") else str(order.mode),
+            "reason": order.reason,
+        }
+        if order.order_id:
+            audit_entry["exchange_order_id"] = order.order_id
+        audit_log_order(audit_entry)
 
         return int(o.id)
     except Exception as e:
         db.rollback()
-        logger.error("Failed to save order: %s", e)
+        logger.error("order_save_failed", ticker=order.ticker, error=str(e))
         return 0
     finally:
         db.close()
@@ -110,26 +159,33 @@ def log_trade(
         )
         db.add(t)
         db.commit()
-        logger.info("Trade logged: %s %d %s @ %.2f (P&L=%.2f)", direction, quantity, ticker, price, pnl)
-
-        audit_log_order(
-            {
-                "event": "trade_logged",
-                "id": t.id,
-                "order_id": order_id,
-                "ticker": ticker,
-                "direction": direction,
-                "quantity": quantity,
-                "price": price,
-                "commission": commission,
-                "slippage": slippage,
-                "pnl": pnl,
-                "reason": reason,
-            }
+        logger.info(
+            "trade_logged",
+            ticker=ticker,
+            direction=direction,
+            quantity=quantity,
+            price=price,
+            pnl=pnl,
+            commission=commission,
         )
+
+        audit_entry = {
+            "event": "trade_executed",
+            "id": t.id,
+            "order_id": order_id,
+            "ticker": ticker,
+            "direction": direction,
+            "quantity": quantity,
+            "price": price,
+            "commission": commission,
+            "slippage": slippage,
+            "pnl": pnl,
+            "reason": reason,
+        }
+        audit_log_order(audit_entry)
     except Exception as e:
         db.rollback()
-        logger.error("Failed to log trade: %s", e)
+        logger.error("trade_log_failed", ticker=ticker, error=str(e))
     finally:
         db.close()
 
@@ -188,13 +244,29 @@ def update_order_status(order_id: int, status: str, **kwargs: object) -> None:
     try:
         o = db.query(OrderModel).filter_by(id=order_id).first()
         if o:
+            old_status = o.status
             o.status = status  # type: ignore[assignment]
             for k, v in kwargs.items():
                 if hasattr(o, k):
                     setattr(o, k, v)
             db.commit()
+            logger.info(
+                "order_status_updated",
+                order_id=order_id,
+                ticker=o.ticker,
+                old_status=old_status,
+                new_status=status,
+            )
+            audit_log_order({
+                "event": "order_status_changed",
+                "order_id": order_id,
+                "ticker": o.ticker,
+                "old_status": old_status,
+                "new_status": status,
+                "changes": {k: str(v) for k, v in kwargs.items()},
+            })
     except Exception as e:
         db.rollback()
-        logger.error("Failed to update order %d: %s", order_id, e)
+        logger.error("order_update_failed", order_id=order_id, error=str(e))
     finally:
         db.close()

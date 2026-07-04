@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import structlog
 from datetime import date, timedelta
 from typing import Any, Optional
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 

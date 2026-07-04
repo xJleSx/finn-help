@@ -459,8 +459,8 @@ async def collect_social_sentiment() -> None:
             for ticker in tickers:
                 try:
                     compute_social_features(db2, ticker)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Social features computation failed for %s: %s", ticker, e)
             db2.commit()
         finally:
             db2.close()

@@ -11,15 +11,11 @@ from src.collectors.macro import MacroCollector
 from src.constants import NEWS_SENTIMENT_DAYS
 from src.db.models import (
     BondOffering,
-    Dividend,
     FinancialReport,
     FundamentalMetric,
-    GeoRiskScore,
     Instrument,
     MetricSnapshot,
     News,
-    NewsInstrument,
-    Price,
 )
 from src.social.sentiment.aggregator import aggregator
 

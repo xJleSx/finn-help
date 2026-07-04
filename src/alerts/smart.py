@@ -4,8 +4,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_
-
 from src.db.models import Instrument, Price, Signal, SmartAlertRule
 
 logger = logging.getLogger(__name__)

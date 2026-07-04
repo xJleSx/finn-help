@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 import structlog
-from fastapi import Depends, HTTPException
+from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import User
-from src.interfaces.api.auth import create_token, get_db, hash_password, verify_password
+from src.interfaces.api.auth import create_token, hash_password, verify_password
 
 logger = structlog.get_logger(__name__)
 

@@ -4,8 +4,6 @@ import logging
 from typing import Any, Optional
 
 import numpy as np
-import torch
-import torch.nn as nn
 
 from src.analysis.ml._base import BaseRegressor, log_feature_importance
 from src.analysis.ml.news_impact_features import (
@@ -14,6 +12,7 @@ from src.analysis.ml.news_impact_features import (
     extract_features,
 )
 from src.config import settings
+from src.model_registry import MODEL_DIR
 from src.model_registry import load_model as load_from_registry
 
 logger = logging.getLogger(__name__)
@@ -24,22 +23,6 @@ LSTM_DROPOUT = 0.2
 LSTM_EPOCHS = 100
 LSTM_LR = 0.001
 LSTM_SEQ_LEN = 10
-
-
-class LSTMPredictor(nn.Module):
-    def __init__(
-        self, input_dim: int, hidden: int = LSTM_HIDDEN,
-        layers: int = LSTM_LAYERS, dropout: float = LSTM_DROPOUT,
-    ):
-        super().__init__()
-        self.lstm = nn.LSTM(input_dim, hidden, layers, batch_first=True, dropout=dropout if layers > 1 else 0)
-        self.fc = nn.Linear(hidden, 1)
-        self.layers = layers
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out, _ = self.lstm(x)
-        out = self.fc(out[:, -1, :])
-        return out.squeeze(-1)
 
 
 def _build_sequences(features: np.ndarray, targets: np.ndarray, seq_len: int = LSTM_SEQ_LEN):
@@ -85,8 +68,12 @@ class NewsImpactModel(BaseRegressor):
 
     def _train_lstm(
         self, x_train: np.ndarray, y_train: np.ndarray, input_dim: int
-    ) -> LSTMPredictor:
-        model = LSTMPredictor(input_dim=input_dim)
+    ) -> Any:
+        import torch
+        import torch.nn as nn
+
+        lstm_class = self._get_lstm_class()
+        model = lstm_class(input_dim=input_dim)
         optimizer = torch.optim.Adam(model.parameters(), lr=LSTM_LR)
         loss_fn = nn.MSELoss()
 
@@ -94,7 +81,7 @@ class NewsImpactModel(BaseRegressor):
         y_t = torch.from_numpy(y_train)
 
         model.train()
-        for epoch in range(LSTM_EPOCHS):
+        for _ in range(LSTM_EPOCHS):
             optimizer.zero_grad()
             pred = model(x_t)
             loss = loss_fn(pred, y_t)
@@ -103,12 +90,36 @@ class NewsImpactModel(BaseRegressor):
 
         return model
 
-    def _predict_lstm(self, model: LSTMPredictor, features_seq: np.ndarray) -> float:
+    def _predict_lstm(self, model: Any, features_seq: np.ndarray) -> float:
+        import torch
+
         model.eval()
         with torch.no_grad():
             x_t = torch.from_numpy(features_seq)
             pred = model(x_t)
             return float(pred.item())
+
+    @staticmethod
+    def _get_lstm_class() -> Any:
+        import torch
+        import torch.nn as nn
+
+        class _LSTMPredictor(nn.Module):
+            def __init__(
+                self, input_dim: int, hidden: int = LSTM_HIDDEN,
+                layers: int = LSTM_LAYERS, dropout: float = LSTM_DROPOUT,
+            ):
+                super().__init__()
+                self.lstm = nn.LSTM(input_dim, hidden, layers, batch_first=True, dropout=dropout if layers > 1 else 0)
+                self.fc = nn.Linear(hidden, 1)
+                self.layers = layers
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                out, _ = self.lstm(x)
+                out = self.fc(out[:, -1, :])
+                return out.squeeze(-1)
+
+        return _LSTMPredictor
 
     def train(self, db: Any, ticker: Optional[str] = None) -> dict[str, Any]:
         ticker = (ticker or self._ticker).upper()
@@ -149,22 +160,30 @@ class NewsImpactModel(BaseRegressor):
             lstm_dir_acc = 0.0
             xs, ys = _build_sequences(x, y, LSTM_SEQ_LEN)
             if len(xs) >= settings.ml_impact_min_train_samples:
-                seq_split = int(len(xs) * 0.8)
-                xs_train, xs_val = xs[:seq_split], xs[seq_split:]
-                ys_train, ys_val = ys[:seq_split], ys[seq_split:]
+                try:
+                    import torch
 
-                lstm_model = self._train_lstm(xs_train, ys_train, x.shape[1])
+                    seq_split = int(len(xs) * 0.8)
+                    xs_train, xs_val = xs[:seq_split], xs[seq_split:]
+                    ys_train, ys_val = ys[:seq_split], ys[seq_split:]
 
-                lstm_model.eval()
-                with torch.no_grad():
-                    lstm_preds = lstm_model(torch.from_numpy(xs_val)).numpy()
+                    lstm_model = self._train_lstm(xs_train, ys_train, x.shape[1])
 
-                lstm_rmse = float(np.sqrt(np.mean((lstm_preds - ys_val) ** 2)))
-                lstm_dir_acc = float(np.mean((np.sign(lstm_preds) == np.sign(ys_val)) | (np.abs(ys_val) < 0.001)))
+                    lstm_model.eval()
+                    with torch.no_grad():
+                        lstm_preds = lstm_model(torch.from_numpy(xs_val)).numpy()
 
-                self._lstm_models[h] = lstm_model
-                torch.save(lstm_model.state_dict(), f"{self._lstm_model_name(h)}.pt")
-                has_lstm = True
+                    lstm_rmse = float(np.sqrt(np.mean((lstm_preds - ys_val) ** 2)))
+                    lstm_dir_acc = float(np.mean((np.sign(lstm_preds) == np.sign(ys_val)) | (np.abs(ys_val) < 0.001)))
+
+                    self._lstm_models[h] = lstm_model
+                    lstm_path = MODEL_DIR / f"{self._lstm_model_name(h)}.pt"
+                    torch.save(lstm_model.state_dict(), str(lstm_path))
+                    has_lstm = True
+                except ImportError:
+                    logger.debug("torch not available, skipping LSTM for horizon %d", h)
+                except Exception as e:
+                    logger.debug("LSTM training failed for horizon %d: %s", h, e)
 
             if has_lstm and len(xs_val) == len(x_val[LSTM_SEQ_LEN:]):
                 xgb_ens = xgb_preds
@@ -207,6 +226,11 @@ class NewsImpactModel(BaseRegressor):
         return results
 
     def predict(self, db: Any, news_article: Any, horizon_days: int = 1) -> dict[str, Any]:
+        try:
+            import torch
+        except ImportError:
+            return {"predicted_return": 0.0, "confidence": 0.0, "model_loaded": False}
+
         model = self._models.get(horizon_days)
         if model is None:
             try:
@@ -224,14 +248,14 @@ class NewsImpactModel(BaseRegressor):
         lstm_model = self._lstm_models.get(horizon_days)
         if lstm_model is None:
             try:
-                lstm_path = f"{self._lstm_model_name(horizon_days)}.pt"
-                import os
-                if os.path.exists(lstm_path):
-                    lstm_model = LSTMPredictor(input_dim=len(self._feature_names))
-                    lstm_model.load_state_dict(torch.load(lstm_path))
+                lstm_path = MODEL_DIR / f"{self._lstm_model_name(horizon_days)}.pt"
+                if lstm_path.exists():
+                    lstm_cls = self._get_lstm_class()
+                    lstm_model = lstm_cls(input_dim=len(self._feature_names))
+                    lstm_model.load_state_dict(torch.load(str(lstm_path)))
                     self._lstm_models[horizon_days] = lstm_model
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("LSTM model load failed for horizon %d: %s", horizon_days, e)
 
         if lstm_model is not None:
             with torch.no_grad():
@@ -299,3 +323,9 @@ class NewsImpactModel(BaseRegressor):
         model = load_from_registry(self._model_name(horizon_days))
         self._models[horizon_days] = model
         return model
+
+
+# Backward-compatible alias for LSTMPredictor
+def lstm_predictor(input_dim: int, hidden: int = LSTM_HIDDEN, layers: int = LSTM_LAYERS, dropout: float = LSTM_DROPOUT) -> Any:
+    cls = NewsImpactModel._get_lstm_class()
+    return cls(input_dim=input_dim, hidden=hidden, layers=layers, dropout=dropout)

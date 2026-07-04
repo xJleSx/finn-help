@@ -4,7 +4,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import cast, Date, func
+from sqlalchemy import func
 
 from src.db.models import AlertLog, BondOffering, CorporateEvent, FinancialReport, Instrument, Signal
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from jinja2 import Environment, FileSystemLoader, BaseLoader, select_autoescape
+from jinja2 import BaseLoader, Environment, FileSystemLoader, select_autoescape
 
 logger = structlog.get_logger(__name__)
 

@@ -4,35 +4,21 @@ import logging
 from typing import Any
 
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
 
 from src.analysis.ml.news_impact_features import ALL_FEATURE_COLS, build_training_data
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
+_TORCH_AVAILABLE: bool = False
 
-class _Autoencoder(nn.Module):
+
+class _Autoencoder:  # stub for type hints
     def __init__(self, input_dim: int, hidden_dim: int = 8) -> None:
-        super().__init__()
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim * 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.ReLU(),
-        )
-        self.decoder = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim * 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim * 2, input_dim),
-        )
+        pass
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        return decoded
+    def forward(self, x: Any) -> Any:
+        return x
 
 
 class AutoencoderAnomalyDetector:
@@ -44,6 +30,33 @@ class AutoencoderAnomalyDetector:
         self._losses: list[float] = []
 
     def train(self, db: Any, ticker: str | None = None) -> dict[str, Any]:
+        try:
+            import torch
+            import torch.nn as nn
+            import torch.optim as optim
+        except ImportError:
+            return {"trained": False, "reason": "torch not available"}
+
+        class _RealAutoencoder(nn.Module):
+            def __init__(self, input_dim: int, hidden_dim: int = 8) -> None:
+                super().__init__()
+                self.encoder = nn.Sequential(
+                    nn.Linear(input_dim, hidden_dim * 2),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim * 2, hidden_dim),
+                    nn.ReLU(),
+                )
+                self.decoder = nn.Sequential(
+                    nn.Linear(hidden_dim, hidden_dim * 2),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim * 2, input_dim),
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                encoded = self.encoder(x)
+                decoded = self.decoder(encoded)
+                return decoded
+
         if not ticker:
             return {"trained": False, "reason": "no ticker"}
         df = build_training_data(db, ticker)
@@ -53,7 +66,7 @@ class AutoencoderAnomalyDetector:
         x = df[present].values.astype(np.float32)
         self.input_dim = len(present)
 
-        self._model = _Autoencoder(self.input_dim, settings.ml_anomaly_autoencoder_hidden_dim)
+        self._model = _RealAutoencoder(self.input_dim, settings.ml_anomaly_autoencoder_hidden_dim)
         tensor_x = torch.from_numpy(x)
         loader = torch.utils.data.DataLoader(tensor_x, batch_size=32, shuffle=True)
 
@@ -92,6 +105,8 @@ class AutoencoderAnomalyDetector:
         }
 
     def predict(self, features: np.ndarray) -> float:
+        import torch
+
         if self._model is None:
             return 0.0
         tensor_x = torch.from_numpy(features.reshape(1, -1).astype(np.float32))
@@ -104,6 +119,7 @@ class AutoencoderAnomalyDetector:
         return float(min(error, 1.0))
 
     def predict_article(self, db: Any, news_article: Any) -> float:
+
         from src.analysis.anomaly.features import build_anomaly_feature_vector
 
         vec = build_anomaly_feature_vector(db, news_article)

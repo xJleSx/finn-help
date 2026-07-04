@@ -1,8 +1,8 @@
 import asyncio
 import io
+import logging
 import time
 from collections import OrderedDict
-
 from typing import Any, Optional, cast
 
 import structlog
@@ -34,6 +34,7 @@ from src.db.connection import get_session
 from src.db.models import GeoRiskScore, Instrument, News, Price, UserSetting
 from src.db.models import Portfolio as PortModel
 from src.db.models import Signal as SignalModel
+from src.interfaces.telegram_guard import _check_access, _check_cooldown, analysis_cache, guard
 from src.interfaces.telegram_helpers import (
     ACTION_EMOJI,
     TOTAL_PAGES,
@@ -60,13 +61,6 @@ from src.portfolio.allocator import allocator
 from src.reports import generate_portfolio_csv
 
 logger = structlog.get_logger(__name__)
-
-from src.interfaces.telegram_guard import (
-    analysis_cache,
-    _check_access,
-    _check_cooldown,
-    guard,
-)
 
 DETAILED_KEYWORDS = {
     "анализ",
@@ -1557,8 +1551,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             rows = get_portfolio_positions(db)
             portfolio_value = sum(r["value"] for r in rows)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Portfolio value calc failed: %s", e)
 
         p_tickers: list[Any] = cast(list[Any], personal.get("favorite_tickers", []))
         p_horizon: str = cast(str, personal.get("investment_horizon", "medium"))
@@ -1571,7 +1565,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             pct = (portfolio_value / current_goal) * 100 if current_goal > 0 else 0
             text += f"🎯 Цель: {current_goal:,.0f} ₽ ({pct:.1f}%)\n"
         else:
-            text += f"🎯 Цель: не задана\n"
+            text += "🎯 Цель: не задана\n"
         text += f"📅 Горизонт: {horizon_label.get(p_horizon, p_horizon)}\n"
 
         # Show portfolio by sector
@@ -1592,7 +1586,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text += "\n<b>Команды:</b>\n"
         for k, name in names.items():
             text += f"• <code>/profile {k}</code> — {name} ({desc[k]})\n"
-        text += f"• <code>/profile goal СУММА</code> — установить цель\n"
+        text += "• <code>/profile goal СУММА</code> — установить цель\n"
         await update.effective_message.reply_text(text, parse_mode="HTML")
     finally:
         db.close()
@@ -2028,7 +2022,8 @@ async def favorite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     subcmd = args[0].lower() if args else "list"
 
     from src.db.connection import get_session
-    from src.db.models import Favorite as FavoriteModel, Instrument
+    from src.db.models import Favorite as FavoriteModel
+    from src.db.models import Instrument
 
     db = get_session()
     try:
@@ -2084,7 +2079,7 @@ async def favorite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "• /favorite remove TICKER — удалить из избранного\n"
                 "• /favorite list — показать избранное"
             )
-    except Exception as e:
+    except Exception:
         db.rollback()
         logger.exception("favorite_command_error")
         await update.effective_message.reply_text("❌ Ошибка при работе с избранным")

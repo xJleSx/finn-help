@@ -61,8 +61,8 @@ async def take_snapshot(period: str) -> None:
                 social_with_data = [s for s in all_social.values() if s["count"] > 0]
                 if social_with_data:
                     social_score_avg = round(sum(s["score"] for s in social_with_data) / len(social_with_data), 4)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Social score aggregation failed: %s", e)
 
             geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
             if geo_row:
@@ -305,8 +305,8 @@ async def generate_weekly_report_text() -> str:
                     parts.append(f"сигнал {prev_snap.signal_action}→{curr.signal_action}")
                 if curr.delta_score is not None:
                     parts.append(f"score {curr.delta_score:+.3f}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Weekly snapshot delta failed: %s", e)
 
             if parts:
                 changed.append(f"• <b>{ticker}</b>: {' | '.join(parts)}")

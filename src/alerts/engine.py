@@ -5,10 +5,10 @@ from typing import Any
 
 from sqlalchemy import select
 
+from src.alerts.deduplicator import AlertDeduplicator, AlertTimer
+from src.alerts.scorer import build_alert
 from src.analysis.anomaly.detector import AnomalyDetector
 from src.analysis.ml.news_impact import NewsImpactModel
-from src.alerts.deduplicator import AlertDeduplicator, AlertTimer
-from src.alerts.scorer import build_alert, classify_priority
 from src.config import settings
 from src.db.models import Instrument, News, NewsInstrument, Portfolio
 

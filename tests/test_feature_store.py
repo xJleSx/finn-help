@@ -83,7 +83,7 @@ class TestGetCached:
             mock_db.close.assert_called_once()
 
     def test_returns_stale(self):
-        from datetime import date, timedelta, datetime, timezone
+        from datetime import date, datetime, timedelta, timezone
 
         with (
             patch("src.analysis.feature_store._mem") as mock_mem,

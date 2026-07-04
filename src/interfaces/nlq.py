@@ -534,20 +534,20 @@ class NLQueryEngine:
             if profile:
                 try:
                     entry["profile"] = build_enriched_context_block(db, inst)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("NLQ profile block failed: %s", e)
                 if profile.description:
                     entry["description"] = profile.description[:300]
             if report:
                 try:
                     entry["financial_highlights"] = build_financial_highlights(report)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("NLQ highlights block failed: %s", e)
             if bond_offering:
                 try:
                     entry["bond_analysis"] = build_bond_analysis(bond_offering)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("NLQ bond analysis failed: %s", e)
             instruments.append(entry)
         return {
             "intent": "instrument_info",

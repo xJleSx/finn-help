@@ -5,14 +5,15 @@ import logging
 from datetime import date
 from typing import Any, Optional
 
+from sqlalchemy import func
+
 from src.config import settings
 from src.db.connection import get_session
 from src.db.models import Instrument
 from src.db.models import Signal as SignalModel
-from src.interfaces.telegram_helpers import html_escape
 from src.interfaces.telegram_alerter import AlertNotifier
+from src.interfaces.telegram_helpers import html_escape
 from src.notifications.service import NotificationService, format_daily_summary_text, format_signal_text
-from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,6 @@ async def broadcast_author_posts() -> None:
 
     from datetime import datetime, timezone
 
-    from src.config import settings
     from src.db.models import SocialPost
     from src.social.pulse import PulseAdapter
 

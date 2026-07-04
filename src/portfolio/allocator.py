@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -187,87 +188,13 @@ class PortfolioAllocator:
         self, capital: float, existing: list[dict[str, Any]],
         instruments_data: list[dict[str, Any]], db: Any,
     ) -> dict[str, Any]:
-        plan = {}
-        total_allocated = 0.0
-        sector_allocation: dict[str, float] = {}
-
-        for category, cfg in self._weights().items():
-            budget = capital * cfg["weight"]
-            candidates = self._score_candidates(instruments_data, category, budget, existing, db)
-
-            max_positions = cfg["max"]
-            for tier in ALLOCATOR_CAPITAL_TIERS:
-                if capital < tier["max_capital"] and budget < tier["min_budget"]:
-                    max_positions = tier["max_positions"]
-                    break
-
-            selected = candidates[:max_positions]
-            if not selected:
-                continue
-
-            cat_total = sum(s["score"] for s in selected) or 1
-            category_items = []
-            for item in selected:
-                share = item["score"] / cat_total
-                amount = round(budget * share, 2)
-
-                last_price = item.get("last_price")
-                if last_price and last_price > 0 and amount < last_price:
-                    continue
-
-                sector = item.get("sector", "Прочее")
-                limit = SECTOR_LIMITS.get(sector, 0.30)
-                current_sector_weight = (sector_allocation.get(sector, 0.0) + amount) / capital
-                if capital >= ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL and current_sector_weight > limit:
-                    continue
-
-                sector_allocation[sector] = sector_allocation.get(sector, 0.0) + amount
-
-                risk = item_risk(item, db, capital)
-                category_items.append(
-                    {
-                        "ticker": item["ticker"],
-                        "name": item["name"],
-                        "amount": amount,
-                        "reason": item.get("reason", ""),
-                        "expected_yield": item.get("yield", 0),
-                        "sector": sector,
-                        "last_price": item.get("last_price"),
-                        "risk": risk,
-                    }
-                )
-                total_allocated += amount
-
-            plan[category] = {
-                "label": cfg["label"],
-                "budget": round(budget, 2),
-                "items": category_items,
-            }
-
-        leftover = round(capital - total_allocated, 2)
-        if leftover > max(ALLOCATOR_LEFTOVER_MIN_ABS, capital * ALLOCATOR_LEFTOVER_THRESHOLD):
-            for cat_name in ["etf", "dividend"]:
-                if cat_name in plan and plan[cat_name]["items"]:
-                    items = plan[cat_name]["items"]
-                    total_score = sum(it.get("amount", 0) for it in items) or 1
-                    for it in items:
-                        frac = it["amount"] / total_score
-                        it["amount"] = round(it["amount"] + leftover * frac, 2)
-                    total_allocated += leftover
-                    break
-
-        projected_monthly = self._calc_projected_yield(plan, capital)
-
-        return {
-            "capital": capital,
-            "total_allocated": round(total_allocated, 2),
-            "reserve": round(capital - total_allocated, 2),
-            "plan": plan,
-            "projected_monthly_yield": round(projected_monthly, 2),
-            "projected_monthly_pct": round((projected_monthly / capital) * 100 if capital > 0 else 0, 2),
-            "existing_portfolio": existing,
-            "sector_allocation": sector_allocation,
-        }
+        async def score_fn(data, cat, budget, _existing):
+            return self._score_candidates(data, cat, budget, _existing, db)
+        async def risk_fn(item):
+            return item_risk(item, db, capital)
+        return asyncio.run(
+            self._allocate_from_data_core(capital, existing, instruments_data, score_fn, risk_fn)
+        )
 
     async def _allocate_from_data_async(
         self, capital: float, existing: list[dict[str, Any]],

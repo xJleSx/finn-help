@@ -10,6 +10,7 @@ from src.model_registry import (
     get_model_metrics,
     list_models,
     load_model,
+    prune_models,
     rollback,
     save_model,
     set_ab_test_meta,
@@ -139,3 +140,43 @@ class TestModelRegistry:
     def test_rollback_nonexistent_model(self):
         with pytest.raises(ValueError, match="not found"):
             rollback("no_model")
+
+
+class TestPruneModels:
+    def test_removes_old_versions(self):
+        for i in range(7):
+            save_model({"i": i}, "prune_model", metrics={"epoch": i})
+        result = prune_models(max_versions=3)
+        assert result["registry_pruned"] == 4
+        models = list_models()
+        m = next(m for m in models if m["name"] == "prune_model")
+        assert m["versions_count"] == 3
+
+    def test_keeps_all_if_under_limit(self):
+        for i in range(2):
+            save_model({"i": i}, "keep_model")
+        result = prune_models(max_versions=5)
+        assert result["registry_pruned"] == 0
+
+    def test_removes_orphaned_files(self):
+        import src.model_registry as mr
+
+        save_model({"x": 1}, "known_model")
+        orphan_path = mr.MODEL_DIR / "orphan.pkl"
+        orphan_path.write_bytes(b"dummy")
+        known_pt = mr.MODEL_DIR / "unknown.pt"
+        known_pt.write_bytes(b"dummy")
+
+        result = prune_models()
+        assert result["orphan_files_removed"] == 2
+        assert not orphan_path.exists()
+        assert not known_pt.exists()
+
+    def test_no_crash_on_missing_model_dir(self, tmp_path):
+        nonexistent = tmp_path / "does_not_exist"
+        result = prune_models(model_dir=nonexistent)
+        assert result == {"registry_pruned": 0, "orphan_files_removed": 0}
+
+    def test_handles_empty_registry(self):
+        result = prune_models(max_versions=3)
+        assert result == {"registry_pruned": 0, "orphan_files_removed": 0}

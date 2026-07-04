@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from src.notifications.templates.renderer import (
-    AlertTemplateRenderer,
-    PRIORITY_EMOJI,
-    PRIORITY_COLORS,
     ACTION_EMOJI,
+    PRIORITY_COLORS,
+    PRIORITY_EMOJI,
+    AlertTemplateRenderer,
 )
 
 

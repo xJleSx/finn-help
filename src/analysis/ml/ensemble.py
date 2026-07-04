@@ -4,11 +4,12 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from src.analysis.ml._base import EVENT_FEATURE_COLS, BASE_FEATURE_COLS, prepare_features
+from src.analysis.ml._base import prepare_features
 from src.analysis.ml.walk_forward import (
     adjust_confidence_by_oos,
     build_labels,
     model_weight_from_oos,
+    temporal_split,
     walk_forward_validate,
 )
 from src.model_registry import load_model as load_from_registry
@@ -28,6 +29,7 @@ class EnsemblePredictor:
         self._scaler: Any = None
         self._meta_model: Any = None
         self._ticker = ticker
+        self._meta_trained_at: float = 0.0
 
     @property
     def model_name(self) -> str:
@@ -169,6 +171,17 @@ class EnsemblePredictor:
             except Exception as e:
                 logger.warning("Ensemble %s training failed: %s", name, e)
                 results[name] = False
+
+        self._train_meta_oof(df, anomaly_mask=anomaly_mask)
+
+        for name in ("xgb", "lgb", "cat"):
+            try:
+                model = getattr(self, name)
+                if results.get(name):
+                    model.train(df, anomaly_mask=anomaly_mask)
+            except Exception as e:
+                logger.warning("Ensemble %s retrain after OOF failed: %s", name, e)
+                results[name] = False
         return results
 
     def save_meta(self, metrics: Optional[dict[str, Any]] = None) -> str:
@@ -214,67 +227,118 @@ class EnsemblePredictor:
         return success
 
     def _stacking_predict(self, df: pd.DataFrame, base_preds: list[dict[str, Any]]) -> float | None:
+        if self._scaler is None or self._meta_model is None:
+            return None
+        if not base_preds:
+            return None
         try:
-            from sklearn.linear_model import LogisticRegression  # type: ignore[import-untyped]
-            from sklearn.preprocessing import StandardScaler  # type: ignore[import-untyped]
-
-            if not all(c in df.columns for c in FEATURE_COLS):
-                return None
-
-            if self._scaler is not None and self._meta_model is not None:
-                features = prepare_features(df)
-                if len(features) == 0:
-                    return None
-                latest = self._scaler.transform(features.iloc[-1:].values)
-                prob = float(self._meta_model.predict_proba(latest)[0, 1])
-                return prob
-
-            lookahead = 5
-            threshold = 0.03
-
-            features = prepare_features(df)
-
-            if len(features) < 50:
-                return None
-
-            future_returns = df["close"].shift(-lookahead) / df["close"] - 1
-            aligned = features.iloc[:-lookahead]
-            labels = np.asarray(future_returns.iloc[: len(aligned)].values).astype(float)
-            y = np.where(labels > threshold, 1, np.where(labels < -threshold, 0, np.nan))
-            mask = ~np.isnan(y)
-            if mask.sum() < 40:
-                return None
-
-            x_meta = aligned[mask].values
-            y_meta = y[mask].astype(int)
-
-            split_idx = int(len(x_meta) * 0.8)
-            x_train, x_test = x_meta[:split_idx], x_meta[split_idx:]
-            y_train, y_test = y_meta[:split_idx], y_meta[split_idx:]
-
-            if len(x_train) < 30 or len(x_test) < 10:
-                return None
-
-            self._scaler = StandardScaler()
-            x_train_scaled = self._scaler.fit_transform(x_train)
-            x_test_scaled = self._scaler.transform(x_test)
-
-            self._meta_model = LogisticRegression(max_iter=2000, random_state=42, C=0.5)
-            self._meta_model.fit(x_train_scaled, y_train)
-
-            test_acc = float(np.mean(self._meta_model.predict(x_test_scaled) == y_test))
-            if test_acc < 0.52:
-                logger.debug("Stacking meta-learner test acc %.3f < 0.52, falling back", test_acc)
-                self._scaler = None
-                self._meta_model = None
-                return None
-
-            latest = self._scaler.transform(features.iloc[-1:].values)
-            prob = float(self._meta_model.predict_proba(latest)[0, 1])
+            meta_features = np.array(
+                [[r.get("probability", 0.5) for r in base_preds]],
+                dtype=np.float64,
+            )
+            scaled = self._scaler.transform(meta_features)
+            prob = float(self._meta_model.predict_proba(scaled)[0, 1])
             return prob
         except Exception as e:
-            logger.warning(f"Stacking meta-learner failed: {e}")
+            logger.warning("Stacking meta-learner predict failed: %s", e)
             return None
+
+    def _meta_needs_retrain(self) -> bool:
+        if self._meta_model is None:
+            return True
+        from src.config import settings
+        ttl_hours = getattr(settings, "ml_meta_ttl_hours", 24)
+        import time
+        return (time.time() - self._meta_trained_at) > ttl_hours * 3600
+
+    def _train_meta_oof(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> None:
+        """Train meta-learner on OOF predictions from base models.
+
+        Split data temporally, train base models on train split, collect
+        OOF predictions on val split, then train a LogisticRegression meta-learner.
+        Base models are retrained on full data afterward. Cached by schedule.
+        """
+        if not self._meta_needs_retrain():
+            return
+        if not all(c in df.columns for c in FEATURE_COLS):
+            return
+        features = prepare_features(df)
+        if features.empty or len(features) < 60:
+            return
+        y_raw, mask = build_labels(df["close"], lookahead=5, threshold=0.03)
+        n = min(len(features), len(y_raw))
+        aligned = features.iloc[:n].copy()
+        mask = mask[:n]
+        y_raw = y_raw[:n]
+        if mask.sum() < 40:
+            return
+
+        x_all = aligned[mask].values
+        y_all = y_raw[mask].astype(int)
+
+        splits = temporal_split(len(x_all))
+        train_slice = splits["train"]
+        val_slice = splits["val"]
+
+        if train_slice.stop <= train_slice.start or val_slice.stop <= val_slice.start:
+            return
+
+        x_train = x_all[train_slice]
+        y_train = y_all[train_slice]
+        x_val = x_all[val_slice]
+        y_val = y_all[val_slice]
+
+        if len(x_train) < 30 or len(x_val) < 10:
+            return
+
+        active_models = 0
+        oof_probs: list[np.ndarray] = []
+
+        for name in ("xgb", "lgb", "cat"):
+            model_obj = getattr(self, name, None)
+            if model_obj is None:
+                continue
+            try:
+                model_obj.fit(x_train, y_train)
+                if hasattr(model_obj._model, "predict_proba"):
+                    val_probs = model_obj._model.predict_proba(x_val)[:, 1]
+                else:
+                    val_probs = np.full(len(x_val), 0.5)
+                oof_probs.append(val_probs)
+                active_models += 1
+            except Exception as e:
+                logger.debug("OOF %s failed: %s", name, e)
+
+        if active_models < 2 or len(oof_probs) < 2:
+            logger.debug("Not enough models for OOF stacking (%d active)", active_models)
+            return
+
+        meta_x = np.column_stack(oof_probs)
+
+        try:
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.preprocessing import StandardScaler
+
+            self._scaler = StandardScaler()
+            meta_x_scaled = self._scaler.fit_transform(meta_x)
+
+            self._meta_model = LogisticRegression(max_iter=2000, random_state=42, C=0.5)
+            self._meta_model.fit(meta_x_scaled, y_val)
+
+            val_acc = float(np.mean(self._meta_model.predict(meta_x_scaled) == y_val))
+            if val_acc < 0.52:
+                logger.debug("OOF meta-learner acc %.3f < 0.52, discarding", val_acc)
+                self._scaler = None
+                self._meta_model = None
+                return
+
+            import time
+            self._meta_trained_at = time.time()
+            logger.info("OOF meta-learner trained: acc=%.3f, models=%d", val_acc, active_models)
+        except Exception as e:
+            logger.warning("OOF meta-learner training failed: %s", e)
+            self._scaler = None
+            self._meta_model = None
 
     def _walk_forward_validate(self, df: pd.DataFrame, model: Any) -> dict[str, Any]:
         if df.empty or len(df) < 60:

@@ -12,7 +12,7 @@ from src.interfaces.api.auth import get_current_user, require_user
 from src.interfaces.api.dependencies import get_portfolio_service
 from src.interfaces.api.schemas import AllocationResponse, PortfolioAddResponse, PortfolioPosition
 from src.portfolio.service import PortfolioService
-from src.reports import generate_portfolio_csv, generate_signals_csv, generate_sector_report_csv
+from src.reports import generate_portfolio_csv, generate_sector_report_csv, generate_signals_csv
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["portfolio"])

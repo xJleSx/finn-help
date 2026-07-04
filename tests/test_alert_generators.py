@@ -71,7 +71,6 @@ class TestReportAnomalies:
         db_session.add(inst)
         db_session.flush()
 
-        from datetime import datetime
         today = date.today()
         current = FinancialReport(
             instrument_id=inst.id, report_date=today - timedelta(days=30),
@@ -125,7 +124,8 @@ class TestSignalDropAlerts:
         db_session.add(inst)
         db_session.flush()
 
-        from datetime import datetime, timedelta as dt_td
+        from datetime import datetime
+        from datetime import timedelta as dt_td
         today = date.today()
         # conf goes 0.8 → 0.3 → 0.85 → 0.35: yesterday=0.3 < threshold from 0.8
         for i, conf in enumerate([0.3, 0.8, 0.35, 0.85]):

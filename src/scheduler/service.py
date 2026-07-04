@@ -1,10 +1,35 @@
 import asyncio
+import os
+import tempfile
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import structlog
+
 from src.scheduler.reporting import generate_daily_report, take_snapshot
 from src.scheduler.tasks import daily_update, weekly_update
 
+
+def _acquire_instance_lock(name: str = "scheduler") -> bool:
+    lock_dir = Path(os.environ.get("FINN_LOCK_DIR", tempfile.gettempdir()))
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f"finn_{name}.lock"
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+
+
+def _release_instance_lock(name: str = "scheduler") -> None:
+    lock_dir = Path(os.environ.get("FINN_LOCK_DIR", tempfile.gettempdir()))
+    lock_path = lock_dir / f"finn_{name}.lock"
+    lock_path.unlink(missing_ok=True)
+
+
+_INSTANCE_LOCK_HELD = False
 _SMART_RULES_CYCLE = 0
 
 logger = structlog.get_logger(__name__)
@@ -35,8 +60,7 @@ def _retry_failed_receipts() -> None:
         for receipt in pending:
             try:
                 if receipt.channel == "email" and receipt.title:
-                    from src.notifications.channels import EmailPushChannel
-                    from src.notifications.channels import PushMessage
+                    from src.notifications.channels import EmailPushChannel, PushMessage
                     channel = EmailPushChannel(db=db)
                     msg = PushMessage(
                         title=receipt.title or "",
@@ -63,8 +87,8 @@ def _check_smart_rules() -> None:
     from src.db.connection import get_session
     db = get_session()
     try:
-        from src.alerts.smart import SmartAlertEngine
         from src.alerts.history import AlertHistory
+        from src.alerts.smart import SmartAlertEngine
         engine = SmartAlertEngine()
         triggered = engine.evaluate_rules(db)
         if triggered:
@@ -97,13 +121,32 @@ _LAST_MONTHLY_MONTH: int | None = None
 
 
 async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
-    global _running, _LAST_SNAPSHOT_DAY, _LAST_WEEKLY_WEEK, _LAST_MONTHLY_MONTH
+    global _running, _LAST_SNAPSHOT_DAY, _LAST_WEEKLY_WEEK, _LAST_MONTHLY_MONTH, _INSTANCE_LOCK_HELD
+    if not _acquire_instance_lock("scheduler"):
+        logger.error("Another scheduler instance is already running (lock file exists)")
+        return
+    _INSTANCE_LOCK_HELD = True
     if _running:
         logger.warning("Scheduler already running")
         return
     _running = True
 
     logger.info("Scheduler started (interval=%ds)", interval)
+    shutdown_event = asyncio.Event()
+
+    async def _check_shutdown() -> None:
+        global _running
+        while _running:
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            if shutdown_event.is_set():
+                logger.info("shutdown.scheduler_signal_received")
+                _running = False
+                break
+
+    asyncio.create_task(_check_shutdown())
     while _running:
         start = datetime.now(timezone.utc)
         try:
@@ -214,6 +257,10 @@ async def start_background() -> "asyncio.Task[None]":
 
 
 def stop() -> None:
+    global _INSTANCE_LOCK_HELD
+    if _INSTANCE_LOCK_HELD:
+        _release_instance_lock("scheduler")
+        _INSTANCE_LOCK_HELD = False
     global _running
     _running = False
     logger.info("Scheduler stopping")

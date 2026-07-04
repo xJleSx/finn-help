@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
-
 from src.alerts.scorer import build_alert, classify_priority
 from src.db.models import News
 

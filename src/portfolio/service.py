@@ -108,7 +108,6 @@ class PortfolioService:
         return positions
 
     async def get_signals_for_csv(self, limit: int = 50) -> list[dict[str, Any]]:
-        from src.reports import generate_signals_csv
 
         result = await self.db.execute(select(Signal).order_by(Signal.date.desc()).limit(limit))
         signals = result.scalars().all()

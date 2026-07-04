@@ -396,16 +396,13 @@ async def test_execute_auto_exception(mock_tbank, mock_settings):
         assert record.status == "failed"
 
 
-def test_notify_trade_calls_broadcast():
-    import sys
-    from unittest.mock import MagicMock, patch
+@pytest.mark.asyncio
+async def test_notify_trade_calls_broadcast():
+ from unittest.mock import AsyncMock, patch
 
-    import src.trading.execution.engine as eng
+ import src.trading.execution.engine as eng
 
-    mock_telegram = MagicMock()
-    sys.modules["src.interfaces.telegram"] = mock_telegram
-
-    record = eng.OrderRecord(ticker="TEST", direction="BUY", quantity=1, price=100, mode=TradeMode.DRY_RUN)
-    with patch("src.trading.execution.engine.asyncio.ensure_future") as mock_future:
-        eng._notify_trade(record, reason="test")
-        mock_future.assert_called_once()
+ record = eng.OrderRecord(ticker="TEST", direction="BUY", quantity=1, price=100, mode=TradeMode.DRY_RUN)
+ with patch("src.interfaces.telegram_broadcaster.broadcast_trade", new_callable=AsyncMock) as mock_broadcast:
+  await eng._notify_trade(record, reason="test")
+  mock_broadcast.assert_awaited_once()

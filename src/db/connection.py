@@ -102,3 +102,15 @@ def init_db() -> None:
     alembic_cfg = Config(Path(__file__).resolve().parents[2] / "alembic.ini")
     command.upgrade(alembic_cfg, "head")
     logger.info("Database migrated to latest revision")
+
+
+def close_db() -> None:
+    """Close all database connections during shutdown."""
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        from sqlalchemy.orm import close_all_sessions
+        close_all_sessions()
+        logger.info("All database sessions closed")
+    except Exception as e:
+        logger.warning("Failed to close database sessions: %s", e)

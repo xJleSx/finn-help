@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import logging
+import warnings
 from typing import Any, Optional
 
 import numpy as np
@@ -9,14 +12,16 @@ from src.analysis.ml._base import BaseRegressor
 logger = logging.getLogger(__name__)
 
 
-class ProphetPredictor(BaseRegressor):
+class StatsModelsTrendPredictor(BaseRegressor):
     def __init__(self, ticker: str = ""):
         super().__init__(ticker)
         self._model: Optional[Any] = None
+        self._fitted_values: np.ndarray = np.array([])
+        self._residual_std: float = 0.0
 
     @property
     def _model_prefix(self) -> str:
-        return "prophet"
+        return "trend"
 
     def train(self, df: pd.DataFrame) -> bool:
         if df.empty or len(df) < 30:
@@ -36,7 +41,7 @@ class ProphetPredictor(BaseRegressor):
                 self.load()
             except (ValueError, FileNotFoundError, ModuleNotFoundError, ImportError):
                 logger.warning(
-                    "Prophet model for %s not found, auto-training (run train() first for performance)",
+                    "Trend model for %s not found, auto-training (run train() first for performance)",
                     self._ticker or "default",
                 )
 
@@ -44,9 +49,9 @@ class ProphetPredictor(BaseRegressor):
             try:
                 return self._predict_with_model(df, days_ahead)
             except Exception:
-                logger.warning("Loaded Prophet model failed, retraining", exc_info=True)
+                logger.warning("Loaded trend model failed, retraining", exc_info=True)
 
-        logger.info("Training Prophet model for %s on the fly (%d rows)", self._ticker or "default", len(df))
+        logger.info("Training trend model for %s on the fly (%d rows)", self._ticker or "default", len(df))
         self._model = self._fit(df)
         if self._model is None:
             return {"target_price": None, "confidence": 0.0, "signal_score": 0.0}
@@ -54,67 +59,82 @@ class ProphetPredictor(BaseRegressor):
         return self._predict_with_model(df, days_ahead)
 
     def _fit(self, df: pd.DataFrame) -> Any:
-        try:
-            from prophet import Prophet
-        except ImportError:
-            logger.warning("prophet not installed, using linear trend fallback")
-            import numpy as np
-
-            trend_df = df[["date", "close"]].copy()
-            trend_df.columns = ["ds", "y"]
-            trend_df["ds"] = pd.to_datetime(trend_df["ds"])
-            trend_df["y"] = trend_df["y"].clip(lower=0.01)
-
-            class LinearFallback:
-                def __init__(self, trend_df: pd.DataFrame) -> None:
-                    self.trend_df = trend_df
-                    self.changepoints: list[Any] = []
-                    self.params: dict[str, Any] = {"delta": np.array([])}
-                    x = np.arange(len(trend_df))
-                    y = np.log(trend_df["y"].values)
-                    self._coeffs = np.polyfit(x, y, 1)
-
-                def make_future_dataframe(self, periods: int) -> pd.DataFrame:
-                    import pandas as pd
-
-                    last = self.trend_df["ds"].max()
-                    return pd.DataFrame({"ds": pd.date_range(last + pd.Timedelta(days=1), periods=periods)})
-
-                def predict(self, future_df: pd.DataFrame) -> pd.DataFrame:
-                    import pandas as pd
-
-                    all_dates = pd.concat([self.trend_df["ds"], future_df["ds"]], ignore_index=True)
-                    x = np.arange(len(all_dates))
-                    log_pred = self._coeffs[0] * x + self._coeffs[1]
-                    pred = np.exp(log_pred)
-                    result = pd.DataFrame(
-                        {
-                            "ds": all_dates,
-                            "trend": pred,
-                            "yhat": pred,
-                            "yhat_lower": pred * 0.9,
-                            "yhat_upper": pred * 1.1,
-                        }
-                    )
-                    return result
-
-            return LinearFallback(trend_df)
-
         trend_df = df[["date", "close"]].copy()
         trend_df.columns = ["ds", "y"]
         trend_df["ds"] = pd.to_datetime(trend_df["ds"])
         trend_df["y"] = trend_df["y"].clip(lower=0.01)
 
+        try:
+            from statsmodels.tsa.holtwinters import ExponentialSmoothing
+        except ImportError:
+            logger.warning("statsmodels not installed, using linear trend fallback")
+            return self._linear_fallback(trend_df)
+
         n = len(trend_df)
-        model = Prophet(
-            yearly_seasonality=n >= 730,
-            weekly_seasonality=n >= 100,
-            daily_seasonality=False,
-            interval_width=0.80,
-            changepoint_prior_scale=0.20,
-        )
-        model.fit(trend_df)
-        return model
+        seasonal_periods: Optional[int] = None
+        if n >= 730:
+            seasonal_periods = 365
+        elif n >= 100:
+            seasonal_periods = 7
+
+        try:
+            if seasonal_periods is not None:
+                model = ExponentialSmoothing(
+                    trend_df["y"],
+                    trend="add",
+                    seasonal="add",
+                    seasonal_periods=seasonal_periods,
+                    initialization_method="estimated",
+                )
+            else:
+                model = ExponentialSmoothing(
+                    trend_df["y"],
+                    trend="add",
+                    seasonal=None,
+                    initialization_method="estimated",
+                )
+            fitted = model.fit()
+            self._fitted_values = fitted.fittedvalues.values
+            residuals = trend_df["y"].values[:len(self._fitted_values)] - self._fitted_values
+            self._residual_std = float(np.std(residuals)) if len(residuals) > 0 else 0.0
+            return fitted
+        except Exception as e:
+            logger.warning("ExponentialSmoothing failed for %s: %s, falling back to linear", self._ticker or "", e)
+            return self._linear_fallback(trend_df)
+
+    def _linear_fallback(self, trend_df: pd.DataFrame) -> Any:
+        x = np.arange(len(trend_df))
+        y = np.log(trend_df["y"].values)
+        coeffs = np.polyfit(x, y, 1)
+        fitted_log = coeffs[0] * x + coeffs[1]
+        self._fitted_values = np.exp(fitted_log)
+        residuals = trend_df["y"].values - self._fitted_values
+        self._residual_std = float(np.std(residuals)) if len(residuals) > 0 else 0.0
+
+        class LinearTrendModel:
+            def __init__(self, coeffs: np.ndarray, trend_df: pd.DataFrame) -> None:
+                self._coeffs = coeffs
+                self._trend_df = trend_df
+
+            def make_future_dataframe(self, periods: int) -> pd.DataFrame:
+                last = self._trend_df["ds"].max()
+                return pd.DataFrame({"ds": pd.date_range(last + pd.Timedelta(days=1), periods=periods)})
+
+            def predict(self, future_df: pd.DataFrame) -> pd.DataFrame:
+                all_dates = pd.concat([self._trend_df["ds"], future_df["ds"]], ignore_index=True)
+                x = np.arange(len(all_dates))
+                log_pred = self._coeffs[0] * x + self._coeffs[1]
+                pred = np.exp(log_pred)
+                result = pd.DataFrame({
+                    "ds": all_dates,
+                    "trend": pred,
+                    "yhat": pred,
+                    "yhat_lower": pred * 0.9,
+                    "yhat_upper": pred * 1.1,
+                })
+                return result
+
+        return LinearTrendModel(coeffs, trend_df)
 
     def _trend_slope(self, forecast: pd.DataFrame, n_days: int = 21) -> float:
         trend: np.ndarray = np.asarray(forecast["trend"].values).astype(float)
@@ -133,25 +153,15 @@ class ProphetPredictor(BaseRegressor):
         if self._model is None:
             return {"changed": False, "magnitude": 0.0}
         try:
-            changepoints = self._model.changepoints
-            if changepoints is None or len(changepoints) == 0:
-                return {"changed": False, "magnitude": 0.0}
-            deltas = self._model.params["delta"]
-            delta_series = pd.Series(deltas.flatten() if hasattr(deltas, "flatten") else deltas)
-            if len(delta_series) == 0:
-                return {"changed": False, "magnitude": 0.0}
-
-            today = pd.Timestamp.today()
-            recent_mask = (today - changepoints).dt.days.between(0, 20)
-            recent_indices = recent_mask[recent_mask].index
-            if len(recent_indices) == 0:
-                return {"changed": False, "magnitude": 0.0}
-
-            recent_deltas = delta_series.iloc[recent_indices]
-            total_magnitude = float(recent_deltas.abs().sum())
-            return {"changed": total_magnitude > 0.02, "magnitude": round(total_magnitude, 4)}
+            if hasattr(self._model, "params") and "delta" in self._model.params:
+                deltas = self._model.params["delta"]
+                delta_series = pd.Series(deltas.flatten() if hasattr(deltas, "flatten") else deltas)
+                if len(delta_series) > 0:
+                    total_magnitude = float(delta_series.abs().sum())
+                    return {"changed": total_magnitude > 0.02, "magnitude": round(total_magnitude, 4)}
         except Exception:
-            return {"changed": False, "magnitude": 0.0}
+            pass
+        return {"changed": False, "magnitude": 0.0}
 
     def _trend_strength(self, forecast: pd.DataFrame, trend_df: pd.DataFrame) -> float:
         try:
@@ -193,6 +203,10 @@ class ProphetPredictor(BaseRegressor):
         future = self._model.make_future_dataframe(periods=days_ahead)
         forecast = self._model.predict(future)
 
+        if self._residual_std > 0 and "yhat" in forecast.columns and "yhat_lower" not in forecast.columns:
+            forecast["yhat_lower"] = forecast["yhat"] - 1.96 * self._residual_std
+            forecast["yhat_upper"] = forecast["yhat"] + 1.96 * self._residual_std
+
         last_date = trend_df["ds"].max()
         future_forecast = forecast[forecast["ds"] > last_date]
 
@@ -201,8 +215,12 @@ class ProphetPredictor(BaseRegressor):
 
         predictions = future_forecast.head(days_ahead)
         target_price = float(predictions["yhat"].iloc[-1])
-        lower_bound = float(predictions["yhat_lower"].iloc[-1])
-        upper_bound = float(predictions["yhat_upper"].iloc[-1])
+        lower_bound = float(
+            predictions["yhat_lower"].iloc[-1] if "yhat_lower" in predictions.columns else target_price * 0.95
+        )
+        upper_bound = float(
+            predictions["yhat_upper"].iloc[-1] if "yhat_upper" in predictions.columns else target_price * 1.05
+        )
 
         current_price = float(trend_df["y"].iloc[-1])
         if current_price <= 0:
@@ -241,3 +259,10 @@ class ProphetPredictor(BaseRegressor):
             "trend_strength": trend_strength,
             "forecast_uncertainty": forecast_uncertainty,
         }
+
+
+warnings.warn(
+    "ProphetPredictor is deprecated, use StatsModelsTrendPredictor",
+    DeprecationWarning, stacklevel=2,
+)
+ProphetPredictor = StatsModelsTrendPredictor

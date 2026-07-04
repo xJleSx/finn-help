@@ -142,8 +142,8 @@ class BaseMLClassifier(PersistMixin, ABC):
             fi = log_feature_importance(model, self._feature_names())
             if fi:
                 save_metrics["feature_importance"] = fi[:5]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Feature importance extraction failed: %s", e)
         if settings.ml_hpo_enabled and val_metrics:
             try:
                 x_train, y_train, x_val, y_val = self._get_train_val_sets(df, features)

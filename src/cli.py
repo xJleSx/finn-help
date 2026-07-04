@@ -762,6 +762,18 @@ def full_cycle() -> None:
 
 
 @app.command()
+def prune_models(max_versions: int = 5) -> None:
+    """Удалить устаревшие версии ML-моделей (оставить только max_versions последних)"""
+    from src.model_registry import prune_models as _prune
+
+    result = _prune(max_versions=max_versions)
+    console.print(
+        f"[green]✓[/green] Pruned: {result['registry_pruned']} versions, "
+        f"{result['orphan_files_removed']} orphans"
+    )
+
+
+@app.command()
 def bot() -> None:
     """Запустить Telegram бота"""
     from src.interfaces.telegram import run_bot

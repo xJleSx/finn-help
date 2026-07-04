@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -15,7 +14,6 @@ from tenacity import (
 from src.config import settings
 from src.core.resilience import (
     CircuitBreaker,
-    CircuitBreakerConfig,
     CircuitBreakerOpenError,
     get_circuit_breaker,
 )
@@ -40,6 +38,14 @@ except ImportError:
 SANDBOX_TARGET = "sandbox"
 
 
+_CB_NAMES = {
+    "orders": "tbank_orders",
+    "market": "tbank_market",
+    "accounts": "tbank_accounts",
+    "instruments": "tbank_instruments",
+}
+
+
 class TBankClient:
     def __init__(self, use_sandbox: bool = True):
         self._token = settings.tinkoff_token
@@ -49,6 +55,8 @@ class TBankClient:
         self._client: Optional[AsyncClient] = None
         self._raw_client: Optional[AsyncClient] = None
         self._circuit_breaker: CircuitBreaker = get_circuit_breaker("tbank")
+        self._orders_cb: CircuitBreaker = get_circuit_breaker("tbank_orders")
+        self._market_cb: CircuitBreaker = get_circuit_breaker("tbank_market")
 
     def _target(self) -> str:
         return str(INVEST_GRPC_API_SANDBOX if self._use_sandbox else INVEST_GRPC_API)
@@ -64,7 +72,15 @@ class TBankClient:
             self._client = None
             self._raw_client = None
 
-    async def _call_with_retry(self, fn_name: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
+    async def _call_with_retry(
+        self,
+        fn_name: str,
+        fn: Any,
+        *args: Any,
+        circuit_breaker: Optional[CircuitBreaker] = None,
+        **kwargs: Any,
+    ) -> Any:
+        cb = circuit_breaker or self._circuit_breaker
         async def _do_call() -> Any:
             return await fn(*args, **kwargs)
 
@@ -77,7 +93,7 @@ class TBankClient:
         ):
             with attempt:
                 try:
-                    return await self._circuit_breaker.call(_do_call)
+                    return await cb.call(_do_call)
                 except CircuitBreakerOpenError:
                     logger.warning("tbank.circuit_breaker.open.%s", fn_name)
                     if not HAS_SDK:
@@ -196,14 +212,21 @@ class TBankClient:
         if idempotency_key:
             logger.info("Placing order figi=%s with idempotency_key=%s", figi, idempotency_key)
 
-        resp = await self._client.orders.post_order(
-            figi=figi,
-            quantity=quantity,
-            direction=direction_enum,
-            order_type=type_enum,
-            price=price_quotation,
-            account_id=account_id,
-            idempotency_key=idempotency_key or "",
+        async def _post_order() -> Any:
+            return await self._client.orders.post_order(
+                figi=figi,
+                quantity=quantity,
+                direction=direction_enum,
+                order_type=type_enum,
+                price=price_quotation,
+                account_id=account_id,
+                idempotency_key=idempotency_key or "",
+            )
+
+        resp = await self._call_with_retry(
+            "place_order",
+            _post_order,
+            circuit_breaker=self._orders_cb,
         )
         return {
             "order_id": resp.order_id,

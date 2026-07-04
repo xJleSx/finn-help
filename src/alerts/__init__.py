@@ -1,4 +1,5 @@
-from src.alerts.deduplicator import AlertDeduplicator as AlertDeduplicator, AlertTimer as AlertTimer
+from src.alerts.deduplicator import AlertDeduplicator as AlertDeduplicator
+from src.alerts.deduplicator import AlertTimer as AlertTimer
 from src.alerts.engine import AlertEngine as AlertEngine
 from src.alerts.history import AlertHistory as AlertHistory
 from src.alerts.preferences import UserAlertPreferences as UserAlertPreferences

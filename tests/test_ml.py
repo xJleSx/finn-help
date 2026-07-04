@@ -242,36 +242,36 @@ class TestWalkForward:
         assert result == pytest.approx(0.0)
 
 
-class TestProphet:
+class TestTrendModel:
     @pytest.fixture
-    def prophet(self):
-        from src.analysis.ml.prophet_model import ProphetPredictor
+    def trend_model(self):
+        from src.analysis.ml.prophet_model import StatsModelsTrendPredictor
 
-        return ProphetPredictor()
+        return StatsModelsTrendPredictor()
 
-    def test_predict_returns_keys(self, prophet):
+    def test_predict_returns_keys(self, trend_model):
         df = _make_df(200)
-        result = prophet.predict(df)
+        result = trend_model.predict(df)
         assert isinstance(result, dict)
         assert "target_price" in result
         assert "current_price" in result
         assert "price_change_pct" in result
         assert "confidence" in result
 
-    def test_predict_short_data(self, prophet):
+    def test_predict_short_data(self, trend_model):
         df = _make_df(10)
-        result = prophet.predict(df)
+        result = trend_model.predict(df)
         assert "target_price" in result
 
-    def test_predict_flat_price(self, prophet):
+    def test_predict_flat_price(self, trend_model):
         df = _make_df(100)
         df["close"] = 100.0
-        result = prophet.predict(df)
+        result = trend_model.predict(df)
         assert result["current_price"] == 100.0
 
-    def test_predict_empty_df(self, prophet):
+    def test_predict_empty_df(self, trend_model):
         df = pd.DataFrame()
-        result = prophet.predict(df)
+        result = trend_model.predict(df)
         assert result["target_price"] is None
 
 
@@ -300,13 +300,13 @@ class TestEdgeCases:
         assert isinstance(result, dict)
         assert "action" in result
 
-    def test_prophet_zero_price(self):
-        from src.analysis.ml.prophet_model import ProphetPredictor
+    def test_trend_model_zero_price(self):
+        from src.analysis.ml.prophet_model import StatsModelsTrendPredictor
 
-        prophet = ProphetPredictor()
+        trend_model = StatsModelsTrendPredictor()
         df = _make_df(100)
         df["close"] = 0.0
-        result = prophet.predict(df)
+        result = trend_model.predict(df)
         assert isinstance(result, dict)
         assert "target_price" in result
 

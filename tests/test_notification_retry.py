@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-import pytest
-
-from src.notifications.retry import ReceiptManager, retry_sync
 from src.db.models import NotificationReceipt
+from src.notifications.retry import ReceiptManager, retry_sync
 
 
 @pytest.fixture(autouse=True)

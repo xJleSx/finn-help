@@ -74,8 +74,8 @@ class LLMRouter:
                     signal["risk_profile"] = row.value
             finally:
                 db.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Risk profile load failed: %s", e)
 
     async def _enrich_with_wolfram(self, signal: dict[str, object]) -> None:
         if not self._wolfram:
@@ -109,8 +109,8 @@ class LLMRouter:
                         signal["enriched_context"] = ctx
             finally:
                 db.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Enriched context build failed: %s", e)
 
     def _profile_label(self, user_id: str | int | None = None) -> str:
         try:
@@ -118,8 +118,8 @@ class LLMRouter:
 
             if user_id is not None:
                 return profile_manager.get(str(user_id)).risk_profile
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Profile label failed: %s", e)
         return "balanced"
 
     def _market_context_block(self, db: Any = None) -> str:

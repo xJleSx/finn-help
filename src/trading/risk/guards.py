@@ -6,7 +6,45 @@ from src.config import personal
 
 logger = logging.getLogger(__name__)
 
-_risk_lock = asyncio.Lock()
+_risk_lock: asyncio.Lock | None = None
+
+
+def _get_risk_lock() -> asyncio.Lock:
+    global _risk_lock
+    if _risk_lock is None:
+        _risk_lock = asyncio.Lock()
+    return _risk_lock
+_CB_KILL_SWITCH_REASONS: set[str] = set()
+
+
+def _cb_state_change_handler(name: str, old_state: object, new_state: object) -> None:
+    from src.core.resilience import CircuitState
+
+    if new_state is CircuitState.OPEN:
+        reason = f"circuit_breaker.{name}.opened"
+        _CB_KILL_SWITCH_REASONS.add(name)
+        logger.warning("KILL SWITCH via circuit breaker: %s", reason)
+        activate_kill_switch(reason)
+    elif new_state is CircuitState.CLOSED and name in _CB_KILL_SWITCH_REASONS:
+        _CB_KILL_SWITCH_REASONS.discard(name)
+        if not _CB_KILL_SWITCH_REASONS:
+            logger.info("Circuit breaker %s recovered — kill switch may be manually deactivated", name)
+
+
+def wire_circuit_breakers_to_kill_switch() -> None:
+    from src.core.resilience import get_circuit_breaker
+
+    for cb_name in ("tbank", "tbank_orders", "tbank_market"):
+        try:
+            cb = get_circuit_breaker(cb_name)
+            cb.on_state_change(_cb_state_change_handler)
+        except Exception:
+            logger.warning("Could not wire circuit breaker %s to kill switch", cb_name)
+
+
+def circuit_breaker_kill_switch_active() -> bool:
+    return len(_CB_KILL_SWITCH_REASONS) > 0
+
 
 # kill switch
 _kill_switch_active = False
@@ -106,7 +144,7 @@ def deactivate_kill_switch() -> None:
 
 
 def is_kill_switch_active() -> bool:
-    return _kill_switch_active
+    return _kill_switch_active or circuit_breaker_kill_switch_active()
 
 
 def set_daily_loss_limit(pct: float) -> None:
@@ -296,37 +334,37 @@ def get_day_pnl() -> tuple[float, float]:
 
 
 async def async_check_daily_loss(day_return_pct: float) -> bool:
-    async with _risk_lock:
+    async with _get_risk_lock():
         return check_daily_loss(day_return_pct)
 
 
 async def async_update_drawdown(current_value: float) -> float:
-    async with _risk_lock:
+    async with _get_risk_lock():
         return update_drawdown(current_value)
 
 
 async def async_activate_kill_switch(reason: str = "") -> None:
-    async with _risk_lock:
+    async with _get_risk_lock():
         activate_kill_switch(reason)
 
 
 async def async_deactivate_kill_switch() -> None:
-    async with _risk_lock:
+    async with _get_risk_lock():
         deactivate_kill_switch()
 
 
 async def async_is_kill_switch_active() -> bool:
-    async with _risk_lock:
+    async with _get_risk_lock():
         return is_kill_switch_active()
 
 
 async def async_update_day_value(current_value: float) -> None:
-    async with _risk_lock:
+    async with _get_risk_lock():
         update_day_value(current_value)
 
 
 async def async_start_day(value: float) -> None:
-    async with _risk_lock:
+    async with _get_risk_lock():
         start_day(value)
 
 

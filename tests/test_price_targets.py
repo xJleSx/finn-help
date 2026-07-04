@@ -9,7 +9,6 @@ from src.analysis.ml.price_targets import (
     ENTRY_ATR_FACTOR,
     PROFILES,
     EntryZone,
-    PredictionInterval,
     TakeProfit,
     TradePlan,
     _interval_width,

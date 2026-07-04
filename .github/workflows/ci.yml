@@ -29,7 +29,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --group ml
 
       - name: Ruff check
         run: uv run ruff check src/ tests/
@@ -52,10 +52,10 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --group ml
 
       - name: mypy check
-        run: uv run mypy src/ --ignore-missing-imports
+        run: uv run mypy src/
 
   test:
     runs-on: ubuntu-latest
@@ -89,7 +89,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --group ml
 
       - name: Wait for Postgres
         run: |
@@ -128,12 +128,10 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --group ml
 
       - name: pip-audit
-        run: uv run pip-audit
-        continue-on-error: true
+        run: uv run pip-audit --strict
 
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
-        continue-on-error: true

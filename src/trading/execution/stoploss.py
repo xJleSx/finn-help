@@ -13,27 +13,34 @@ class PositionTracker:
         self._restore_from_db()
 
     def _restore_from_db(self) -> None:
-        db = get_session()
-        try:
-            filled = (
-                db.query(OrderModel)
-                .filter(
-                    OrderModel.status.in_(["filled", "partial"]),
-                    OrderModel.direction == "BUY",
+        for attempt in range(3):
+            db = get_session()
+            try:
+                filled = (
+                    db.query(OrderModel)
+                    .filter(
+                        OrderModel.status.in_(["filled", "partial"]),
+                        OrderModel.direction == "BUY",
+                    )
+                    .all()
                 )
-                .all()
-            )
-            for o in filled:
-                self._positions[str(o.ticker)] = {
-                    "shares": int(o.quantity or 0),
-                    "avg_price": float(o.price or 0.0),
-                    "sl": o.stop_loss,
-                    "tp": o.take_profit,
-                }
-        except Exception:
-            pass
-        finally:
-            db.close()
+                for o in filled:
+                    self._positions[str(o.ticker)] = {
+                        "shares": int(o.quantity or 0),
+                        "avg_price": float(o.price or 0.0),
+                        "sl": o.stop_loss,
+                        "tp": o.take_profit,
+                    }
+                return
+            except Exception as e:
+                logger.debug("Restore attempt %d/3 failed: %s", attempt + 1, e)
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(0.5 * (attempt + 1))
+                else:
+                    logger.warning("Failed to restore positions from DB after 3 attempts")
+            finally:
+                db.close()
 
     def update(self, ticker: str, direction: str, quantity: int, price: float) -> None:
         if ticker not in self._positions:
@@ -62,24 +69,32 @@ class PositionTracker:
         pos = self._positions.get(ticker)
         if not pos:
             return
-        db = get_session()
-        try:
-            orders = (
-                db.query(OrderModel)
-                .filter(
-                    OrderModel.ticker == ticker,
-                    OrderModel.status.in_(["filled", "partial"]),
+        for attempt in range(3):
+            db = get_session()
+            try:
+                orders = (
+                    db.query(OrderModel)
+                    .filter(
+                        OrderModel.ticker == ticker,
+                        OrderModel.status.in_(["filled", "partial"]),
+                    )
+                    .all()
                 )
-                .all()
-            )
-            for o in orders:
-                o.stop_loss = pos.get("sl")  # type: ignore[assignment]
-                o.take_profit = pos.get("tp")  # type: ignore[assignment]
-            db.commit()
-        except Exception:
-            db.rollback()
-        finally:
-            db.close()
+                for o in orders:
+                    o.stop_loss = pos.get("sl")
+                    o.take_profit = pos.get("tp")
+                db.commit()
+                return
+            except Exception as e:
+                db.rollback()
+                logger.debug("SL/TP persist attempt %d/3 failed for %s: %s", attempt + 1, ticker, e)
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(0.3 * (attempt + 1))
+                else:
+                    logger.warning("Failed to persist SL/TP for %s after 3 attempts", ticker)
+            finally:
+                db.close()
 
     def check_triggers(self, ticker: str, current_price: float) -> Optional[str]:
         pos = self._positions.get(ticker)

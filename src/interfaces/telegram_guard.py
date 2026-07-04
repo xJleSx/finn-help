@@ -73,3 +73,19 @@ def guard(with_cooldown: bool = False):
             return await handler(update, context)
         return wrapper
     return decorator
+
+
+# Track last message time per user for anti-flood
+_last_message_time: dict[int, float] = {}
+_ANTI_FLOOD_COOLDOWN = float(__import__("src.config", fromlist=["settings"]).settings.telegram_anti_flood_cooldown)
+
+
+def anti_flood_check(user_id: int) -> bool:
+    """Returns True if message should be processed, False if flood detected."""
+    import time
+    now = time.monotonic()
+    last = _last_message_time.get(user_id, 0.0)
+    if now - last < _ANTI_FLOOD_COOLDOWN:
+        return False
+    _last_message_time[user_id] = now
+    return True

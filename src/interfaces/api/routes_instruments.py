@@ -8,8 +8,8 @@ from pydantic import BaseModel
 
 from src.db.models import User
 from src.interfaces.api.auth import get_current_user
-from src.interfaces.api.rate_limiter import limiter
 from src.interfaces.api.dependencies import get_market_service
+from src.interfaces.api.rate_limiter import limiter
 from src.interfaces.api.schemas import (
     AdviceResponse,
     AskResponse,

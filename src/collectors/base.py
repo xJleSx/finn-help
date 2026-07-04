@@ -16,7 +16,6 @@ from tenacity import (
 
 from src.core.resilience import (
     CircuitBreaker,
-    CircuitBreakerConfig,
     CircuitBreakerOpenError,
     get_circuit_breaker,
 )

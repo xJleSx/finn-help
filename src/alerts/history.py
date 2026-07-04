@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func as sa_func, cast, Date
+from sqlalchemy import Date, cast
+from sqlalchemy import func as sa_func
 
 from src.db.models import AlertLog
 

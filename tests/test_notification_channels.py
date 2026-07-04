@@ -5,20 +5,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.db.models import ChannelPreference, Base
+from src.config import settings
+from src.db.models import Base, ChannelPreference
 from src.notifications.channels import (
     ALL_CHANNELS,
     EmailPushChannel,
     PushManager,
     PushMessage,
     WebPushChannel,
+    _in_quiet_hours,
+    _severity_level,
     load_preferences,
     set_preference,
     should_send,
-    _severity_level,
-    _in_quiet_hours,
 )
-from src.config import settings
 
 
 @pytest.fixture

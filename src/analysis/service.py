@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from datetime import date
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -19,16 +20,12 @@ from src.analysis.multi_timeframe import MultiTimeframeAnalyzer
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.volatility import VolatilityRegimeDetector
 from src.db.models import (
-    BondOffering,
     Dividend,
-    FinancialReport,
     FundamentalMetric,
     GeoRiskScore,
     Indicator,
     Instrument,
     MarketEvent,
-    News,
-    NewsInstrument,
     Price,
     Signal,
 )
@@ -66,41 +63,20 @@ class AnalysisService:
     def _get_ensemble(self, ticker: str = "") -> Any:
         return self.ml.get_ensemble(ticker)
 
-    def _compute_ml(
+    async def _compute_ml(
         self,
         df: pd.DataFrame,
         ind_df: pd.DataFrame,
         ticker: str = "",
         events: list[MarketEvent] | None = None,
     ) -> dict[str, Any] | None:
-        if len(df) < 60:
-            return None
-        try:
-            anomaly_mask = None
-            if events:
-                ef = self.events.build_features(events, ind_df["date"])
-                ind_df = ind_df.merge(ef, on="date", how="left")
-                for c in ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]:
-                    if c in ind_df.columns:
-                        ind_df[c] = ind_df[c].fillna(0)
-                if "is_anomaly" in ind_df.columns:
-                    anomaly_mask = ind_df["is_anomaly"].fillna(False).to_numpy(dtype=bool)
-                    ind_df = ind_df.drop(columns=["is_anomaly"])
-
-            pr = self._get_prophet(ticker).predict(df)
-            ensemble = self._get_ensemble(ticker).predict(ind_df, anomaly_mask=anomaly_mask)
-            ml = pr
-            ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble.get("confidence", 0))
-            ml["xgb_action"] = ensemble.get("xgb_action", "NEUTRAL")
-            ml["ensemble"] = {
-                "lgb_action": ensemble.get("lgb_action", "NEUTRAL"),
-                "cat_action": ensemble.get("cat_action", "NEUTRAL"),
-                "model_votes": ensemble.get("model_votes", {}),
-            }
-            return cast(dict[str, Any], ml)
-        except Exception:
-            logger.warning("ML prediction failed", exc_info=True)
-            return None
+        return await self.ml.compute_ml(
+            df=df,
+            ind_df=ind_df,
+            ticker=ticker,
+            events=events,
+            event_builder=self.events,
+        )
 
     async def _load_geo(self, db: AsyncSession) -> dict[str, Any]:
         return await self.loader.load_geo(db)
@@ -194,16 +170,15 @@ class AnalysisService:
         macro_context: dict[str, Any],
         sentiment: dict[str, Any],
         event_context: dict[str, Any],
-        market_events: list[MarketEvent],
         trends: dict[str, Any],
+        ml: dict[str, Any] | None = None,
+        market_events: list[Any] | None = None,
         financial_report: dict[str, Any] | None = None,
         bond_offering: dict[str, Any] | None = None,
-        with_ml: bool = True,
     ) -> dict[str, Any]:
         tech_signal = self.analyzer.generate_signal(ind_df)
         div_df = self._dividend_df(divs)
         fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics)
-        ml = self._compute_ml(df, ind_df, ticker=ticker, events=market_events) if with_ml else None
         geo = {"score": geo_score}
         volatility_regime = self.volatility.detect(df, ind_df)
         risk_metrics = compute_risk_metrics(df["close"].tolist())
@@ -293,22 +268,28 @@ class AnalysisService:
         financial_report = await self.loader.load_latest_report(db, int(inst.id))
         bond_offering = await self.loader.load_bond_offering(db, int(inst.id))
 
-        return self._analyze_core(
-            df=df,
-            ind_df=ind_df,
-            inst=inst,
-            ticker=ticker,
-            fund_metrics=fund_metrics,
-            divs=divs,
-            geo_score=geo_score,
-            macro_context=macro_context,
-            sentiment=sentiment,
-            event_context=event_context,
-            market_events=market_events,
-            trends=trends,
-            financial_report=financial_report,
-            bond_offering=bond_offering,
-            with_ml=with_ml,
+        ml = await self._compute_ml(df, ind_df, ticker=ticker, events=market_events) if with_ml else None
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self._analyze_core(
+                df=df,
+                ind_df=ind_df,
+                inst=inst,
+                ticker=ticker,
+                fund_metrics=fund_metrics,
+                divs=divs,
+                geo_score=geo_score,
+                macro_context=macro_context,
+                sentiment=sentiment,
+                event_context=event_context,
+                market_events=market_events,
+                trends=trends,
+                ml=ml,
+                financial_report=financial_report,
+                bond_offering=bond_offering,
+            ),
         )
 
     async def analyze_all(
@@ -375,11 +356,21 @@ class AnalysisService:
 
         macro_context = MacroCollector.latest_values(db)
         sentiment = self.loader.load_sentiment_sync(db, ticker)
-        market_events = self.events.load_all_events_sync(db)
+        market_events_sync = self.events.load_all_events_sync(db)
         event_context = self.events.load_market_events_sync(db)
         trends = self.loader.load_trends_sync(db, inst.id)
         financial_report = self.loader.load_latest_report_sync(db, inst.id)
         bond_offering = self.loader.load_bond_offering_sync(db, inst.id)
+
+        ml: dict[str, Any] | None = None
+        if with_ml:
+            ml = self.ml.compute_ml_sync(
+                df=df,
+                ind_df=ind_df,
+                ticker=ticker,
+                events=market_events_sync,
+                event_builder=self.events,
+            )
 
         return self._analyze_core(
             df=df,
@@ -392,11 +383,10 @@ class AnalysisService:
             macro_context=macro_context,
             sentiment=sentiment,
             event_context=event_context,
-            market_events=market_events,
             trends=trends,
+            ml=ml,
             financial_report=financial_report,
             bond_offering=bond_offering,
-            with_ml=with_ml,
         )
 
     def analyze_all_sync(
@@ -440,6 +430,8 @@ class AnalysisService:
         return ticker_context_builder.build(db, ticker)
 
     def train_models(self, db: Any, ticker: str | None = None) -> dict[str, bool]:
+        import time
+        _train_start = time.monotonic()
         from sqlalchemy import select as sa_select
 
         q = sa_select(Instrument)
@@ -487,9 +479,11 @@ class AnalysisService:
             logger.info(
                 "Model training for %s: ensemble=%s prophet=%s",
                 sym,
-                "OK" if all(ensemble_ok.values()) else "partial",
+                "OK" if ensemble_ok and all(ensemble_ok.values()) else "partial",
                 "OK" if prophet_ok else "FAIL",
             )
+        elapsed = time.monotonic() - _train_start
+        logger.info("Model training completed in %.2fs for %d instruments", elapsed, len(all_results))
         return all_results
 
 

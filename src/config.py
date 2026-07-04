@@ -41,10 +41,13 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_proxy_url: str = ""
     telegram_allowed_ids: str = ""
+    telegram_rate_limit_messages: int = 20
+    telegram_rate_limit_period: int = 60
+    telegram_anti_flood_cooldown: int = 5
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:3000"
     cors_credentials: bool = True
-    rate_limit_per_minute: int = 0
+    rate_limit_per_minute: int = 60
     ssl_tbank_verify: bool = True
     enable_trading: bool = False
     max_trades_per_day: int = 5
@@ -121,6 +124,11 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from_email: str = ""
     smtp_use_tls: bool = True
+
+    sentry_dsn: str = ""
+    sentry_environment: str = "production"
+    lock_file_path: str = ""
+    ml_prometheus_enabled: bool = True
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

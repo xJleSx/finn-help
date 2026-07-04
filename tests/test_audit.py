@@ -50,6 +50,7 @@ class TestSaveOrder:
             patch("src.trading.execution.audit.get_session", return_value=mock_db),
             patch("src.trading.execution.audit.AUDIT_DIR"),
             patch("src.trading.execution.audit.OrderModel", return_value=mock_order_model),
+            patch("src.trading.execution.audit._rotate_if_needed"),
         ):
             result = save_order(mock_order_record)
             assert result == 42
@@ -62,6 +63,7 @@ class TestSaveOrder:
             patch("src.trading.execution.audit.get_session", return_value=mock_db),
             patch("src.trading.execution.audit.AUDIT_DIR"),
             patch("src.trading.execution.audit.OrderModel", return_value=mock_order_model),
+            patch("src.trading.execution.audit._rotate_if_needed"),
         ):
             mock_db.add.side_effect = Exception("DB error")
             result = save_order(mock_order_record)
@@ -188,6 +190,7 @@ class TestAuditLogOrder:
     def test_writes_jsonl(self):
         with (
             patch("src.trading.execution.audit.AUDIT_DIR"),
+            patch("src.trading.execution.audit._rotate_if_needed"),
             patch("builtins.open") as mock_open,
         ):
             mock_file = MagicMock()
@@ -198,6 +201,7 @@ class TestAuditLogOrder:
     def test_write_exception(self):
         with (
             patch("src.trading.execution.audit.AUDIT_DIR"),
+            patch("src.trading.execution.audit._rotate_if_needed"),
             patch("builtins.open") as mock_open,
         ):
             mock_file = MagicMock()

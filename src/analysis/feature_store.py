@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
@@ -10,7 +9,7 @@ from typing import Any, Callable, Optional, cast
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.connection import get_async_session, get_session
+from src.db.connection import get_session
 from src.db.models import FeatureCache
 
 logger = logging.getLogger(__name__)
@@ -112,8 +111,10 @@ def _is_stale(row: FeatureCache, max_age_days: int, version: int) -> bool:
     if row.version != version:
         return True
     if row.ttl_hours is not None:
-        if row.created_at and (datetime.now(timezone.utc).replace(tzinfo=None) - row.created_at).total_seconds() > row.ttl_hours * 3600:
-            return True
+        if row.created_at:
+            age = (datetime.now(timezone.utc).replace(tzinfo=None) - row.created_at).total_seconds()
+            if age > row.ttl_hours * 3600:
+                return True
     age = (date.today() - row.date).days
     if age > max_age_days:
         return True
@@ -141,8 +142,8 @@ def get_cached(
                 parsed = json.loads(data)
                 _mem.set(mem_key, parsed)
                 return cast(dict[str, Any], parsed)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Redis get failed for %s/%s: %s", ticker, feature_type, e)
 
     db = get_session()
     try:
@@ -184,8 +185,8 @@ async def get_cached_async(
                 parsed = json.loads(data)
                 _mem.set(mem_key, parsed)
                 return cast(dict[str, Any], parsed)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Redis get failed for %s/%s: %s", ticker, feature_type, e)
 
     result = await db.execute(
         select(FeatureCache)
@@ -220,8 +221,8 @@ def set_cache(
         try:
             ttl_sec = (ttl_hours or _ttl_for(feature_type)) * 3600
             r.setex(_redis_key(ticker, feature_type), ttl_sec, json.dumps(value, default=str))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Redis set failed for %s/%s: %s", ticker, feature_type, e)
 
     db = get_session()
     try:
@@ -265,8 +266,8 @@ async def set_cache_async(
         try:
             ttl_sec = (ttl_hours or _ttl_for(feature_type)) * 3600
             r.setex(_redis_key(ticker, feature_type), ttl_sec, json.dumps(value, default=str))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Redis set failed for %s/%s: %s", ticker, feature_type, e)
 
     try:
         await db.execute(
@@ -306,8 +307,8 @@ def invalidate(ticker: str, feature_type: str | None = None) -> None:
             else:
                 for key in r.scan_iter(f"finn:feat:{ticker_up}:*"):
                     r.delete(key)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Redis delete failed for %s: %s", ticker, e)
 
     db = get_session()
     try:
@@ -338,8 +339,8 @@ async def invalidate_async(db: AsyncSession, ticker: str, feature_type: str | No
             else:
                 for key in r.scan_iter(f"finn:feat:{ticker_up}:*"):
                     r.delete(key)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Redis delete failed for %s: %s", ticker, e)
 
     try:
         q = delete(FeatureCache).where(FeatureCache.ticker == ticker_up)

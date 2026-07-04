@@ -1,4 +1,6 @@
 import asyncio
+import os
+import secrets
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Optional
@@ -16,18 +18,22 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.core.health import health_registry
 from src.core.logging import setup_logging
-from src.interfaces.api.dependencies import get_auth_service
+from src.core.sentry import setup_sentry
 from src.db.models import Instrument, Price, Signal, User
 from src.interfaces.api.auth import get_db, require_user
+from src.interfaces.api.dependencies import get_auth_service
+from src.interfaces.api.rate_limiter import limiter
 from src.interfaces.api.routes.analysis import router as analysis_router
 from src.interfaces.api.routes_instruments import router as instruments_router
 from src.interfaces.api.routes_market import router as market_router
 from src.interfaces.api.routes_portfolio import router as portfolio_router
-from src.interfaces.api.rate_limiter import limiter
 from src.interfaces.api.schemas import AuthTokenResponse, HealthResponse, UserResponse
 from src.scheduler.service import run_forever
 from src.scheduler.service import stop as stop_scheduler
+
+PRODUCTION = os.getenv("FINN_ENV", "").lower() == "production"
 
 logger = structlog.get_logger(__name__)
 
@@ -45,6 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         log = structlog.get_logger("finn-help")
         log.warning("db_migration_failed", error=str(e))
+    setup_sentry()
     logger.info("startup.trade_mode", mode="DRY_RUN" if not settings.enable_trading else "AUTO")
     scheduler_task = asyncio.create_task(run_forever())
     yield
@@ -67,6 +74,13 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    try:
+        import sentry_sdk
+        sentry_sdk.set_context("request", {"method": request.method, "path": request.url.path})
+        if hasattr(request, "user") and request.user:
+            sentry_sdk.set_user({"id": str(request.user.id), "username": request.user.username})
+    except Exception:
+        pass
     logger.exception("unhandled_exception", method=request.method, path=request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
@@ -82,19 +96,39 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=allow_creds,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
 
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next: Any) -> Response:
+    nonce = secrets.token_urlsafe(16)
+    request.state.nonce = nonce
+
+    if PRODUCTION:
+        style_src = f"'self' 'nonce-{nonce}'"
+        script_src = f"'self' 'nonce-{nonce}'"
+    else:
+        style_src = "'self' 'unsafe-inline'"
+        script_src = "'self' 'unsafe-inline'"
+
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    response.headers["Content-Security-Policy"] = (
+        f"default-src 'self'; "
+        f"script-src {script_src}; "
+        f"style-src {style_src}; "
+        f"img-src 'self' data:; "
+        f"font-src 'self'; "
+        f"connect-src 'self'; "
+        f"form-action 'self'; "
+        f"base-uri 'self'; "
+        f"frame-ancestors 'none'"
+    )
     return response
 
 
@@ -133,6 +167,18 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     healthy = True
     checks: dict[str, str] = {}
     components: dict[str, Any] = {}
+
+    try:
+        from src.core.resilience import get_all_circuit_states
+
+        cb_states = get_all_circuit_states()
+        if cb_states:
+            components["circuit_breakers"] = cb_states
+        for name, snap in cb_states.items():
+            if snap.get("state") == "open":
+                checks[f"circuit_breaker_{name}"] = f"OPEN ({snap.get('failure_count', 0)} failures)"
+    except Exception:
+        components["circuit_breakers"] = None
 
     try:
         result = await db.execute(select(sqlfunc.count(Instrument.id)))
@@ -207,8 +253,8 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
                 components[label] = f"{cval}/{total_inst} ({pct}%)"
             else:
                 components[label] = int(cval) if cval is not None else 0
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Health check component failed: %s", e)
 
     # Alert stats
     try:
@@ -221,6 +267,14 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         components["alerts_7d"] = int(alert_cnt.scalar() or 0)
     except Exception:
         components["alerts_7d"] = None
+
+    # Run registered module health checks
+    for name, check_fn in health_registry.items():
+        if name not in components:
+            try:
+                components[name] = await check_fn()
+            except Exception:
+                components[name] = "error"
 
     status = "degraded" if checks and healthy else "unhealthy" if not healthy else "ok"
     return {
