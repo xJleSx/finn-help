@@ -112,7 +112,6 @@ def upgrade() -> None:
     op.drop_index(op.f('ix_news_sector_impacts_type'), table_name='news_sector_impacts')
     op.create_index(op.f('ix_news_sector_impacts_impact_type'), 'news_sector_impacts', ['impact_type'], unique=False)
     op.create_index(op.f('ix_news_sector_impacts_news_id'), 'news_sector_impacts', ['news_id'], unique=False)
-    op.create_unique_constraint('uq_user_portfolio', 'portfolio', ['user_id', 'instrument_id'])
     op.alter_column('sector_risk_history', 'created_at',
                existing_type=sa.DATETIME(),
                nullable=True,
@@ -137,7 +136,6 @@ def downgrade() -> None:
                existing_type=sa.DATETIME(),
                nullable=False,
                existing_server_default=sa.text('(CURRENT_TIMESTAMP)'))
-    op.drop_constraint('uq_user_portfolio', 'portfolio', type_='unique')
     op.drop_index(op.f('ix_news_sector_impacts_news_id'), table_name='news_sector_impacts')
     op.drop_index(op.f('ix_news_sector_impacts_impact_type'), table_name='news_sector_impacts')
     op.create_index(op.f('ix_news_sector_impacts_type'), 'news_sector_impacts', ['impact_type'], unique=False)
