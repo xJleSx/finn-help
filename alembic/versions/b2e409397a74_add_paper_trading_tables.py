@@ -83,11 +83,7 @@ def upgrade() -> None:
                nullable=True,
                existing_server_default=sa.text('(CURRENT_TIMESTAMP)'))
     op.drop_index(op.f('ix_geopolitical_risk_date'), table_name='geopolitical_risk_history')
-    op.alter_column('instruments', 'exchange',
-               existing_type=sa.VARCHAR(length=20),
-               type_=sa.String(length=10),
-               existing_nullable=True,
-               existing_server_default=sa.text("'MOEX'"))
+    op.add_column('instruments', sa.Column('exchange', sa.String(length=10), server_default=sa.text("'MOEX'"), nullable=True))
     op.drop_index(op.f('ix_news_created_at'), table_name='news')
     op.create_foreign_key(None, 'news', 'news_events', ['event_id'], ['id'])
     op.alter_column('news_company_impacts', 'created_at',
@@ -170,11 +166,7 @@ def downgrade() -> None:
                existing_server_default=sa.text('(CURRENT_TIMESTAMP)'))
     op.drop_constraint(None, 'news', type_='foreignkey')
     op.create_index(op.f('ix_news_created_at'), 'news', ['created_at'], unique=False)
-    op.alter_column('instruments', 'exchange',
-               existing_type=sa.String(length=10),
-               type_=sa.VARCHAR(length=20),
-               existing_nullable=True,
-               existing_server_default=sa.text("'MOEX'"))
+    op.drop_column('instruments', 'exchange')
     op.create_index(op.f('ix_geopolitical_risk_date'), 'geopolitical_risk_history', ['date'], unique=False)
     op.alter_column('geopolitical_risk_history', 'created_at',
                existing_type=sa.DATETIME(),
