@@ -130,8 +130,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev --group ml
 
+      - name: Install package for auditing
+        run: uv run pip install -e .
+
       - name: pip-audit
-        run: uv run pip-audit --strict --ignore-vuln finn-help
+        run: uv run pip-audit --strict
 
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
