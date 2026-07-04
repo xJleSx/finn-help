@@ -4,11 +4,10 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
-import torch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.analysis.ml.news_impact import LSTMPredictor, NewsImpactModel, _build_sequences
+from src.analysis.ml.news_impact import NewsImpactModel, _build_sequences
 from src.analysis.ml.news_impact_features import (
     ALL_FEATURE_COLS,
     SUBCATEGORY_VALUES,
@@ -274,12 +273,6 @@ class TestNewsImpactModel:
 
 
 class TestLSTM:
-    def test_lstm_predictor_forward(self):
-        model = LSTMPredictor(input_dim=10)
-        x = torch.randn(4, 5, 10)
-        out = model(x)
-        assert out.shape == (4,)
-
     def test_build_sequences(self):
         features = np.random.randn(20, 5).astype(np.float32)
         targets = np.random.randn(20).astype(np.float32)

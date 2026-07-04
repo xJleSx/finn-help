@@ -51,7 +51,7 @@ async def allocate_portfolio(
     user: User = Depends(require_user),
     svc: PortfolioService = Depends(get_portfolio_service),
 ) -> Any:
-    return await svc.allocate(body.capital, user_id=user.id)
+    return await svc.allocate(body.capital)
 
 
 @router.get("/api/reports/portfolio")
