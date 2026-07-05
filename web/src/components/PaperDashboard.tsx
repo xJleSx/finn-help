@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "@/lib/api-client";
 
 export function PaperDashboard() {
@@ -26,6 +27,12 @@ export function PaperDashboard() {
     queryKey: ["paper-orders"],
     queryFn: () => api.paper.orders(20),
     refetchInterval: 15_000,
+  });
+
+  const { data: equityCurve } = useQuery({
+    queryKey: ["paper-equity-curve"],
+    queryFn: () => api.paper.equityCurve(),
+    refetchInterval: 30_000,
   });
 
   const orderMutation = useMutation({
@@ -176,6 +183,38 @@ export function PaperDashboard() {
               >
                 Продать
               </button>
+              <button
+                onClick={() => {
+                  const qty = parseFloat(quantity);
+                  if (!ticker.trim() || !qty || qty <= 0) return;
+                  orderMutation.mutate({
+                    ticker: ticker.trim(),
+                    direction: "SHORT",
+                    quantity: qty,
+                    price: price ? parseFloat(price) : undefined,
+                  });
+                }}
+                disabled={orderMutation.isPending || !ticker.trim() || !quantity}
+                className="px-4 py-1.5 rounded-xl text-xs font-medium bg-orange-400/20 text-orange-400 hover:bg-orange-400/30 transition disabled:opacity-40"
+              >
+                Short
+              </button>
+              <button
+                onClick={() => {
+                  const qty = parseFloat(quantity);
+                  if (!ticker.trim() || !qty || qty <= 0) return;
+                  orderMutation.mutate({
+                    ticker: ticker.trim(),
+                    direction: "COVER",
+                    quantity: qty,
+                    price: price ? parseFloat(price) : undefined,
+                  });
+                }}
+                disabled={orderMutation.isPending || !ticker.trim() || !quantity}
+                className="px-4 py-1.5 rounded-xl text-xs font-medium bg-violet-400/20 text-violet-400 hover:bg-violet-400/30 transition disabled:opacity-40"
+              >
+                Cover
+              </button>
             </div>
           </div>
         </section>
@@ -212,6 +251,32 @@ export function PaperDashboard() {
         </section>
       )}
 
+      {equityCurve && equityCurve.equity_curve && equityCurve.equity_curve.length > 1 && (
+        <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
+          <h2 className="text-sm font-light text-white mb-4">Equity Curve</h2>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={equityCurve.equity_curve.map((v: number, i: number) => ({ i, v }))}>
+                <defs>
+                  <linearGradient id="eqGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#fbbf24" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="i" hide />
+                <YAxis domain={["auto", "auto"]} hide />
+                <Tooltip
+                  formatter={(value: unknown) => [(value as number).toLocaleString("ru-RU", { maximumFractionDigits: 0 }) + " ₽"]}
+                  contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, fontSize: 12 }}
+                  labelStyle={{ color: "#9ca3af" }}
+                />
+                <Area type="monotone" dataKey="v" stroke="#fbbf24" strokeWidth={2} fill="url(#eqGradient)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      )}
+
       {orders && orders.trades && (orders.trades as Record<string, unknown>[]).length > 0 && (
         <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
           <h2 className="text-sm font-light text-white mb-4">История сделок</h2>
@@ -233,7 +298,7 @@ export function PaperDashboard() {
                   <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02]">
                     <td className="py-2 pr-3 text-gray-500">{(t.timestamp as string)?.slice(11, 19)}</td>
                     <td className="py-2 pr-3 text-white">{t.ticker as string}</td>
-                    <td className={`py-2 pr-3 ${t.direction === "BUY" ? "text-emerald-400" : "text-red-400"}`}>{t.direction as string}</td>
+                    <td className={`py-2 pr-3 ${t.direction === "BUY" ? "text-emerald-400" : t.direction === "SHORT" ? "text-orange-400" : t.direction === "COVER" ? "text-violet-400" : "text-red-400"}`}>{t.direction as string}</td>
                     <td className="py-2 pr-3 text-right text-gray-300">{(t.quantity as number).toFixed(0)}</td>
                     <td className="py-2 pr-3 text-right text-gray-300">{(t.price as number)?.toFixed(2)}</td>
                     <td className={`py-2 pr-3 text-right ${((t.pnl as number) || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>{t.pnl ? `${(t.pnl as number) >= 0 ? "+" : ""}${(t.pnl as number).toFixed(0)}` : "-"}</td>
