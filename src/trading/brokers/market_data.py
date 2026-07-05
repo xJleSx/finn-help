@@ -2,8 +2,10 @@ import logging
 from datetime import datetime
 from typing import cast
 
+from sqlalchemy import select
+
 from src.config import personal, settings
-from src.db.connection import get_session
+from src.db.connection import get_async_session
 from src.db.models import Instrument, Price
 from src.trading.brokers.tbank import TBankClient
 
@@ -20,9 +22,9 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
     async with TBankClient(use_sandbox=use_sandbox) as client:
         candles = await client.get_candles(figi=figi, interval=interval, days=days)
 
-    db = get_session()
-    try:
-        inst = db.query(Instrument).filter_by(ticker=ticker).first()
+    async with get_async_session() as db:
+        result = await db.execute(select(Instrument).where(Instrument.ticker == ticker))
+        inst = result.scalars().first()
         if not inst:
             logger.warning("Instrument %s not found in local DB", ticker)
             return 0
@@ -31,7 +33,8 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
             d = c.get("time")
             if isinstance(d, str):
                 d = datetime.fromisoformat(d).date()
-            exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
+            result = await db.execute(select(Price).where(Price.instrument_id == inst.id, Price.date == d))
+            exists = result.scalars().first()
             if not exists:
                 p = Price(
                     instrument_id=inst.id,
@@ -57,10 +60,7 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
                 if exists.open is None:
                     exists.open = c.get("open", 0.0)
                 exists.volume = _volume  # type: ignore[assignment]
-        db.commit()
         logger.info("Added/updated %d candles for %s (%s)", new_count, ticker, interval)
-    finally:
-        db.close()
     return new_count
 
 
@@ -71,15 +71,13 @@ async def update_all_favorites(interval: str = "5min", days: int = 5) -> dict[st
 
     tickers: list[str] = cast(list[str], personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP", "YNDX", "TATN"]))
 
-    db = get_session()
-    try:
-        figi_map: dict[str, str] = {}
+    figi_map: dict[str, str] = {}
+    async with get_async_session() as db:
         for t in tickers:
-            inst = db.query(Instrument).filter_by(ticker=t).first()
+            result = await db.execute(select(Instrument).where(Instrument.ticker == t))
+            inst = result.scalars().first()
             if inst and inst.figi:
                 figi_map[t] = str(inst.figi)
-    finally:
-        db.close()
 
     if not figi_map:
         logger.warning("No FIGI mappings found. Run MOEX collector first.")
