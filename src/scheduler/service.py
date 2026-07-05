@@ -140,6 +140,14 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
     logger.info("Scheduler started (interval=%ds)", interval)
     shutdown_event = asyncio.Event()
 
+    try:
+        from src.core.shutdown import register_shutdown_hook, setup_signal_handlers
+
+        setup_signal_handlers()
+        register_shutdown_hook(stop)
+    except Exception:
+        pass
+
     async def _check_shutdown() -> None:
         global _running
         while _running:

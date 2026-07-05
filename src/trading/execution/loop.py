@@ -247,6 +247,15 @@ async def _check_news(ticker: str) -> tuple[bool, str]:
 
 
 async def _process_signals() -> None:
+    if not await market_hours_check():
+        logger.info("Market closed, skipping signal processing")
+        return
+
+    can, reason = await can_trade()
+    if not can:
+        logger.warning("Cannot trade: %s", reason)
+        return
+
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
 
@@ -255,6 +264,12 @@ async def _process_signals() -> None:
     from src.db.models import Portfolio as PortModel
     from src.db.models import Price as PriceModel
     from src.db.models import Signal as SignalModel
+
+    signals: list[SignalModel] = []
+    liquidity_cache: dict[str, tuple[bool, str]] = {}
+    news_cache: dict[str, tuple[bool, str]] = {}
+    total_value = 100000
+    last_price_rows: dict[int, float] = {}
 
     async with AsyncSessionLocal() as db:
         today = datetime.now(timezone.utc).date()
@@ -267,9 +282,6 @@ async def _process_signals() -> None:
 
         result = await db.execute(select(PortModel))
         port_rows = result.scalars().all()
-
-        total_value = 100000
-        last_price_rows: dict[int, float] = {}
 
         if port_rows:
             inst_ids = [p.instrument_id for p in port_rows if p.instrument_id]
@@ -301,8 +313,6 @@ async def _process_signals() -> None:
 
         # Pre-fetch liquidity and news data for all signal instruments
         tickers_with_inst = {s.instrument.ticker: s.instrument_id for s in signals if s.instrument and s.instrument_id}
-        liquidity_cache: dict[str, tuple[bool, str]] = {}
-        news_cache: dict[str, tuple[bool, str]] = {}
 
         ticker_inst_map: dict[str, int] = {
             inst.ticker: inst.id
@@ -342,19 +352,10 @@ async def _process_signals() -> None:
             scores = [n.sentiment_weighted or n.sentiment_score or 0 for n in result.all()]
             news_cache[ticker] = check_news_sentiment(scores)
 
-    if not await market_hours_check():
-        logger.info("Market closed, skipping signal processing")
-        return
-
-    can, reason = await can_trade()
-    if not can:
-        logger.warning("Cannot trade: %s", reason)
-        return
-
-    var_ok, var_msg = await _check_var(db=db)
-    if not var_ok:
-        logger.warning("VaR limit exceeded: %s", var_msg)
-        return
+        var_ok, var_msg = await _check_var(db=db)
+        if not var_ok:
+            logger.warning("VaR limit exceeded: %s", var_msg)
+            return
 
     for s in signals:
         if not s.instrument:
@@ -527,6 +528,14 @@ async def run_execution_loop(interval: int = 300) -> None:
     _running = True
 
     logger.info("Execution loop started (interval=%ds)", interval)
+
+    try:
+        from src.core.shutdown import register_shutdown_hook, setup_signal_handlers
+
+        setup_signal_handlers()
+        register_shutdown_hook(stop)
+    except Exception:
+        pass
 
     try:
         from src.db.connection import init_db

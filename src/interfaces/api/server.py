@@ -224,6 +224,11 @@ async def logout(
     return {"status": "ok"}
 
 
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @app.get("/api/health", response_model=HealthResponse)
 async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     healthy = True
