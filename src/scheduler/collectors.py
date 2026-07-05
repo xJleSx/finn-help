@@ -558,7 +558,7 @@ async def collect_bond_offerings(db: Session) -> None:
         await collector.close()
 
 
-async def collect_company_profiles(db: Session) -> None:
+def collect_company_profiles(db: Session) -> None:
     """Fetch/update company profiles from SmartLab."""
     from src.collectors.profiles import SmartLabProfileCollector, store_company_profile
 

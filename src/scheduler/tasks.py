@@ -6,6 +6,7 @@ from sqlalchemy import func
 
 from src.alerts.generators import generate_all_alerts, store_alerts
 from src.analysis.rebalancing import RebalancingEngine
+from src.core.executor import get_executor
 from src.db.connection import get_session
 from src.db.models import Signal as SignalModel
 from src.scheduler.collectors import (
@@ -48,7 +49,7 @@ async def daily_update() -> None:
         updated_ids = await collect_prices(db)
         await collect_dividends(db)
         await collect_fundamental(db)
-        await loop.run_in_executor(None, lambda: compute_indicators(db, instrument_ids=updated_ids))
+        await loop.run_in_executor(get_executor(), lambda: compute_indicators(db, instrument_ids=updated_ids))
         news_list = await collect_news(db)
         await compute_geo_risk(db, news_list)
         await collect_macro(db)
@@ -71,13 +72,13 @@ async def daily_update() -> None:
                 sync_result.get("removed", 0),
             )
 
-        await loop.run_in_executor(None, _delete_today_signals, db)
-        await loop.run_in_executor(None, db.commit)
+        await loop.run_in_executor(get_executor(), _delete_today_signals, db)
+        await loop.run_in_executor(get_executor(), db.commit)
         await generate_signals(db, updated_ids=None)
         logger.info("Daily update cycle completed")
     except Exception as e:
         logger.error(f"Daily update cycle failed: {e}")
-        await loop.run_in_executor(None, db.rollback)
+        await loop.run_in_executor(get_executor(), db.rollback)
     finally:
         db.close()
 
@@ -94,16 +95,16 @@ async def weekly_update() -> None:
     try:
         await collect_financial_reports(db)
         await collect_bond_offerings(db)
-        await collect_company_profiles(db)
+        await loop.run_in_executor(get_executor(), collect_company_profiles, db)
         await collect_corporate_events(db)
 
         rebalancer = RebalancingEngine()
-        plan = await loop.run_in_executor(None, lambda: rebalancer.analyze_portfolio(db, user_id=0))
+        plan = await loop.run_in_executor(get_executor(), lambda: rebalancer.analyze_portfolio(db, user_id=0))
         if plan:
             logger.info("Rebalance plan: %d actions", len(plan))
 
-        alerts = await loop.run_in_executor(None, generate_all_alerts, db)
-        stored = await loop.run_in_executor(None, store_alerts, db, alerts)
+        alerts = await loop.run_in_executor(get_executor(), generate_all_alerts, db)
+        stored = await loop.run_in_executor(get_executor(), store_alerts, db, alerts)
         if stored:
             logger.info("Alerts generated: %d new", stored)
 
@@ -117,7 +118,7 @@ async def weekly_update() -> None:
     try:
         from src.model_registry import prune_models as _prune_registry
 
-        result = await loop.run_in_executor(None, _prune_registry)
+        result = await loop.run_in_executor(get_executor(), _prune_registry)
         if result["registry_pruned"] or result["orphan_files_removed"]:
             logger.info("prune_models: %s", result)
     except Exception as e:

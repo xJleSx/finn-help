@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from datetime import date
@@ -9,6 +10,7 @@ from xml.etree import ElementTree
 import httpx
 
 from src.config import settings
+from src.core.executor import get_executor
 from src.db.models import AltDataPoint
 
 logger = logging.getLogger(__name__)
@@ -201,8 +203,12 @@ class GoogleTrendsSource(AltDataSource):
         today = date.today()
 
         try:
-            self._pytrends.build_payload(kw_list=keywords[:3], cat=0, timeframe="today 1-m")
-            df = self._pytrends.interest_over_time()
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                get_executor(),
+                lambda: self._pytrends.build_payload(kw_list=keywords[:3], cat=0, timeframe="today 1-m"),
+            )
+            df = await loop.run_in_executor(get_executor(), self._pytrends.interest_over_time)
             if df is not None and not df.empty:
                 for kw in keywords[:3]:
                     if kw in df.columns:
