@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.config import settings
 from src.db.connection import get_session
 from src.db.models import Order as OrderModel
@@ -137,19 +139,21 @@ async def market_hours_check() -> bool:
     return False
 
 
-async def _check_var() -> tuple[bool, str]:
+async def _check_var(db: AsyncSession | None = None) -> tuple[bool, str]:
+    if db is not None:
+        return await _check_var_async(db)
 
     def _work() -> tuple[bool, str]:
-        db = get_session()
+        sync_db = get_session()
         try:
             from src.db.models import Portfolio, Price
 
-            positions = db.query(Portfolio).all()
+            positions = sync_db.query(Portfolio).all()
             all_returns = []
             for p in positions:
                 if not p.instrument_id:
                     continue
-                prices = db.query(Price.close).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).limit(60).all()
+                prices = sync_db.query(Price.close).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).limit(60).all()
                 vals = [r[0] for r in prices if r[0] is not None]
                 if len(vals) < 20:
                     continue
@@ -162,9 +166,34 @@ async def _check_var() -> tuple[bool, str]:
             var_95 = float(abs(np.percentile(all_returns, 5)))
             return check_var_limit(var_95)
         finally:
-            db.close()
+            sync_db.close()
 
     return await asyncio.to_thread(_work)
+
+
+async def _check_var_async(db: AsyncSession) -> tuple[bool, str]:
+    from sqlalchemy import select
+
+    from src.db.models import Portfolio, Price
+
+    result = await db.execute(select(Portfolio))
+    positions = result.scalars().all()
+    all_returns: list[float] = []
+    for p in positions:
+        if not p.instrument_id:
+            continue
+        result = await db.execute(select(Price.close).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc()).limit(60))
+        vals = [r[0] for r in result.all() if r[0] is not None]
+        if len(vals) < 20:
+            continue
+        rets = [(vals[i] - vals[i + 1]) / vals[i + 1] for i in range(len(vals) - 1)]
+        all_returns.extend(rets)
+    if len(all_returns) < 20:
+        return True, "ok"
+    import numpy as np
+
+    var_95 = float(abs(np.percentile(all_returns, 5)))
+    return check_var_limit(var_95)
 
 
 async def _check_liquidity(ticker: str) -> tuple[bool, str]:
@@ -322,7 +351,7 @@ async def _process_signals() -> None:
         logger.warning("Cannot trade: %s", reason)
         return
 
-    var_ok, var_msg = await _check_var()
+    var_ok, var_msg = await _check_var(db=db)
     if not var_ok:
         logger.warning("VaR limit exceeded: %s", var_msg)
         return
