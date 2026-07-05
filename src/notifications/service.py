@@ -8,6 +8,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from src.core.executor import get_executor
 from src.db.connection import get_session
 from src.db.models import AuthorSubscription, GeoRiskScore, Instrument, Notification, Portfolio, Price, Subscription
 from src.db.models import Signal as SignalModel
@@ -80,7 +81,7 @@ class NotificationService:
     async def _run_sync(self, fn, *args, **kwargs):
         if self._db is not None:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, fn, *args, **kwargs)
+            return await loop.run_in_executor(get_executor(), fn, *args, **kwargs)
         return fn(*args, **kwargs)
 
     # --- Subscriptions ---
@@ -506,7 +507,7 @@ class NotificationService:
                 session.close()
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _run)
+        return await loop.run_in_executor(get_executor(), _run)
 
     def was_signal_sent_today_sync(self, ticker: str, notif_type: str = "signal") -> bool:
         return self.was_signal_sent_today(ticker, notif_type)

@@ -11,6 +11,7 @@ from src.analysis.backtest import BacktestConfig, backtest_allocation
 from src.analysis.personal_backtest import run_personal_backtest
 from src.analysis.sensitivity import commission_sensitivity, slippage_sensitivity
 from src.analysis.walk_forward_analysis import WalkForwardConfig, run_walk_forward
+from src.core.executor import get_executor
 from src.db.connection import get_session
 from src.db.models import Instrument, Price, User
 from src.interfaces.api.auth import require_user
@@ -67,7 +68,7 @@ async def run_backtest(
                 else None,
             }
 
-        return await loop.run_in_executor(None, _run)
+        return await loop.run_in_executor(get_executor(), _run)
     except Exception as e:
         logger.exception("backtest_failed")
         raise HTTPException(500, f"Backtest failed: {e}")
@@ -141,7 +142,7 @@ async def personal_backtest(
                 ],
             }
 
-        return await loop.run_in_executor(None, _run)
+        return await loop.run_in_executor(get_executor(), _run)
     except Exception as e:
         logger.exception("personal_backtest_failed")
         raise HTTPException(500, f"Personal backtest failed: {e}")
@@ -214,7 +215,7 @@ async def walk_forward(
                 ],
             }
 
-        return await loop.run_in_executor(None, _run)
+        return await loop.run_in_executor(get_executor(), _run)
     except HTTPException:
         raise
     except Exception as e:
@@ -252,7 +253,7 @@ async def sensitivity_analysis(
                 result = slippage_sensitivity(equity)
             return result.to_dict()
 
-        return await loop.run_in_executor(None, _run)
+        return await loop.run_in_executor(get_executor(), _run)
     except HTTPException:
         raise
     except Exception as e:
@@ -291,7 +292,7 @@ async def ticker_metrics(
             finally:
                 db.close()
 
-        return await loop.run_in_executor(None, _run)
+        return await loop.run_in_executor(get_executor(), _run)
     except HTTPException:
         raise
     except Exception as e:

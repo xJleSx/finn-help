@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import httpx
 
+from src.core.executor import get_executor
 from src.social.base import RawPost, SocialDataSource
 from src.social.utils import async_retry, clean_text, extract_tickers
 
@@ -102,7 +103,7 @@ class PulseAdapter(SocialDataSource):
         loop = asyncio.get_event_loop()
         url = PROFILE_URL.format(nick)
         try:
-            resp = await loop.run_in_executor(None, lambda: self._http.get(url, follow_redirects=True))
+            resp = await loop.run_in_executor(get_executor(), lambda: self._http.get(url, follow_redirects=True))
             resp.raise_for_status()
             return resp.text
         except httpx.HTTPStatusError as e:

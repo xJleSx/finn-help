@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.analysis.events import EventFeatureBuilder, event_features
+from src.core.executor import get_executor
 from src.db.models import Indicator, Instrument, MarketEvent, Price
 
 logger = logging.getLogger(__name__)
@@ -88,10 +89,10 @@ class MLCoordinator:
             prophet = self.get_prophet(ticker)
             ensemble = self.get_ensemble(ticker)
             with ml_inference_latency.labels(model_type="prophet", ticker=ticker or "unknown").time():
-                pr = await loop.run_in_executor(None, prophet.predict, df)
+                pr = await loop.run_in_executor(get_executor(), prophet.predict, df)
             ml_prediction_count.labels(model_type="prophet", ticker=ticker or "unknown", status="success").inc()
             with ml_inference_latency.labels(model_type="ensemble", ticker=ticker or "unknown").time():
-                ensemble_res = await loop.run_in_executor(None, ensemble.predict, ind_df, anomaly_mask)
+                ensemble_res = await loop.run_in_executor(get_executor(), ensemble.predict, ind_df, anomaly_mask)
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="success").inc()
             ml = pr
             ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble_res.get("confidence", 0))
@@ -240,9 +241,9 @@ class MLCoordinator:
             )
 
             prophet = self.get_prophet(sym)
-            prophet_ok = await loop.run_in_executor(None, prophet.train, df)
+            prophet_ok = await loop.run_in_executor(get_executor(), prophet.train, df)
 
-            news_ok = await loop.run_in_executor(None, _train_news_impact_sync, sym)
+            news_ok = await loop.run_in_executor(get_executor(), _train_news_impact_sync, sym)
 
             all_results[sym] = all(ensemble_ok.values()) and prophet_ok
             logger.info(

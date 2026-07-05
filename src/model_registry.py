@@ -8,6 +8,8 @@ from typing import Any, Optional
 
 import cloudpickle  # type: ignore[import-untyped]
 
+from src.core.executor import get_executor
+
 logger = logging.getLogger(__name__)
 
 _MODEL_DIR_ENV_OVERRIDE = None
@@ -88,7 +90,7 @@ async def save_model_async(
     params: Optional[dict[str, Any]] = None,
 ) -> str:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, save_model, model, name, metrics, params)
+    return await loop.run_in_executor(get_executor(), save_model, model, name, metrics, params)
 
 
 def load_model(name: str, version: Optional[str] = None) -> Any:
@@ -122,7 +124,7 @@ def load_model(name: str, version: Optional[str] = None) -> Any:
 
 async def load_model_async(name: str, version: Optional[str] = None) -> Any:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, load_model, name, version)
+    return await loop.run_in_executor(get_executor(), load_model, name, version)
 
 
 def list_models() -> list[dict[str, Any]]:

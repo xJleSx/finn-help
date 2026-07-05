@@ -6,6 +6,7 @@ from pathlib import Path
 
 import structlog
 
+from src.core.executor import get_executor
 from src.scheduler.reporting import generate_daily_report, take_snapshot
 from src.scheduler.tasks import daily_update, weekly_update
 
@@ -165,11 +166,11 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
             if _SMART_RULES_CYCLE % 6 == 0:
                 try:
                     loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, _check_smart_rules)
+                    await loop.run_in_executor(get_executor(), _check_smart_rules)
                 except Exception as e:
                     logger.error("Smart rule check failed: %s", e)
                 try:
-                    await loop.run_in_executor(None, _retry_failed_receipts)
+                    await loop.run_in_executor(get_executor(), _retry_failed_receipts)
                 except Exception as e:
                     logger.error("Receipt retry failed: %s", e)
         except Exception as e:

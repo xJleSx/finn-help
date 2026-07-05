@@ -6,6 +6,7 @@ from typing import Any
 import feedparser  # type: ignore[import-untyped]
 
 from src.collectors.sentiment import analyze_sentiment
+from src.core.executor import get_executor
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ class NewsCollector:
 
     async def _fetch_feed_async(self, url: str, source: str, max_items: int) -> list[dict[str, Any]]:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._fetch_feed, url, source, max_items)
+        return await loop.run_in_executor(get_executor(), self._fetch_feed, url, source, max_items)
 
     def _fetch_feed(self, url: str, source: str, max_items: int) -> list[dict[str, Any]]:
         parsed = feedparser.parse(url)

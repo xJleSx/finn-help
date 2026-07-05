@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from src.analysis.anomaly.features import sentiment_features_per_day
 from src.config import settings
+from src.core.executor import get_executor
 
 
 class SentimentAnomalyDetector:
@@ -50,7 +51,7 @@ class SentimentAnomalyDetector:
             finally:
                 sync_db.close()
 
-        return await loop.run_in_executor(None, _sync_train)
+        return await loop.run_in_executor(get_executor(), _sync_train)
 
     def predict(self, features: dict[str, float]) -> float:
         if self._model is None:
@@ -79,7 +80,7 @@ class SentimentAnomalyDetector:
             finally:
                 sync_db.close()
 
-        return await loop.run_in_executor(None, _sync_predict)
+        return await loop.run_in_executor(get_executor(), _sync_predict)
 
     def _build_single_day_features(self, db: Session, day: datetime) -> dict[str, float]:
         from datetime import timedelta

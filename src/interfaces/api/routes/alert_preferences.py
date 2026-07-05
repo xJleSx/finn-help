@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from src.alerts.preferences import UserAlertPreferences
+from src.core.executor import get_executor
 from src.db.connection import get_session
 from src.db.models import User
 from src.interfaces.api.auth import require_user
@@ -68,7 +69,7 @@ async def get_alert_preferences(
 
     loop = asyncio.get_running_loop()
     try:
-        return await loop.run_in_executor(None, _sync_get_prefs, user.id)
+        return await loop.run_in_executor(get_executor(), _sync_get_prefs, user.id)
     except Exception as e:
         logger.exception("alert_prefs_get_failed", user_id=user.id)
         raise HTTPException(500, f"Failed to get alert preferences: {e}")
@@ -89,7 +90,7 @@ async def update_alert_preferences(
 
     loop = asyncio.get_running_loop()
     try:
-        return await loop.run_in_executor(None, _sync_set_prefs, user.id, body.model_dump(exclude_none=True))
+        return await loop.run_in_executor(get_executor(), _sync_set_prefs, user.id, body.model_dump(exclude_none=True))
     except Exception as e:
         logger.exception("alert_prefs_update_failed", user_id=user.id)
         raise HTTPException(500, f"Failed to update alert preferences: {e}")
@@ -104,7 +105,7 @@ async def mute_ticker(
 
     loop = asyncio.get_running_loop()
     try:
-        ok = await loop.run_in_executor(None, _sync_mute_ticker, user.id, ticker)
+        ok = await loop.run_in_executor(get_executor(), _sync_mute_ticker, user.id, ticker)
         if not ok:
             return {"status": "already_muted"}
         return {"status": "ok"}
@@ -122,7 +123,7 @@ async def unmute_ticker(
 
     loop = asyncio.get_running_loop()
     try:
-        ok = await loop.run_in_executor(None, _sync_unmute_ticker, user.id, ticker)
+        ok = await loop.run_in_executor(get_executor(), _sync_unmute_ticker, user.id, ticker)
         if not ok:
             return {"status": "not_found"}
         return {"status": "ok"}
