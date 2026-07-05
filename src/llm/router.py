@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import re
@@ -17,8 +19,6 @@ class LLMRouter:
     def __init__(self) -> None:
         self._use_groq = bool(settings.groq_api_key)
         self._groq_model = settings.groq_model
-        self._ollama_model = settings.ollama_model
-        self._ollama_url = settings.ollama_url
         self._wolfram: WolframAlphaClient | None = (
             WolframAlphaClient(settings.wolfram_app_id) if settings.wolfram_enabled and settings.wolfram_app_id else None
         )
@@ -27,30 +27,14 @@ class LLMRouter:
         self._enrich_with_risk_profile(signal, user_id=user_id)
         await self._enrich_with_wolfram(signal)
         self._enrich_with_enriched_context(signal)
-
-        if self._use_groq:
-            try:
-                raw = await self._groq_advise(signal)
-                return self._process_output(raw, signal)
-            except Exception as e:
-                logger.warning(f"Groq failed: {e}, trying local...")
-
-        raw = await self._ollama_advise(signal)
+        raw = await self._groq_advise(signal)
         return self._process_output(raw, signal)
 
     async def report(self, signal: dict[str, object], user_id: str | int | None = None) -> str:
         self._enrich_with_risk_profile(signal, user_id=user_id)
         await self._enrich_with_wolfram(signal)
         self._enrich_with_enriched_context(signal)
-
-        if self._use_groq:
-            try:
-                raw = await self._groq_report(signal)
-                return self._process_report(raw, signal)
-            except Exception as e:
-                logger.warning(f"Groq report failed: {e}, trying local...")
-
-        raw = await self._ollama_report(signal)
+        raw = await self._groq_report(signal)
         return self._process_report(raw, signal)
 
     def _enrich_with_risk_profile(self, signal: dict[str, object], user_id: str | int | None = None) -> None:
@@ -141,8 +125,6 @@ class LLMRouter:
                         parts.append(f"{k}={v}")
                 lines.append(f"Макро: {', '.join(parts)}")
 
-            # Alt data context block
-            alt_lines = []
             from datetime import date, timedelta
 
             from sqlalchemy import func
@@ -152,6 +134,7 @@ class LLMRouter:
             alt_rows = db.query(AltDataPoint).filter(AltDataPoint.date >= date.today() - timedelta(days=7)).order_by(AltDataPoint.date.desc()).all()
             if alt_rows:
                 seen: set[str] = set()
+                alt_lines: list[str] = []
                 for r in alt_rows:
                     key = f"{r.source_name}/{r.indicator_name}"
                     if key not in seen:
@@ -159,8 +142,6 @@ class LLMRouter:
                         seen.add(key)
                 if alt_lines:
                     lines.append(f"Альт. данные: {', '.join(alt_lines)}")
-
-            from datetime import date
 
             from src.db.models import Instrument, Price
             from src.db.models import Signal as SignalModel
@@ -200,7 +181,6 @@ class LLMRouter:
 
         db = get_session()
         try:
-            # Auto-detect ticker in question if no ticker_context provided
             if not ticker_context:
                 found_ticker = self._detect_ticker(db, question)
                 if found_ticker:
@@ -220,21 +200,13 @@ class LLMRouter:
             ticker_context=ticker_context,
         )
 
-        if self._use_groq:
-            try:
-                return await self._groq_question(system_prompt, user_prompt)
-            except Exception as e:
-                logger.warning(f"Groq question failed: {e}, trying local...")
-
-        return await self._ollama_question(system_prompt, user_prompt)
+        return await self._groq_question(system_prompt, user_prompt)
 
     @staticmethod
     def _detect_ticker(db: Any, text: str) -> str | None:
-        """Extract likely MOEX ticker from question text."""
         from src.db.models import Instrument
 
         candidates = re.findall(r"\b[A-Z]{4,5}\b", text.upper())
-        # Filter against known instruments in DB
         known = set()
         for row in db.query(Instrument.ticker).all():
             known.add(row[0].upper() if row[0] else "")
@@ -264,91 +236,39 @@ class LLMRouter:
 
         return await throttled_groq_call(_do_call)
 
-    async def _ollama_call(
-        self,
-        messages: list[dict[str, str]],
-        model: str,
-        temperature: float,
-        max_tokens: int,
-        timeout: float = 120.0,
-    ) -> str:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            payload = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stream": False,
-            }
-            resp = await client.post(f"{self._ollama_url}/api/chat", json=payload)
-            resp.raise_for_status()
-            data: Any = resp.json()
-            return cast(str, data.get("message", {}).get("content", ""))
-
     async def _call(
         self,
         system: str,
         user: str,
-        backend: str,
         temperature: float = LLM_TEMPERATURE,
         max_tokens: int = 768,
-        timeout: float = 60.0,
         model: str | None = None,
     ) -> str:
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
-        if backend == "groq":
-            return await self._groq_call(
-                messages=messages,
-                model=model or self._groq_model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-        return await self._ollama_call(
+        return await self._groq_call(
             messages=messages,
-            model=model or self._ollama_model,
+            model=model or self._groq_model,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout,
         )
 
     async def _groq_question(self, system: str, user: str) -> str:
-        return await self._call(system, user, backend="groq", temperature=0.3, max_tokens=1024)
-
-    async def _ollama_question(self, system: str, user: str) -> str:
-        return await self._call(system, user, backend="ollama", temperature=0.3, max_tokens=1024)
+        return await self._call(system, user, temperature=0.3, max_tokens=1024)
 
     async def _groq_advise(self, signal: dict[str, object]) -> str:
         try:
             result = await self._call(
                 prompts.SYSTEM_PROMPT,
                 prompts.build_user_message(signal),
-                backend="groq",
                 temperature=LLM_TEMPERATURE,
                 max_tokens=768,
             )
             return result or self._fallback_text(signal)
         except ImportError:
             logger.warning("groq package not installed")
-            return self._fallback_text(signal)
-
-    async def _ollama_advise(self, signal: dict[str, object]) -> str:
-        try:
-            result = await self._call(
-                prompts.SYSTEM_PROMPT,
-                prompts.build_user_message(signal),
-                backend="ollama",
-                temperature=LLM_TEMPERATURE,
-                max_tokens=768,
-                timeout=60.0,
-            )
-            return result or self._fallback_text(signal)
-        except Exception as e:
-            logger.warning(f"ollama failed: {e}")
             return self._fallback_text(signal)
 
     async def _groq_report(self, signal: dict[str, object]) -> str:
@@ -356,28 +276,12 @@ class LLMRouter:
             result = await self._call(
                 prompts.REPORT_SYSTEM_PROMPT,
                 prompts.build_report_message(signal),
-                backend="groq",
                 temperature=0.2,
                 max_tokens=1024,
             )
             return result or self._fallback_report(signal)
         except ImportError:
             logger.warning("groq package not installed")
-            return self._fallback_report(signal)
-
-    async def _ollama_report(self, signal: dict[str, object]) -> str:
-        try:
-            result = await self._call(
-                prompts.REPORT_SYSTEM_PROMPT,
-                prompts.build_report_message(signal),
-                backend="ollama",
-                temperature=0.2,
-                max_tokens=1024,
-                timeout=60.0,
-            )
-            return result or self._fallback_report(signal)
-        except Exception as e:
-            logger.warning(f"ollama report failed: {e}")
             return self._fallback_report(signal)
 
     def _process_report(self, raw: str, signal: dict[str, object]) -> str:
@@ -447,7 +351,7 @@ class LLMRouter:
             lines.append("")
 
         if weaknesses:
-            lines.append("## Слабые стороны / Риски")
+            lines.append("## Слабые стороны")
             for w in weaknesses:
                 lines.append(f"  - {w}")
             lines.append("")
@@ -457,205 +361,64 @@ class LLMRouter:
             lines.append(verdict)
             lines.append("")
 
-        if rating is not None:
-            stars = "★" * rating + "☆" * (5 - rating)
-            lines.append(f"Оценка: {stars} ({rating}/5)")
-            if rating_explain:
-                lines.append(f"  {rating_explain}")
+        if rating:
+            lines.append(f"**Рейтинг:** {rating}")
+        if rating_explain:
+            lines.append(f"*{rating_explain}*")
             lines.append("")
 
-        if portfolio_advice or action:
-            if action:
-                action_labels = {
-                    "BUY": "К покупке",
-                    "SELL": "К продаже",
-                    "HOLD": "Держать",
-                    "CAUTIOUS_BUY": "Осторожная покупка",
-                    "WATCH": "Наблюдение",
-                }
-                label = action_labels.get(action, action)
-                lines.append(f"Рекомендация: {label}")
-            if portfolio_advice:
-                lines.append(f"  {portfolio_advice}")
+        if action:
+            lines.append(f"**Действие:** {action}")
+        if portfolio_advice:
+            lines.append(f"*Совет по портфелю:* {portfolio_advice}")
 
-        return "\n".join(lines) if lines else (verdict or "Нет данных для формирования отчёта")
+        return "\n".join(lines)
+
+    def _fallback_text(self, signal: dict[str, object]) -> str:
+        action = signal.get("action", "HOLD")
+        confidence = signal.get("confidence", 0)
+        reasons = signal.get("reasons", [])
+        if isinstance(reasons, list) and reasons:
+            return f"Рекомендация: {action} (уверенность {confidence:.0%}).\nОбоснование: {'; '.join(str(r) for r in reasons[:5])}."
+        return f"Рекомендация: {action} (уверенность {confidence:.0%})."
 
     def _fallback_report(self, signal: dict[str, object]) -> str:
-        ticker: Any = signal.get("ticker", "?")
-        action: Any = signal.get("action", "NEUTRAL")
-        confidence: Any = signal.get("confidence", 0)
-        reasons: Any = signal.get("reasons", [])
-
-        lines = [f"Отчёт по {ticker}"]
-        lines.append("")
-        lines.append("Данных для полноценного обзора недостаточно. Основные выводы по сигналу:")
-        lines.append(f"Действие: {action} (уверенность {confidence:.0%})")
-        for r in reasons[:5]:
-            lines.append(f"  {r}")
-        return "\n".join(lines)
+        ticker = signal.get("ticker", "N/A")
+        action = signal.get("action", "HOLD")
+        confidence = signal.get("confidence", 0)
+        return f"## {ticker}\n**Рекомендация:** {action} (уверенность {confidence:.0%})."
 
     def _process_output(self, raw: str, signal: dict[str, object]) -> str:
         cleaned = raw.strip()
+        if not cleaned:
+            return self._fallback_text(signal)
         if cleaned.startswith("```"):
             cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
             cleaned = re.sub(r"\s*```$", "", cleaned)
-        try:
-            parsed = json.loads(cleaned)
-            return self._render_json(parsed)
-        except (json.JSONDecodeError, ValueError):
-            logger.debug("LLM output not valid JSON, using as-is: %.100s", raw)
-            return self._validate_text(raw, signal)
-
-    def _render_json(self, parsed: dict[str, Any]) -> str:
-        summary = parsed.get("summary", "")
-        key_facts = parsed.get("key_facts", [])
-        risks = parsed.get("risks", [])
-        action = parsed.get("action", "")
-        confidence_explain = parsed.get("confidence_explain", "")
-        portfolio_advice = parsed.get("portfolio_advice", "")
-
-        lines: list[str] = []
-        action_emojis = {"BUY": "🟢", "CAUTIOUS_BUY": "🟡", "HOLD": "⚪", "SELL": "🔴", "NEUTRAL": "⚪"}
-        emoji = action_emojis.get(action, "⚪")
-
-        if action:
-            lines.append(f"{emoji} *Действие:* {action}")
-        if confidence_explain:
-            lines.append(f"💬 {confidence_explain}")
-        if summary:
-            lines.append("")
-            lines.append(summary)
-        if key_facts:
-            lines.append("")
-            lines.append("📌 *Ключевые факты:*")
-            for f in key_facts:
-                lines.append(f"• {f}")
-        if risks:
-            lines.append("")
-            lines.append("⚠️ *Риски:*")
-            for r in risks:
-                lines.append(f"• {r}")
-        if portfolio_advice:
-            lines.append("")
-            lines.append(f"💡 *Совет:* {portfolio_advice}")
-
-        price_markers = parsed.get("price_markers")
-        if price_markers and isinstance(price_markers, dict):
-            lines.append("")
-            lines.append("🎯 *Ценовые маркеры:*")
-            cur = price_markers.get("current_price")
-            if cur:
-                lines.append(f"💰 Текущая цена: {cur:.2f} ₽")
-            entry = price_markers.get("entry_zone")
-            if entry:
-                lines.append(f"📥 Зона входа: {entry if isinstance(entry, str) else entry:.2f} ₽")
-            targets = price_markers.get("targets")
-            if targets and isinstance(targets, list):
-                for i, t in enumerate(targets, 1):
-                    lines.append(f"🎯 Цель {i}: {t:.2f} ₽")
-            sl = price_markers.get("stop_loss")
-            if sl:
-                lines.append(f"🛑 Стоп-лосс: {sl:.2f} ₽")
-            trigger = price_markers.get("trigger", "")
-            if trigger == "entry":
-                lines.append("🚨 *Триггер: ПОРА ВХОДИТЬ!*")
-            elif trigger == "take_profit":
-                lines.append("💰 *Триггер: ФИКСИРУЙ ПРИБЫЛЬ!*")
-            elif trigger == "stop_loss":
-                lines.append("🔴 *Триггер: ВЫХОДИ ИЗ ПОЗИЦИИ!*")
-
-        return "\n".join(lines) if lines else summary
-
-    def _validate_text(self, text: str, signal: dict[str, object]) -> str:
-        action: Any = signal.get("action", "NEUTRAL")
-        confidence: Any = signal.get("confidence", 0)
-        ticker: Any = signal.get("ticker", "?")
-        max_pct: Any = signal.get("max_portfolio_pct", 10)
-
-        text_lower = text.lower()
-
-        if ticker and isinstance(ticker, str) and ticker.lower() not in text_lower:
-            logger.debug("LLM response missing ticker mention, wrapping")
-            header = f"📊 *{ticker}* — {action} (уверенность: {confidence:.0%})\n\n"
-            footer = f"\n\n💡 Рекомендуемая доля в портфеле: до {max_pct}%"
-            text = header + text + footer
-
-        return text
-
-    def _fallback_text(self, signal: dict[str, object]) -> str:
-        action: Any = signal.get("action", "NEUTRAL")
-        confidence: Any = signal.get("confidence", 0)
-        ticker: Any = signal.get("ticker", "?")
-        reasons: Any = signal.get("reasons", [])
-        max_pct: Any = signal.get("max_portfolio_pct", 10)
-
-        action_emoji_map = {"BUY": "🟢", "CAUTIOUS_BUY": "🟡", "HOLD": "⚪", "SELL": "🔴", "NEUTRAL": "⚪"}
-        emoji = action_emoji_map.get(action, "⚪")
-
-        text = f"{emoji} *{ticker}* — {action} (уверенность: {confidence:.0%})\n"
-        for r in reasons:
-            text += f"• {r}\n"
-        text += f"\n💡 Рекомендуемая доля в портфеле: до {max_pct}%"
-
-        components = signal.get("components", {})
-        ml = components.get("ml", {}) if isinstance(components, dict) else {}
-        if ml and isinstance(ml, dict):
-            ml_change = ml.get("change_pct")
-            ml_tp = ml.get("target_price")
-            if ml_change is not None:
-                text += f"\n\n🤖 *ML-прогноз:* {'+' if ml_change and ml_change > 0 else ''}{ml_change:.1f}%"
-                if ml_tp:
-                    text += f" (цель {ml_tp:.0f} ₽)"
-
-        return text
+        return cleaned
 
     async def ask(self, prompt: str, system_prompt: str = "You are a helpful assistant.") -> str:
         try:
-            if self._use_groq:
-                return await self._groq_call(
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-                    model=settings.groq_model,
-                    temperature=0.1,
-                    max_tokens=64,
-                )
-            return await self._ollama_call(
+            return await self._groq_call(
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-                model=self._ollama_model,
+                model=settings.groq_model,
                 temperature=0.1,
                 max_tokens=64,
-                timeout=30.0,
             )
         except Exception as e:
             logger.warning("ask() failed: %s", e)
             return ""
 
     async def analyze_social(self, prompt: str) -> str:
-        if self._use_groq:
-            try:
-                return await self._groq_social(prompt)
-            except Exception as e:
-                logger.warning("Groq social failed: %s, trying local", e)
-        return await self._ollama_social(prompt)
+        return await self._groq_social(prompt)
 
     async def _groq_social(self, prompt: str) -> str:
         result = await self._call(
             "Отвечай JSON-массивом. Компактно.",
             prompt,
-            backend="groq",
             model=settings.social_groq_model,
             temperature=0.05,
             max_tokens=2048,
-        )
-        return result or "[]"
-
-    async def _ollama_social(self, prompt: str) -> str:
-        result = await self._call(
-            "Отвечай JSON-массивом. Компактно.",
-            prompt,
-            backend="ollama",
-            temperature=0.05,
-            max_tokens=2048,
-            timeout=300.0,
         )
         return result or "[]"
 
