@@ -276,9 +276,9 @@ def analyze(
                         table.add_row(col.upper(), f"{val:.2f}")
                 table.add_row(
                     "Сигнал",
-                    f"[bold]{fused['action']}[/bold] (уверенность: {fused['confidence']:.0%})",
+                    f"[bold]{fused.get('action', 'HOLD')}[/bold] (уверенность: {fused.get('confidence', 0):.0%})",
                 )
-                table.add_row("Макс. доля", f"до {fused['max_portfolio_pct']}% портфеля")
+                table.add_row("Макс. доля", f"до {fused.get('max_portfolio_pct', 10)}% портфеля")
 
             console.print(table)
 

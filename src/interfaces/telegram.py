@@ -878,8 +878,8 @@ async def _reply_with_analysis(update: Update, ticker: str) -> None:
         await update.effective_message.reply_text(f"\u274c {_advice}")
         return
 
-    action = fused["action"]
-    confidence = fused["confidence"]
+    action = fused.get("action", "HOLD")
+    confidence = fused.get("confidence", 0)
     emoji = ACTION_EMOJI.get(action, "\u26aa")
 
     action_labels = {
@@ -934,7 +934,7 @@ async def _reply_with_analysis(update: Update, ticker: str) -> None:
     if data_advice:
         text += f"\n{data_advice}"
 
-    text += f"\n\n💡 Доля в портфеле: до {fused['max_portfolio_pct']}%"
+    text += f"\n\n💡 Доля в портфеле: до {fused.get('max_portfolio_pct', 10)}%"
 
     chunks = _chunk_text(text, 4096)
     if msg:
@@ -2108,7 +2108,7 @@ async def alloc_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     else:
         context.user_data["alloc_profile"] = "balanced"
 
-    amount = context.user_data["alloc_amount"]
+    amount = context.user_data.get("alloc_amount", "100000")
     exclude = context.user_data.get("alloc_exclude", set())
     profile = context.user_data.get("alloc_profile", "balanced")
 

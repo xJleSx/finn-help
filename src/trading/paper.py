@@ -26,6 +26,14 @@ class PaperPosition:
 
 
 @dataclass
+class PaperShortPosition:
+    ticker: str
+    quantity: float
+    avg_price: float
+    margin_held: float = 0.0
+
+
+@dataclass
 class PaperTradeRecord:
     timestamp: str
     ticker: str
@@ -38,6 +46,7 @@ class PaperTradeRecord:
     balance_before: float
     balance_after: float
     reason: str = ""
+    is_short: bool = False
 
 
 @dataclass
@@ -45,28 +54,41 @@ class PaperState:
     balance: float
     initial_capital: float
     positions: dict[str, PaperPosition] = field(default_factory=dict)
+    short_positions: dict[str, PaperShortPosition] = field(default_factory=dict)
     equity_history: list[float] = field(default_factory=list)
     trades: list[PaperTradeRecord] = field(default_factory=list)
     start_time: str = ""
     last_price_cache: dict[str, float] = field(default_factory=dict)
+    margin_loan: float = 0.0
+    leverage: float = 1.0
 
     def total_equity(self, current_prices: dict[str, float] | None = None) -> float:
         pos_value = 0.0
+        short_value = 0.0
         prices = current_prices or self.last_price_cache
         for t, pos in self.positions.items():
             price = prices.get(t, pos.avg_price)
             pos_value += pos.quantity * price
-        return self.balance + pos_value
+        for t, pos in self.short_positions.items():
+            price = prices.get(t, pos.avg_price)
+            short_value += pos.quantity * price
+        return self.balance + pos_value - short_value
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "balance": self.balance,
             "initial_capital": self.initial_capital,
             "positions": {t: {"ticker": p.ticker, "quantity": p.quantity, "avg_price": p.avg_price} for t, p in self.positions.items()},
+            "short_positions": {
+                t: {"ticker": p.ticker, "quantity": p.quantity, "avg_price": p.avg_price, "margin_held": p.margin_held}
+                for t, p in self.short_positions.items()
+            },
             "equity_history": self.equity_history[-500:],
             "n_trades": len(self.trades),
             "start_time": self.start_time,
             "last_price_cache": self.last_price_cache,
+            "margin_loan": self.margin_loan,
+            "leverage": self.leverage,
         }
 
 
@@ -87,15 +109,28 @@ class PaperTradingEngine:
                 data = json.load(f)
             positions = {}
             for t, pdata in data.get("positions", {}).items():
-                positions[t] = PaperPosition(ticker=pdata.get("ticker", t), quantity=float(pdata["quantity"]), avg_price=float(pdata["avg_price"]))
+                positions[t] = PaperPosition(
+                    ticker=pdata.get("ticker", t), quantity=float(pdata.get("quantity", 0)), avg_price=float(pdata.get("avg_price", 0.0))
+                )
+            short_positions = {}
+            for t, pdata in data.get("short_positions", {}).items():
+                short_positions[t] = PaperShortPosition(
+                    ticker=pdata.get("ticker", t),
+                    quantity=float(pdata.get("quantity", 0)),
+                    avg_price=float(pdata.get("avg_price", 0.0)),
+                    margin_held=float(pdata.get("margin_held", 0)),
+                )
             self._state = PaperState(
                 balance=float(data.get("balance", DEFAULT_INITIAL_CAPITAL)),
                 initial_capital=float(data.get("initial_capital", DEFAULT_INITIAL_CAPITAL)),
                 positions=positions,
+                short_positions=short_positions,
                 equity_history=[float(x) for x in data.get("equity_history", [])],
                 trades=[PaperTradeRecord(**t) if isinstance(t, dict) else t for t in data.get("trades", [])],
                 start_time=str(data.get("start_time", "")),
                 last_price_cache={k: float(v) for k, v in data.get("last_price_cache", {}).items()},
+                margin_loan=float(data.get("margin_loan", 0)),
+                leverage=float(data.get("leverage", 1.0)),
             )
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
             self._state = PaperState(
@@ -183,11 +218,12 @@ class PaperTradingEngine:
         commission_pct: float | None = None,
         slippage_bps: int | None = None,
         current_prices: dict[str, float] | None = None,
+        is_short: bool = False,
     ) -> dict[str, Any]:
         state = self._load_state()
         ticker = ticker.upper()
         direction = direction.upper()
-        if direction not in ("BUY", "SELL"):
+        if direction not in ("BUY", "SELL", "SHORT", "COVER"):
             return {"status": "error", "error": f"Invalid direction: {direction}"}
 
         if price is None or price <= 0:
@@ -208,54 +244,88 @@ class PaperTradingEngine:
 
         balance_before = state.balance
         pnl = 0.0
+        effective_is_short = is_short or direction in ("SHORT",)
+        effective_is_cover = direction in ("COVER",)
 
-        if direction == "BUY":
-            if total_cost > balance_before:
-                max_qty = int(balance_before / (price * (1 + com_pct + slip_bps / 10_000)))
-                if max_qty < 1:
-                    return {"status": "error", "error": f"Insufficient funds: need {total_cost:.2f}, have {balance_before:.2f}"}
-                quantity = max_qty
-                gross_value = quantity * price
-                commission = gross_value * com_pct
-                slippage = gross_value * (slip_bps / 10_000)
-                total_cost = gross_value + commission + slippage
-
-            new_balance = balance_before - total_cost
-            existing = state.positions.get(ticker)
-            if existing:
-                total_qty = existing.quantity + quantity
-                total_cost_basis = existing.quantity * existing.avg_price + gross_value
-                state.positions[ticker] = PaperPosition(ticker=ticker, quantity=total_qty, avg_price=total_cost_basis / total_qty)
+        if direction in ("BUY", "COVER"):
+            if effective_is_cover:
+                short_pos = state.short_positions.get(ticker)
+                if not short_pos or short_pos.quantity < 1e-10:
+                    return {"status": "error", "error": f"No short position in {ticker} to cover"}
+                if quantity > short_pos.quantity:
+                    quantity = short_pos.quantity
+                    gross_value = quantity * price
+                    commission = gross_value * com_pct
+                    slippage = gross_value * (slip_bps / 10_000)
+                    total_cost = gross_value + commission + slippage
+                cost_basis = quantity * short_pos.avg_price
+                proceeds = gross_value * -1
+                pnl = cost_basis - proceeds
+                new_balance = balance_before + (cost_basis - gross_value - commission - slippage)
+                remaining = short_pos.quantity - quantity
+                if remaining < 1e-10:
+                    state.short_positions.pop(ticker, None)
+                else:
+                    state.short_positions[ticker] = PaperShortPosition(ticker=ticker, quantity=remaining, avg_price=short_pos.avg_price)
+                state.balance = new_balance
             else:
-                state.positions[ticker] = PaperPosition(ticker=ticker, quantity=quantity, avg_price=price)
-
-            state.balance = new_balance
+                if total_cost > balance_before:
+                    max_qty = int(balance_before / (price * (1 + com_pct + slip_bps / 10_000)))
+                    if max_qty < 1:
+                        return {"status": "error", "error": f"Insufficient funds: need {total_cost:.2f}, have {balance_before:.2f}"}
+                    quantity = max_qty
+                    gross_value = quantity * price
+                    commission = gross_value * com_pct
+                    slippage = gross_value * (slip_bps / 10_000)
+                    total_cost = gross_value + commission + slippage
+                new_balance = balance_before - total_cost
+                existing = state.positions.get(ticker)
+                if existing:
+                    total_qty = existing.quantity + quantity
+                    total_cost_basis = existing.quantity * existing.avg_price + gross_value
+                    state.positions[ticker] = PaperPosition(ticker=ticker, quantity=total_qty, avg_price=total_cost_basis / total_qty)
+                else:
+                    state.positions[ticker] = PaperPosition(ticker=ticker, quantity=quantity, avg_price=price)
+                state.balance = new_balance
             state.last_price_cache[ticker] = price
 
-        elif direction == "SELL":
-            pos = state.positions.get(ticker)
-            if not pos or pos.quantity < 1e-10:
-                return {"status": "error", "error": f"No position in {ticker} to sell"}
-
-            if quantity > pos.quantity:
-                quantity = pos.quantity
-                gross_value = quantity * price
-                commission = gross_value * com_pct
-                slippage = gross_value * (slip_bps / 10_000)
-                total_cost = commission + slippage
-
-            cost_basis = quantity * pos.avg_price
-            proceeds = gross_value - total_cost
-            pnl = proceeds - cost_basis
-            new_balance = balance_before + proceeds
-
-            remaining = pos.quantity - quantity
-            if remaining < 1e-10:
-                state.positions.pop(ticker, None)
+        elif direction in ("SELL", "SHORT"):
+            if effective_is_short:
+                margin_required = gross_value * 0.5
+                if balance_before < margin_required:
+                    return {"status": "error", "error": f"Insufficient margin for short: need {margin_required:.2f}, have {balance_before:.2f}"}
+                proceeds = gross_value
+                new_balance = balance_before + proceeds - total_cost
+                existing_short = state.short_positions.get(ticker)
+                if existing_short:
+                    total_qty = existing_short.quantity + quantity
+                    total_avg = (existing_short.quantity * existing_short.avg_price + quantity * price) / total_qty
+                    state.short_positions[ticker] = PaperShortPosition(
+                        ticker=ticker, quantity=total_qty, avg_price=total_avg, margin_held=existing_short.margin_held + margin_required
+                    )
+                else:
+                    state.short_positions[ticker] = PaperShortPosition(ticker=ticker, quantity=quantity, avg_price=price, margin_held=margin_required)
+                state.balance = new_balance
             else:
-                state.positions[ticker] = PaperPosition(ticker=ticker, quantity=remaining, avg_price=pos.avg_price)
-
-            state.balance = new_balance
+                pos = state.positions.get(ticker)
+                if not pos or pos.quantity < 1e-10:
+                    return {"status": "error", "error": f"No position in {ticker} to sell"}
+                if quantity > pos.quantity:
+                    quantity = pos.quantity
+                    gross_value = quantity * price
+                    commission = gross_value * com_pct
+                    slippage = gross_value * (slip_bps / 10_000)
+                    total_cost = commission + slippage
+                cost_basis = quantity * pos.avg_price
+                proceeds = gross_value - total_cost
+                pnl = proceeds - cost_basis
+                new_balance = balance_before + proceeds
+                remaining = pos.quantity - quantity
+                if remaining < 1e-10:
+                    state.positions.pop(ticker, None)
+                else:
+                    state.positions[ticker] = PaperPosition(ticker=ticker, quantity=remaining, avg_price=pos.avg_price)
+                state.balance = new_balance
             state.last_price_cache[ticker] = price
 
         record = PaperTradeRecord(
@@ -270,6 +340,7 @@ class PaperTradingEngine:
             balance_before=balance_before,
             balance_after=state.balance,
             reason=reason,
+            is_short=effective_is_short,
         )
         state.trades.append(record)
 
@@ -300,6 +371,7 @@ class PaperTradingEngine:
             "balance_before": balance_before,
             "balance_after": state.balance,
             "total_equity": equity,
+            "is_short": effective_is_short,
             "reason": reason,
         }
 
@@ -316,4 +388,5 @@ class PaperTradingEngine:
             "balance_before": t.balance_before,
             "balance_after": t.balance_after,
             "reason": t.reason,
+            "is_short": t.is_short,
         }

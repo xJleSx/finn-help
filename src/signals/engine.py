@@ -419,8 +419,8 @@ class SignalFusionEngine:
         signal = SignalModel(
             instrument_id=instrument_id,
             date=datetime.now(timezone.utc),
-            action=fused["action"],
-            confidence=fused_clean["confidence"],
+            action=fused.get("action", "HOLD"),
+            confidence=fused_clean.get("confidence", 0),
             fused_json=fused_clean,
         )
         db.add(signal)
@@ -432,8 +432,8 @@ class SignalFusionEngine:
         signal = SignalModel(
             instrument_id=instrument_id,
             date=datetime.now(timezone.utc),
-            action=fused["action"],
-            confidence=fused_clean["confidence"],
+            action=fused.get("action", "HOLD"),
+            confidence=fused_clean.get("confidence", 0),
             fused_json=fused_clean,
         )
         db.add(signal)

@@ -13,8 +13,16 @@ from src.core.context import (
 )
 from src.core.resilience import CircuitBreakerOpenError, get_circuit_breaker
 from src.trading.brokers.tbank import TBankClient
+from src.trading.compliance.aml import check_order_aml
+from src.trading.compliance.limits import (
+    check_position_limit,
+    check_short_eligibility,
+)
 from src.trading.execution.audit import log_trade, save_order
 from src.trading.execution.stoploss import position_tracker
+from src.trading.types import (
+    Direction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +59,9 @@ class OrderRecord:
         price: float,
         mode: TradeMode,
         reason: str = "",
+        order_type: str = "market",
+        time_in_force: str = "day",
+        is_short: bool = False,
     ):
         self.ticker = ticker
         self.direction = direction
@@ -58,12 +69,20 @@ class OrderRecord:
         self.price = price
         self.mode = mode
         self.reason = reason
+        self.order_type = order_type
+        self.time_in_force = time_in_force
+        self.is_short = is_short
         self.created_at = datetime.now(timezone.utc)
         self.order_id: Optional[str] = None
         self.status = "pending"
         self.db_id: int = 0
         self.request_id: str = get_request_id() or generate_id("req", 12)
         self.idempotency_key: str = generate_id("idem", 24)
+        self.filled_quantity: int = 0
+        self.remaining_quantity: int = quantity
+        self.executed_price: Optional[float] = None
+        self.commission: float = 0.0
+        self.fills: list[dict[str, Any]] = []
 
 
 _execution_log: "deque[OrderRecord]" = deque(maxlen=1000)
@@ -93,7 +112,12 @@ def get_log(limit: int = 20) -> list[dict[str, object]]:
             "mode": r.mode.value,
             "reason": r.reason,
             "status": r.status,
+            "order_type": r.order_type,
+            "time_in_force": r.time_in_force,
+            "is_short": r.is_short,
             "order_id": r.order_id,
+            "filled_quantity": r.filled_quantity,
+            "remaining_quantity": r.remaining_quantity,
             "time": r.created_at.isoformat(),
             "request_id": r.request_id,
             "idempotency_key": r.idempotency_key,
@@ -110,6 +134,9 @@ async def execute_order(
     figi: Optional[str] = None,
     reason: str = "",
     mode_override: Optional[TradeMode] = None,
+    order_type: str = "market",
+    time_in_force: str = "day",
+    is_short: bool = False,
 ) -> OrderRecord:
     global _mode
     effective_mode = mode_override if mode_override is not None else _mode
@@ -125,20 +152,32 @@ async def execute_order(
         price=price or 0.0,
         mode=effective_mode,
         reason=reason,
+        order_type=order_type,
+        time_in_force=time_in_force,
+        is_short=is_short,
     )
+
+    effective_direction = Direction.SHORT if is_short else Direction(direction.upper())
 
     if effective_mode == TradeMode.DRY_RUN:
         record.status = "simulated"
         record.order_id = f"dry_{datetime.now(timezone.utc).timestamp()}"
         logger.info(
-            "DRY-RUN %s %d %s at %.2f (%s)",
+            "DRY-RUN %s %d %s at %.2f (%s) type=%s tif=%s",
             direction,
             quantity,
             ticker,
             record.price,
             reason,
+            order_type,
+            time_in_force,
         )
-        position_tracker.update(ticker, direction, quantity, record.price)
+        if effective_direction in (Direction.BUY, Direction.COVER):
+            position_tracker.update(ticker, "BUY", quantity, record.price)
+        elif effective_direction in (Direction.SELL, Direction.SHORT):
+            position_tracker.update(ticker, "SELL", quantity, record.price)
+            if is_short:
+                position_tracker.add_short(ticker, quantity, record.price)
         _execution_log.append(record)
         record.db_id = save_order(record)
         await _notify_trade(record, reason)
@@ -160,7 +199,6 @@ async def execute_order(
             await _notify_trade(record, reason)
             return record
 
-        # AUTO mode execution
         try:
             from src.db.connection import get_session as _get_db
             from src.db.models import Instrument as _InstModel
@@ -215,14 +253,6 @@ async def execute_order(
                 _execution_log.append(record)
                 record.db_id = save_order(record)
                 await _notify_trade(record, reason=f"CB_OPEN_FALLBACK {reason}")
-                logger.info(
-                    "CB-FALLBACK DRY_RUN %s %d %s at %.2f (%s)",
-                    direction,
-                    quantity,
-                    ticker,
-                    requested_price,
-                    reason,
-                )
                 return record
 
             async with TBankClient(use_sandbox=use_sandbox) as client:
@@ -235,13 +265,16 @@ async def execute_order(
                     await _notify_trade(record, reason)
                     return record
 
-                account_id = str(accounts[0]["id"])
+                account_id = str(accounts[0].get("id", ""))
 
                 try:
+                    mapped_direction = (
+                        "COVER" if is_short and direction.upper() == "BUY" else "SHORT" if is_short and direction.upper() == "SELL" else direction
+                    )
                     result = await client.place_order(
                         figi=resolved_figi,
                         quantity=quantity_lots,
-                        direction=direction,
+                        direction=mapped_direction,
                         account_id=account_id,
                         idempotency_key=record.idempotency_key,
                     )
@@ -257,6 +290,7 @@ async def execute_order(
                     record.db_id = save_order(record)
                     await _notify_trade(record, reason=f"CB_OPEN_FALLBACK {reason}")
                     return record
+
                 _order_id = result.get("order_id")
                 record.order_id = str(_order_id) if _order_id is not None else None
                 record.status = str(result.get("status", "unknown"))
@@ -265,22 +299,31 @@ async def execute_order(
                 executed_price = result.get("executed_price")
                 if executed_price is not None:
                     record.price = cast(float, executed_price)
+                    record.executed_price = record.price
+                record.filled_quantity = executed_shares
+                record.remaining_quantity = max(0, quantity - executed_shares)
 
                 slippage = 0.0
                 if requested_price and requested_price > 0 and executed_price is not None:
                     slippage = abs(cast(float, executed_price) - requested_price) / requested_price
                 logger.info(
-                    "ORDER FILLED: %s %d lots (%d shares) %s at %.2f (id=%s)",
+                    "ORDER RESULT: %s %d lots (%d shares) %s at %.2f (id=%s) status=%s filled=%d",
                     direction,
                     executed_lots,
                     executed_shares,
                     ticker,
                     record.price,
                     record.order_id,
+                    record.status,
+                    record.filled_quantity,
                 )
 
                 if record.status in ("filled", "partial") and executed_shares > 0:
-                    position_tracker.update(ticker, direction, executed_shares, record.price)
+                    if is_short:
+                        position_tracker.add_short(ticker, executed_shares, record.price)
+                    else:
+                        position_tracker.update(ticker, direction, executed_shares, record.price)
+
                     sl_pct = cast(float, personal.get("stop_loss_pct", 0.05))
                     tp_pct = cast(float, personal.get("take_profit_pct", 0.10))
                     _sl_db = _get_db()
@@ -297,7 +340,7 @@ async def execute_order(
                             from src.trading.risk.manager import compute_stop_loss as _compute_sl
 
                             atr_result = _compute_sl(record.price, float(latest.atr), multiplier=2.0)
-                            if atr_result and atr_result["stop_loss_pct"]:
+                            if atr_result and atr_result.get("stop_loss_pct"):
                                 sl_pct = abs(atr_result["stop_loss_pct"]) / 100
                     except Exception as e:
                         logger.warning("Failed to compute stop loss for %s: %s", ticker, e)
@@ -317,6 +360,22 @@ async def execute_order(
                         reason=record.reason,
                         order_id=record.db_id,
                     )
+
+                if record.status in ("filled", "partial"):
+                    from src.db.connection import get_session as _upd_db
+                    from src.db.models import Order as _OrdModel
+
+                    _upd = _upd_db()
+                    try:
+                        o = _upd.query(_OrdModel).filter_by(id=record.db_id).first()
+                        if o:
+                            o.filled_quantity = record.filled_quantity
+                            o.remaining_quantity = record.remaining_quantity
+                            o.is_short = is_short
+                            _upd.commit()
+                    finally:
+                        _upd.close()
+
         except Exception as e:
             record.status = "failed"
             logger.error("Order failed: %s %d %s: %s", direction, quantity, ticker, e, exc_info=True)
@@ -353,6 +412,9 @@ async def approve_order(ticker: str, direction: str, quantity: int) -> Optional[
                     price=r.price,
                     reason=r.reason,
                     mode_override=TradeMode.AUTO,
+                    order_type=r.order_type,
+                    time_in_force=r.time_in_force,
+                    is_short=r.is_short,
                 )
                 return result
     return None
@@ -366,3 +428,45 @@ async def cancel_pending(ticker: str) -> bool:
                 logger.info("Pending order cancelled: %s", ticker)
                 return True
     return False
+
+
+async def execute_compliance_check(
+    ticker: str,
+    direction: str,
+    quantity: int,
+    price: float,
+    user_id: int = 0,
+    portfolio_value: float = 0.0,
+    is_short: bool = False,
+    user_risk_profile: str = "balanced",
+) -> dict[str, Any]:
+    volume = quantity * price
+    results: dict[str, Any] = {
+        "passed": True,
+        "checks": [],
+        "warnings": [],
+        "blocks": [],
+    }
+
+    aml_check = check_order_aml(user_id, ticker, volume, user_risk_profile)
+    results["checks"].append({"check": "aml", "passed": aml_check.passed})
+    if not aml_check.passed:
+        results["passed"] = False
+        results["blocks"].extend(aml_check.blocks)
+    results["warnings"].extend(aml_check.warnings)
+
+    if is_short:
+        short_check = check_short_eligibility(ticker, quantity, price, portfolio_value)
+        results["checks"].append({"check": "short_eligibility", "passed": short_check.passed})
+        if not short_check.passed:
+            results["passed"] = False
+            results["blocks"].extend(short_check.blocks)
+
+    pos_check = check_position_limit(ticker, quantity, price, portfolio_value)
+    results["checks"].append({"check": "position_limit", "passed": pos_check.passed})
+    if not pos_check.passed:
+        results["passed"] = False
+        results["blocks"].extend(pos_check.blocks)
+    results["warnings"].extend(pos_check.warnings)
+
+    return results

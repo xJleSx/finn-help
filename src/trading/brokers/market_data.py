@@ -28,7 +28,7 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
             return 0
 
         for c in candles:
-            d = c["time"]
+            d = c.get("time")
             if isinstance(d, str):
                 d = datetime.fromisoformat(d).date()
             exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
@@ -36,26 +36,26 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
                 p = Price(
                     instrument_id=inst.id,
                     date=d,
-                    open=c["open"],
-                    high=c["high"],
-                    low=c["low"],
-                    close=c["close"],
-                    volume=c["volume"],
+                    open=c.get("open"),
+                    high=c.get("high"),
+                    low=c.get("low"),
+                    close=c.get("close"),
+                    volume=c.get("volume"),
                 )
                 db.add(p)
                 new_count += 1
             else:
-                _high = cast(float, c["high"])
-                _low = cast(float, c["low"])
-                _close = cast(float, c["close"])
-                _volume = cast(int, c["volume"])
+                _high = cast(float, c.get("high"))
+                _low = cast(float, c.get("low"))
+                _close = cast(float, c.get("close"))
+                _volume = cast(int, c.get("volume"))
                 if exists.high is None or _high > float(exists.high):
                     exists.high = _high  # type: ignore[assignment]
                 if exists.low is None or _low < float(exists.low):
                     exists.low = _low  # type: ignore[assignment]
                 exists.close = _close  # type: ignore[assignment]
                 if exists.open is None:
-                    exists.open = c["open"]
+                    exists.open = c.get("open")
                 exists.volume = _volume  # type: ignore[assignment]
         db.commit()
         logger.info("Added/updated %d candles for %s (%s)", new_count, ticker, interval)

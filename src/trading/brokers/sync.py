@@ -23,7 +23,7 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
         if not accounts:
             return {"status": "no_accounts", **stats}
 
-        targets: list[str] = [account_id] if account_id else [str(a["id"]) for a in accounts]
+        targets: list[str] = [account_id] if account_id else [str(a.get("id", "")) for a in accounts]
         all_positions: list[dict[str, Any]] = []
         for target in targets:
             try:
@@ -37,7 +37,7 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
     try:
         for pos in all_positions:
             try:
-                figi = pos["figi"]
+                figi = pos.get("figi") or ""
                 inst = db.query(Instrument).filter_by(figi=figi).first()
                 if not inst:
                     ticker = pos.get("ticker", figi)
@@ -63,8 +63,8 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                         except Exception as p_e:
                             logger.warning("Failed to fetch price history for new %s: %s", ticker, p_e)
 
-                qty = pos["quantity"]
-                avg_price = pos["average_price"]
+                qty = pos.get("quantity", 0)
+                avg_price = pos.get("average_price", 0.0)
 
                 existing = db.query(PortModel).filter_by(user_id=user_id, instrument_id=inst.id).first()
                 if existing:

@@ -151,7 +151,7 @@ class TickerContextBuilder:
             fused = analysis_service._analyze_single_sync(db, inst, ticker.upper(), with_ml=True)
             if fused:
                 lines.append("")
-                lines.append(f"Сигнал: {fused['action']} (уверенность {fused['confidence']:.0%})")
+                lines.append(f"Сигнал: {fused.get('action', 'HOLD')} (уверенность {fused.get('confidence', 0):.0%})")
                 ml = fused.get("components", {}).get("ml", {})
                 if ml and ml.get("change_pct") is not None:
                     lines.append(f"ML прогноз: {ml['change_pct']:+.2f}% (цель {ml.get('target_price', 0):.0f} ₽)")
