@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 import numpy as np
 import pandas as pd
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from src.analysis.ml.news_impact_features import ALL_FEATURE_COLS
 from src.analysis.ml.news_impact_features import extract_features as extract_impact_features
@@ -14,7 +14,7 @@ from src.config import settings
 from src.db.models import Instrument, News, NewsInstrument
 
 
-def article_counts_per_day(db: Any, ticker: str, days_back: int | None = None) -> pd.DataFrame:
+def article_counts_per_day(db: Session, ticker: str, days_back: int | None = None) -> pd.DataFrame:
     days = days_back or settings.ml_anomaly_days_back
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     rows = (
@@ -43,7 +43,7 @@ def article_counts_per_day(db: Any, ticker: str, days_back: int | None = None) -
     return df
 
 
-def rolling_volume_features(db: Any, ticker: str, days_back: int | None = None) -> pd.DataFrame:
+def rolling_volume_features(db: Session, ticker: str, days_back: int | None = None) -> pd.DataFrame:
     days = days_back or settings.ml_anomaly_days_back
     df = article_counts_per_day(db, ticker, days)
     if df.empty or len(df) < 5:
@@ -57,7 +57,7 @@ def rolling_volume_features(db: Any, ticker: str, days_back: int | None = None) 
     return df
 
 
-def sentiment_features_per_day(db: Any, ticker: str, days_back: int | None = None) -> pd.DataFrame:
+def sentiment_features_per_day(db: Session, ticker: str, days_back: int | None = None) -> pd.DataFrame:
     days = days_back or settings.ml_anomaly_days_back
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     rows = (
@@ -104,7 +104,7 @@ def sentiment_features_per_day(db: Any, ticker: str, days_back: int | None = Non
     return df
 
 
-def source_frequencies(db: Any, category: str | None = None) -> dict[str, dict[str, float]]:
+def source_frequencies(db: Session, category: str | None = None) -> dict[str, dict[str, float]]:
     query = select(News.source_name, News.category, func.count(News.id).label("cnt"))
     if category:
         query = query.where(News.category == category)
@@ -129,7 +129,7 @@ def source_frequencies(db: Any, category: str | None = None) -> dict[str, dict[s
     return result
 
 
-def topic_frequencies(db: Any) -> dict[str, dict[tuple[str, str], int]]:
+def topic_frequencies(db: Session) -> dict[str, dict[tuple[str, str], int]]:
     query = (
         select(
             Instrument.ticker,
@@ -153,7 +153,7 @@ def topic_frequencies(db: Any) -> dict[str, dict[tuple[str, str], int]]:
     return dict(result)
 
 
-def build_anomaly_feature_vector(db: Any, news_article: News) -> np.ndarray:
+def build_anomaly_feature_vector(db: Session, news_article: News) -> np.ndarray:
     impact_features = extract_impact_features(db, news_article)
     vec = np.array([impact_features.get(c, 0.0) for c in ALL_FEATURE_COLS], dtype=np.float32)
     return vec

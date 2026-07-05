@@ -4,9 +4,11 @@ import logging
 from typing import Any
 
 import numpy as np
+from sqlalchemy.orm import Session
 
 from src.analysis.ml.news_impact_features import ALL_FEATURE_COLS, build_training_data
 from src.config import settings
+from src.db.models import News
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +31,7 @@ class AutoencoderAnomalyDetector:
         self._trained = False
         self._losses: list[float] = []
 
-    def train(self, db: Any, ticker: str | None = None) -> dict[str, Any]:
+    def train(self, db: Session, ticker: str | None = None) -> dict[str, Any]:
         try:
             import torch
             import torch.nn as nn
@@ -114,7 +116,7 @@ class AutoencoderAnomalyDetector:
             return float(min(error / self._threshold, 1.0))
         return float(min(error, 1.0))
 
-    def predict_article(self, db: Any, news_article: Any) -> float:
+    def predict_article(self, db: Session, news_article: News) -> float:
 
         from src.analysis.anomaly.features import build_anomaly_feature_vector
 

@@ -7,7 +7,6 @@ from typing import Any
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from src.analysis.anomaly.features import rolling_volume_features
@@ -39,7 +38,7 @@ class VolumeAnomalyDetector:
         self._trained = True
         return {"trained": True, "samples": len(x), "features": len(self._feature_cols)}
 
-    async def async_train(self, db: AsyncSession, ticker: str | None = None) -> dict[str, Any]:
+    async def async_train(self, ticker: str | None = None) -> dict[str, Any]:
         loop = asyncio.get_running_loop()
 
         def _sync_train() -> dict[str, Any]:
@@ -68,7 +67,7 @@ class VolumeAnomalyDetector:
         features = self._build_single_day_features(db, published)
         return self.predict(features)
 
-    async def async_predict_article(self, db: AsyncSession, news_article: Any) -> float:
+    async def async_predict_article(self, news_article: Any) -> float:
         loop = asyncio.get_running_loop()
 
         def _sync_predict() -> float:

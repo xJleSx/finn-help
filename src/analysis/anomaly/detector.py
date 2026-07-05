@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from src.analysis.anomaly.autoencoder import AutoencoderAnomalyDetector
 from src.analysis.anomaly.sentiment_anomaly import SentimentAnomalyDetector
 from src.analysis.anomaly.source_anomaly import SourceAnomalyDetector
@@ -22,7 +24,7 @@ class AnomalyDetector:
         self.topic = TopicAnomalyDetector()
         self.autoencoder = AutoencoderAnomalyDetector()
 
-    def train_all(self, db: Any) -> dict[str, Any]:
+    def train_all(self, db: Session) -> dict[str, Any]:
         results: dict[str, Any] = {}
         results["volume"] = self.volume.train(db, self.ticker)
         results["sentiment"] = self.sentiment.train(db, self.ticker)
@@ -31,7 +33,7 @@ class AnomalyDetector:
         results["autoencoder"] = self.autoencoder.train(db, self.ticker)
         return results
 
-    def predict_article(self, db: Any, news_article: Any) -> dict[str, Any]:
+    def predict_article(self, db: Session, news_article: Any) -> dict[str, Any]:
         weights = {
             "volume": settings.ml_anomaly_weight_volume,
             "sentiment": settings.ml_anomaly_weight_sentiment,

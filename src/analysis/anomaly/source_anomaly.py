@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from src.analysis.anomaly.features import source_frequencies
 
 
@@ -10,7 +12,7 @@ class SourceAnomalyDetector:
         self._freqs: dict[str, dict[str, float]] = {}
         self._trained = False
 
-    def train(self, db: Any) -> dict[str, Any]:
+    def train(self, db: Session) -> dict[str, Any]:
         self._freqs = source_frequencies(db)
         self._trained = True
         return {"trained": True, "sources": len(self._freqs)}

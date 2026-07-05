@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from src.analysis.anomaly.features import topic_frequencies
 from src.config import settings
 
@@ -11,7 +13,7 @@ class TopicAnomalyDetector:
         self._freqs: dict[str, dict[tuple[str, str], int]] = {}
         self._trained = False
 
-    def train(self, db: Any) -> dict[str, Any]:
+    def train(self, db: Session) -> dict[str, Any]:
         self._freqs = topic_frequencies(db)
         self._trained = True
         tickers = len(self._freqs)

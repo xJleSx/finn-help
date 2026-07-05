@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
+from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.db.models import Instrument, News, NewsInstrument, Price
@@ -48,7 +49,7 @@ ALL_FEATURE_COLS = NEWS_FEATURE_COLS + MARKET_FEATURE_COLS
 
 
 def extract_features(
-    db: Any,
+    db: Session,
     news_article: News,
     days_market: int = 30,
 ) -> dict[str, float]:
@@ -151,7 +152,7 @@ def forward_return(
 
 
 def build_training_data(
-    db: Any,
+    db: Session,
     ticker: str,
     max_articles: int = 500,
     days_back: Optional[int] = None,
