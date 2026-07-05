@@ -3,12 +3,20 @@ from src.trading.execution.engine import (
     TradeMode,
     approve_order,
     cancel_pending,
+    execute_compliance_check,
     execute_order,
     get_log,
     get_mode,
     set_mode,
 )
 from src.trading.execution.stoploss import PositionTracker, position_tracker
+from src.trading.margin import (
+    compute_borrow_cost,
+    compute_interest,
+    compute_leverage_info,
+    compute_margin_requirements,
+    compute_portfolio_margin,
+)
 from src.trading.risk.guards import (
     RISK_PROFILE_MAP,
     activate_kill_switch,
@@ -46,11 +54,26 @@ from src.trading.risk.manager import (
     historical_var,
     kelly_fraction,
 )
+from src.trading.types import (
+    Direction,
+    LeverageInfo,
+    MarginRequirements,
+    OrderStatus,
+    OrderType,
+    TimeInForce,
+)
 
 __all__ = [
     "TradeMode",
     "OrderRecord",
+    "OrderType",
+    "OrderStatus",
+    "TimeInForce",
+    "Direction",
+    "MarginRequirements",
+    "LeverageInfo",
     "execute_order",
+    "execute_compliance_check",
     "approve_order",
     "cancel_pending",
     "set_mode",
@@ -58,6 +81,11 @@ __all__ = [
     "get_log",
     "PositionTracker",
     "position_tracker",
+    "compute_margin_requirements",
+    "compute_portfolio_margin",
+    "compute_leverage_info",
+    "compute_borrow_cost",
+    "compute_interest",
     "RISK_PROFILE_MAP",
     "activate_kill_switch",
     "async_activate_kill_switch",

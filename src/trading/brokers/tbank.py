@@ -17,6 +17,8 @@ from src.core.resilience import (
     CircuitBreakerOpenError,
     get_circuit_breaker,
 )
+from src.trading.brokers.base import BrokerOrderResult
+from src.trading.brokers.registry import register_broker
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,6 @@ try:
         CandleInterval,
         InstrumentType,
         OrderDirection,
-        OrderType,
     )
     from t_tech.invest.constants import INVEST_GRPC_API, INVEST_GRPC_API_SANDBOX
 
@@ -39,7 +40,6 @@ except ImportError:
 
 SANDBOX_TARGET = "sandbox"
 
-
 _CB_NAMES = {
     "orders": "tbank_orders",
     "market": "tbank_market",
@@ -47,10 +47,24 @@ _CB_NAMES = {
     "instruments": "tbank_instruments",
 }
 
+_TIF_MAP: dict[str, Any] = {
+    "day": 1,
+    "gtc": 2,
+    "ioc": 3,
+    "fok": 4,
+}
+
+_ORDER_TYPE_MAP: dict[str, Any] = {
+    "market": 1,
+    "limit": 2,
+    "ioc": 3,
+    "fok": 4,
+}
+
 
 class TBankClient:
-    def __init__(self, use_sandbox: bool = True):
-        self._token = settings.tinkoff_token
+    def __init__(self, token: str = "", use_sandbox: bool = True):
+        self._token = token or settings.tinkoff_token
         if not self._token:
             raise ValueError("TINKOFF_TOKEN not set in .env")
         self._use_sandbox = use_sandbox
@@ -62,6 +76,10 @@ class TBankClient:
 
     def _target(self) -> str:
         return str(INVEST_GRPC_API_SANDBOX if self._use_sandbox else INVEST_GRPC_API)
+
+    @property
+    def name(self) -> str:
+        return "tbank"
 
     async def __aenter__(self) -> "TBankClient":
         self._raw_client = AsyncClient(self._token, target=self._target())
@@ -201,13 +219,15 @@ class TBankClient:
         price: Optional[float] = None,
         account_id: str = "",
         idempotency_key: Optional[str] = None,
-    ) -> dict[str, object]:
+        time_in_force: str = "day",
+    ) -> BrokerOrderResult:
         if not self._client:
             raise RuntimeError("Client not initialized")
-        direction_enum = OrderDirection.ORDER_DIRECTION_BUY if direction.upper() == "BUY" else OrderDirection.ORDER_DIRECTION_SELL
-        type_enum = OrderType.ORDER_TYPE_MARKET if order_type == "market" else OrderType.ORDER_TYPE_LIMIT
+        dir_upper = direction.upper()
+        direction_enum = OrderDirection.ORDER_DIRECTION_BUY if dir_upper in ("BUY", "COVER") else OrderDirection.ORDER_DIRECTION_SELL
+        type_enum = _ORDER_TYPE_MAP.get(order_type, 1)
         price_quotation = None
-        if price is not None:
+        if price is not None and order_type in ("limit", "ioc", "fok"):
             price_quotation = self._to_quotation(price)
 
         if idempotency_key:
@@ -229,17 +249,21 @@ class TBankClient:
             _post_order,
             circuit_breaker=self._orders_cb,
         )
-        return {
-            "order_id": resp.order_id,
-            "figi": resp.figi,
-            "direction": "BUY" if resp.direction == 1 else "SELL",
-            "type": "market" if resp.order_type == 1 else "limit",
-            "executed_price": self._money(resp.executed_order_price),
-            "total_commission": self._money(resp.executed_commission),
-            "executed_quantity": resp.lots_executed,
-            "status": str(resp.execution_report_status),
-            "idempotency_key": idempotency_key or "",
-        }
+        result = BrokerOrderResult(
+            order_id=str(resp.order_id),
+            figi=resp.figi,
+            direction="BUY" if resp.direction == 1 else "SELL",
+            order_type=order_type,
+            executed_price=self._money(resp.executed_order_price),
+            total_commission=self._money(resp.executed_commission),
+            executed_quantity=resp.lots_executed,
+            status=str(resp.execution_report_status),
+            idempotency_key=idempotency_key or "",
+        )
+        if hasattr(resp, "lots_requested") and resp.lots_requested:
+            result.remaining_quantity = resp.lots_requested - resp.lots_executed
+        result.filled_quantity = resp.lots_executed
+        return result
 
     async def sandbox_pay_in(self, account_id: str, amount: float, currency: str = "RUB") -> dict[str, object]:
         if not self._client:
@@ -300,7 +324,7 @@ class TBankClient:
     @staticmethod
     def _decimal(val: object) -> float:
         if hasattr(val, "units") and hasattr(val, "nano"):
-            return val.units + val.nano / 1e9  # type: ignore[no-any-return]
+            return val.units + val.nano / 1e9
         if isinstance(val, (int, float)):
             return float(val)
         return 0.0
@@ -308,7 +332,7 @@ class TBankClient:
     @staticmethod
     def _money(val: object) -> float:
         if hasattr(val, "units") and hasattr(val, "nano"):
-            return val.units + val.nano / 1e9  # type: ignore[no-any-return]
+            return val.units + val.nano / 1e9
         return 0.0
 
     @staticmethod
@@ -318,3 +342,6 @@ class TBankClient:
         units = int(val)
         nano = int(round((val - units) * 1e9))
         return Quotation(units=units, nano=nano)
+
+
+register_broker("tbank", TBankClient)

@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 class PositionTracker:
     def __init__(self) -> None:
         self._positions: dict[str, dict[str, Any]] = {}
+        self._short_positions: dict[str, dict[str, Any]] = {}
         self._restore_from_db()
 
     def _restore_from_db(self) -> None:
@@ -26,6 +27,22 @@ class PositionTracker:
                 )
                 for o in filled:
                     self._positions[str(o.ticker)] = {
+                        "shares": int(o.quantity or 0),
+                        "avg_price": float(o.price or 0.0),
+                        "sl": o.stop_loss,
+                        "tp": o.take_profit,
+                    }
+
+                short_filled = (
+                    db.query(OrderModel)
+                    .filter(
+                        OrderModel.status.in_(["filled", "partial"]),
+                        OrderModel.is_short.is_(True),
+                    )
+                    .all()
+                )
+                for o in short_filled:
+                    self._short_positions[str(o.ticker)] = {
                         "shares": int(o.quantity or 0),
                         "avg_price": float(o.price or 0.0),
                         "sl": o.stop_loss,
@@ -57,6 +74,38 @@ class PositionTracker:
             if pos["shares"] == 0:
                 pos["avg_price"] = 0.0
                 self._positions.pop(ticker, None)
+
+    def add_short(self, ticker: str, quantity: int, price: float) -> None:
+        if ticker not in self._short_positions:
+            self._short_positions[ticker] = {"shares": 0, "avg_price": 0.0, "sl": None, "tp": None}
+        pos = self._short_positions[ticker]
+        total_value = float(pos["avg_price"]) * int(pos["shares"]) + price * quantity
+        pos["shares"] = int(pos["shares"]) + quantity
+        shares = int(pos["shares"])
+        pos["avg_price"] = total_value / shares if shares > 0 else 0
+        logger.info("Short position opened: %s %d @ %.2f", ticker, quantity, price)
+
+    def cover_short(self, ticker: str, quantity: int, price: float) -> Optional[float]:
+        pos = self._short_positions.get(ticker)
+        if not pos or pos["shares"] == 0:
+            return None
+        cover_qty = min(quantity, int(pos["shares"]))
+        pnl = (float(pos["avg_price"]) - price) * cover_qty
+        pos["shares"] = int(pos["shares"]) - cover_qty
+        if pos["shares"] <= 0:
+            self._short_positions.pop(ticker, None)
+        logger.info("Short position covered: %s %d @ %.2f (pnl=%.2f)", ticker, cover_qty, price, pnl)
+        return pnl
+
+    def get_short_positions(self) -> dict[str, dict[str, Any]]:
+        return dict(self._short_positions)
+
+    def get_total_short_value(self, current_prices: dict[str, float]) -> float:
+        total = 0.0
+        for ticker, pos in self._short_positions.items():
+            price = current_prices.get(ticker, float(pos["avg_price"]))
+            total += int(pos["shares"]) * price
+        return total
 
     def set_sl_tp(self, ticker: str, sl_pct: Optional[float] = None, tp_pct: Optional[float] = None) -> None:
         if ticker in self._positions:
@@ -100,18 +149,26 @@ class PositionTracker:
 
     def check_triggers(self, ticker: str, current_price: float) -> Optional[str]:
         pos = self._positions.get(ticker)
-        if not pos or pos["shares"] == 0:
-            return None
+        if pos and pos["shares"] > 0:
+            sl = pos.get("sl")
+            tp = pos.get("tp")
+            if sl is not None and current_price <= float(sl):
+                logger.warning("STOP-LOSS TRIGGERED %s at %.2f (SL=%.2f)", ticker, current_price, float(sl))
+                return "stop_loss"
+            if tp is not None and current_price >= float(tp):
+                logger.info("TAKE-PROFIT TRIGGERED %s at %.2f (TP=%.2f)", ticker, current_price, float(tp))
+                return "take_profit"
 
-        sl = pos.get("sl")
-        tp = pos.get("tp")
-
-        if sl is not None and current_price <= float(sl):
-            logger.warning("STOP-LOSS TRIGGERED %s at %.2f (SL=%.2f)", ticker, current_price, float(sl))
-            return "stop_loss"
-        if tp is not None and current_price >= float(tp):
-            logger.info("TAKE-PROFIT TRIGGERED %s at %.2f (TP=%.2f)", ticker, current_price, float(tp))
-            return "take_profit"
+        short_pos = self._short_positions.get(ticker)
+        if short_pos and short_pos["shares"] > 0:
+            sl = short_pos.get("sl")
+            tp = short_pos.get("tp")
+            if sl is not None and current_price >= float(sl):
+                logger.warning("SHORT STOP-LOSS TRIGGERED %s at %.2f (SL=%.2f)", ticker, current_price, float(sl))
+                return "short_stop_loss"
+            if tp is not None and current_price <= float(tp):
+                logger.info("SHORT TAKE-PROFIT TRIGGERED %s at %.2f (TP=%.2f)", ticker, current_price, float(tp))
+                return "short_take_profit"
         return None
 
     async def execute_triggers(self, ticker: str, current_price: float) -> Optional[str]:
@@ -122,17 +179,29 @@ class PositionTracker:
             return None
 
         pos = self._positions.get(ticker)
-        if not pos or pos["shares"] == 0:
-            return None
+        short_pos = self._short_positions.get(ticker)
 
-        await _execute_order(
-            ticker=ticker,
-            direction="SELL",
-            quantity=int(pos["shares"]),
-            price=current_price,
-            reason=f"{trigger} at {current_price:.2f}",
-        )
-        return trigger
+        if "short_" in (trigger or ""):
+            if short_pos and short_pos["shares"] > 0:
+                await _execute_order(
+                    ticker=ticker,
+                    direction="BUY",
+                    quantity=int(short_pos["shares"]),
+                    price=current_price,
+                    reason=f"{trigger} at {current_price:.2f}",
+                    is_short=True,
+                )
+                return trigger
+        elif pos and pos["shares"] > 0:
+            await _execute_order(
+                ticker=ticker,
+                direction="SELL",
+                quantity=int(pos["shares"]),
+                price=current_price,
+                reason=f"{trigger} at {current_price:.2f}",
+            )
+            return trigger
+        return None
 
 
 position_tracker = PositionTracker()

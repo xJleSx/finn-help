@@ -131,6 +131,59 @@ NEWS_SENTIMENT_DAYS: int = 3
 SOCIAL_SENTIMENT_WEIGHT: float = 0.6
 NEWS_SENTIMENT_WEIGHT: float = 0.4
 
+# ── Phase 10: Advanced Trading & Compliance ──────────────────────────
+
+ORDER_TYPE_LABELS: dict[str, str] = {
+    "market": "Рыночная",
+    "limit": "Лимитная",
+    "ioc": "IOC (Immediate-or-Cancel)",
+    "fok": "FOK (Fill-or-Kill)",
+}
+
+TIME_IN_FORCE_LABELS: dict[str, str] = {
+    "day": "Дневная",
+    "gtc": "GTC (до отмены)",
+    "ioc": "IOC",
+    "fok": "FOK",
+}
+
+MARGIN_STATUS_LABELS: dict[str, str] = {
+    "safe": "Безопасно",
+    "warning": "Внимание",
+    "margin_call": "Margin Call",
+    "liquidation": "Принудительное закрытие",
+}
+
+SHORT_BORROW_RATES: dict[str, float] = {
+    "SBER": 0.15,
+    "GAZP": 0.20,
+    "LKOH": 0.12,
+    "VTBR": 0.25,
+}
+
+SHORT_RESTRICTED_TICKERS: list[str] = []
+
+AML_SUSPICIOUS_PATTERNS: list[str] = [
+    "round_trip",
+    "structuring",
+    "velocity_anomaly",
+    "high_volume",
+    "pep_volume",
+]
+
+TAX_RUB_DIVIDEND_RATE: float = 0.13
+TAX_RUB_CAPITAL_GAINS_RATE: float = 0.13
+TAX_RUB_LONG_TERM_RATE: float = 0.0
+TAX_RUB_LONG_TERM_DAYS: int = 1095
+TAX_RUB_BROKER_COMMISSION_PCT: float = 0.0004
+
+BROKER_NAMES: dict[str, str] = {
+    "tbank": "Т-Банк (Тинькофф)",
+    "alor": "Алор",
+    "finam": "Финам",
+    "openapi": "OpenAPI",
+}
+
 # ── Default days for data collection ─────────────────────────────────
 
 DEFAULT_HISTORY_DAYS: int = 365
