@@ -36,26 +36,26 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
                 p = Price(
                     instrument_id=inst.id,
                     date=d,
-                    open=c.get("open"),
-                    high=c.get("high"),
-                    low=c.get("low"),
-                    close=c.get("close"),
-                    volume=c.get("volume"),
+                    open=c.get("open", 0.0),
+                    high=c.get("high", 0.0),
+                    low=c.get("low", 0.0),
+                    close=c.get("close", 0.0),
+                    volume=c.get("volume", 0),
                 )
                 db.add(p)
                 new_count += 1
             else:
-                _high = cast(float, c.get("high"))
-                _low = cast(float, c.get("low"))
-                _close = cast(float, c.get("close"))
-                _volume = cast(int, c.get("volume"))
+                _high = c.get("high", 0.0)
+                _low = c.get("low", 0.0)
+                _close = c.get("close", 0.0)
+                _volume = c.get("volume", 0)
                 if exists.high is None or _high > float(exists.high):
                     exists.high = _high  # type: ignore[assignment]
                 if exists.low is None or _low < float(exists.low):
                     exists.low = _low  # type: ignore[assignment]
                 exists.close = _close  # type: ignore[assignment]
                 if exists.open is None:
-                    exists.open = c.get("open")
+                    exists.open = c.get("open", 0.0)
                 exists.volume = _volume  # type: ignore[assignment]
         db.commit()
         logger.info("Added/updated %d candles for %s (%s)", new_count, ticker, interval)

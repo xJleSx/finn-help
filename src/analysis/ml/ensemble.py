@@ -89,7 +89,7 @@ class EnsemblePredictor:
                 pred = model.predict(df, anomaly_mask=anomaly_mask)
                 oos = self._walk_forward_validate(df, model)
                 named_oos[name] = oos
-                if pred.get("action") != "NEUTRAL":
+                if pred.get("action") not in (None, "NEUTRAL"):
                     pred["oos"] = oos
                     named_results[name] = pred
             except Exception as e:

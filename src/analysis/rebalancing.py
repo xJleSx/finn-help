@@ -337,9 +337,9 @@ class RebalancingEngine:
                         quantity=action.quantity,
                         direction=action.action.lower(),
                     )
-                    trade["order_id"] = order.get("order_id")
-                    trade["executed_price"] = order.get("executed_price")
-                    trade["commission"] = order.get("commission")
+                    trade["order_id"] = order.get("order_id") or ""
+                    trade["executed_price"] = order.get("executed_price") or 0.0
+                    trade["commission"] = order.get("commission") or 0.0
                     trade["status"] = "submitted"
                 except Exception as e:
                     logger.error("Failed to execute %s %s: %s", action.action, action.ticker, e)
