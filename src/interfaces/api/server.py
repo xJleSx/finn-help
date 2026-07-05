@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.core.executor import get_executor, shutdown_executor
 from src.core.health import health_registry
 from src.core.logging import setup_logging
 from src.core.sentry import setup_sentry
@@ -36,6 +37,7 @@ from src.interfaces.api.routes.alert_preferences import router as alert_prefs_ro
 from src.interfaces.api.routes.analysis import router as analysis_router
 from src.interfaces.api.routes.backtest import router as backtest_router
 from src.interfaces.api.routes.paper_trading import router as paper_trading_router
+from src.interfaces.api.routes.trading_v2 import router as trading_v2_router
 from src.interfaces.api.routes_instruments import router as instruments_router
 from src.interfaces.api.routes_market import router as market_router
 from src.interfaces.api.routes_portfolio import router as portfolio_router
@@ -74,13 +76,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pass
     except asyncio.TimeoutError:
         logger.warning("shutdown.scheduler_timeout")
+
+    loop = asyncio.get_running_loop()
     try:
         from src.cache import close_redis
 
-        close_redis()
+        await loop.run_in_executor(get_executor(), close_redis)
     except Exception:
         pass
-    close_db()
+    await loop.run_in_executor(get_executor(), close_db)
+    shutdown_executor()
     logger.info("shutdown.complete")
 
 
@@ -162,6 +167,7 @@ app.include_router(alert_prefs_router)
 app.include_router(analysis_router)
 app.include_router(backtest_router)
 app.include_router(paper_trading_router)
+app.include_router(trading_v2_router)
 app.include_router(instruments_router)
 app.include_router(portfolio_router)
 app.include_router(market_router)

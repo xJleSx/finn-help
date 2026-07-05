@@ -53,6 +53,34 @@ class Settings(BaseSettings):
     max_trades_per_day: int = 5
     metrics_token: str = ""
 
+    tax_capital_gains_rate: float = 0.13
+    tax_dividend_rate: float = 0.13
+    tax_long_term_rate: float = 0.0
+    tax_long_term_years: int = 3
+    tax_free_threshold: float = 0.0
+
+    margin_initial_pct: float = 0.25
+    margin_maintenance_pct: float = 0.15
+    margin_call_pct: float = 0.20
+    margin_liquidation_pct: float = 0.10
+    short_initial_margin_pct: float = 0.50
+    short_maintenance_margin_pct: float = 0.30
+    max_leverage: float = 3.0
+    broker_interest_rate: float = 0.18
+
+    aml_high_volume_rub: float = 1_000_000
+    aml_structuring_threshold_rub: float = 600_000
+    aml_max_daily_volume_rub: float = 10_000_000
+    aml_pep_threshold_rub: float = 5_000_000
+
+    compliance_position_limit_pct: float = 0.25
+    compliance_sector_limit_pct: float = 0.40
+    compliance_max_short_pct: float = 0.20
+    compliance_min_capital_short: float = 500_000
+
+    default_broker: str = "tbank"
+    enable_short_selling: bool = False
+
     wolfram_app_id: str = ""
     wolfram_enabled: bool = True
 
@@ -147,6 +175,7 @@ class Settings(BaseSettings):
     sentry_environment: str = "production"
     lock_file_path: str = ""
     ml_prometheus_enabled: bool = True
+    executor_max_workers: int = 4
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
