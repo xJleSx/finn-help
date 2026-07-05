@@ -1,6 +1,0 @@
-__pycache__/
-*.pyc
-.bcs-cache/
-.pytest_cache/
-.venv/
-.env

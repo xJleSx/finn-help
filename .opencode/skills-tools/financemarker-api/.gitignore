@@ -1,6 +1,0 @@
-__pycache__/
-*.pyc
-.fmc-cache/
-.pytest_cache/
-.venv/
-.env

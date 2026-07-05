@@ -42,3 +42,6 @@ logs/
 
 # Temp files
 tmp/
+
+# AI skill tools (reference, not part of project)
+.opencode/skills-tools/
