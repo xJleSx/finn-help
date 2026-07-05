@@ -1,8 +1,10 @@
 import logging
 from typing import Any
 
+from sqlalchemy import select
+
 from src.config import personal, settings
-from src.db.connection import get_session
+from src.db.connection import get_async_session
 from src.db.models import Instrument
 from src.db.models import Portfolio as PortModel
 from src.scheduler.collectors import fetch_price_history_for_instrument
@@ -32,21 +34,20 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                 stats["errors"].append(f"Account {target}: {e}")
                 logger.warning("Sync failed for account %s: %s", target, e)
 
-    db = get_session()
-    synced_instrument_ids: set[int] = set()
-    try:
+    async with get_async_session() as db:
+        synced_instrument_ids: set[int] = set()
         for pos in all_positions:
             try:
                 figi = pos.get("figi") or ""
-                inst = db.query(Instrument).filter_by(figi=figi).first()
+                result = await db.execute(select(Instrument).where(Instrument.figi == figi))
+                inst = result.scalars().first()
                 if not inst:
                     ticker = pos.get("ticker", figi)
-                    # fallback — ищем по тикеру (мог быть создан с другим FIGI от MOEX)
-                    inst = db.query(Instrument).filter_by(ticker=ticker).first()
+                    result = await db.execute(select(Instrument).where(Instrument.ticker == ticker))
+                    inst = result.scalars().first()
                     if inst:
-                        # обновляем FIGI на T-Bank (он точнее)
                         inst.figi = figi
-                        db.flush()
+                        await db.flush()
                     else:
                         inst_type = pos.get("instrument_type", "stock")
                         logger.info("Auto-creating instrument %s (figi=%s) from broker portfolio", ticker, figi)
@@ -57,7 +58,7 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                             instrument_type=inst_type,
                         )
                         db.add(inst)
-                        db.flush()
+                        await db.flush()
                         try:
                             await fetch_price_history_for_instrument(ticker, inst_type)
                         except Exception as p_e:
@@ -66,7 +67,8 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                 qty = pos.get("quantity", 0)
                 avg_price = pos.get("average_price", 0.0)
 
-                existing = db.query(PortModel).filter_by(user_id=user_id, instrument_id=inst.id).first()
+                result = await db.execute(select(PortModel).where(PortModel.user_id == user_id, PortModel.instrument_id == inst.id))
+                existing = result.scalars().first()
                 if existing:
                     existing.quantity = qty
                     existing.avg_price = avg_price
@@ -74,21 +76,19 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                     db.add(PortModel(user_id=user_id, instrument_id=inst.id, quantity=qty, avg_price=avg_price))
                 synced_instrument_ids.add(int(inst.id))
                 stats["positions_synced"] += 1
-                db.commit()
+                await db.commit()
             except Exception as e:
-                db.rollback()
+                await db.rollback()
                 stats["errors"].append(str(e))
                 logger.warning("Sync error for position: %s", e)
 
-        # Орфанные позиции — больше не в портфеле брокера
-        orphaned = (
-            db.query(PortModel)
-            .filter(
+        result = await db.execute(
+            select(PortModel).where(
                 PortModel.user_id == user_id,
                 PortModel.instrument_id.notin_(synced_instrument_ids),
             )
-            .all()
         )
+        orphaned = result.scalars().all()
         sync_cfg = personal.get("sync", {})
         auto_remove = bool(sync_cfg.get("auto_remove_orphans", False)) if isinstance(sync_cfg, dict) else False
 
@@ -105,7 +105,7 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                     qty,
                     value,
                 )
-                db.delete(orphan)
+                await db.delete(orphan)
                 stats.setdefault("removed", 0)
                 stats["removed"] += 1
             else:
@@ -119,9 +119,7 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                 stats.setdefault("orphans_skipped", 0)
                 stats["orphans_skipped"] += 1
 
-        db.commit()
-    finally:
-        db.close()
+        await db.commit()
 
     logger.info("Synced %d positions from broker", stats["positions_synced"])
     return stats
