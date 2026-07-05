@@ -609,6 +609,26 @@ class LLMRouter:
 
         return text
 
+    async def ask(self, prompt: str, system_prompt: str = "You are a helpful assistant.") -> str:
+        try:
+            if self._use_groq:
+                return await self._groq_call(
+                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
+                    model=settings.groq_model,
+                    temperature=0.1,
+                    max_tokens=64,
+                )
+            return await self._ollama_call(
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
+                model=self._ollama_model,
+                temperature=0.1,
+                max_tokens=64,
+                timeout=30.0,
+            )
+        except Exception as e:
+            logger.warning("ask() failed: %s", e)
+            return ""
+
     async def analyze_social(self, prompt: str) -> str:
         if self._use_groq:
             try:
