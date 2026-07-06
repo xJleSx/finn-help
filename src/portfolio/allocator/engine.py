@@ -23,37 +23,17 @@ from src.constants import (
 from src.db.connection import get_session, session_scope
 from src.db.models import CorporateEvent, Dividend, FundamentalMetric, Instrument, Price
 from src.portfolio.risk import item_risk, item_risk_async
+from src.portfolio.allocator.profiles import PROFILES
 
 logger = logging.getLogger(__name__)
 
 
 class PortfolioAllocator:
-    PROFILES = {
-        "conservative": {
-            "etf": {"weight": 0.50, "label": "БПИФ (ETF)", "max": 4},
-            "dividend": {"weight": 0.20, "label": "Дивидендные акции", "max": 3},
-            "bond": {"weight": 0.25, "label": "Облигации / ОФЗ", "max": 4},
-            "growth": {"weight": 0.05, "label": "Акции роста", "max": 1},
-        },
-        "balanced": {
-            "etf": {"weight": 0.40, "label": "БПИФ (ETF)", "max": 3},
-            "dividend": {"weight": 0.30, "label": "Дивидендные акции", "max": 4},
-            "bond": {"weight": 0.20, "label": "Облигации / ОФЗ", "max": 3},
-            "growth": {"weight": 0.10, "label": "Акции роста", "max": 2},
-        },
-        "aggressive": {
-            "etf": {"weight": 0.25, "label": "БПИФ (ETF)", "max": 3},
-            "dividend": {"weight": 0.25, "label": "Дивидендные акции", "max": 3},
-            "bond": {"weight": 0.10, "label": "Облигации / ОФЗ", "max": 2},
-            "growth": {"weight": 0.40, "label": "Акции роста", "max": 4},
-        },
-    }
-
     def __init__(self) -> None:
         self.profile = "balanced"
 
     def set_profile(self, profile: str) -> None:
-        if profile in self.PROFILES:
+        if profile in PROFILES:
             self.profile = profile
 
     def _load_profile_from_db(self) -> None:
@@ -62,13 +42,13 @@ class PortfolioAllocator:
 
             with session_scope() as db:
                 row = db.query(UserSetting).filter_by(key="risk_profile").first()
-                if row and row.value in self.PROFILES:
+                if row and row.value in PROFILES:
                     self.profile = row.value
         except Exception as e:
             logger.warning("Failed to load risk profile from DB: %s", e)
 
     def _weights(self) -> dict[str, Any]:
-        return self.PROFILES.get(self.profile, self.PROFILES["balanced"])
+        return PROFILES.get(self.profile, PROFILES["balanced"])
 
     async def _get_current_portfolio_async(self, db: AsyncSession) -> list[dict[str, Any]]:
         from src.db.models import Portfolio as PortModel
@@ -260,7 +240,7 @@ class PortfolioAllocator:
                 div_yield = sum(d.amount for d in divs) / last_price * 100
                 if div_yield > 25:
                     logger.warning(
-                        "Suspicious div yield %.1f%% for %s (divs=%s, price=%s), capping at 25%%",
+                        "Suspicious div yield %.1f%% for %s (divs=%s, price=%s)",
                         div_yield,
                         inst.ticker,
                         [d.amount for d in divs],
@@ -326,7 +306,7 @@ class PortfolioAllocator:
                 div_yield = sum(d.amount for d in divs) / last_price * 100
                 if div_yield > 25:
                     logger.warning(
-                        "Suspicious div yield %.1f%% for %s (divs=%s, price=%s), capping at 25%%",
+                        "Suspicious div yield %.1f%% for %s (divs=%s, price=%s)",
                         div_yield,
                         inst.ticker,
                         [d.amount for d in divs],
@@ -955,6 +935,3 @@ class PortfolioAllocator:
         existing = await self._get_current_portfolio_async(db)
         instruments_data = await self._load_instruments_async(db)
         return await self._allocate_from_data_async(capital, existing, instruments_data, db)
-
-
-allocator = PortfolioAllocator()
