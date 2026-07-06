@@ -1,22 +1,12 @@
 import asyncio
 import io
 import logging
-import time
-from collections import OrderedDict
+from datetime import date, timedelta
 from typing import Any, Optional, cast
 
 import structlog
-from telegram import BotCommand, Message, Update
-from telegram.error import NetworkError
-from telegram.ext import (
-    Application,
-    CallbackQueryHandler,
-    CommandHandler,
-    ContextTypes,
-    ConversationHandler,
-    MessageHandler,
-    filters,
-)
+from telegram import Update
+from telegram.ext import ContextTypes
 
 from src.analysis.backtest import backtest_allocation
 from src.analysis.correlation_analysis import correlation_table
@@ -26,245 +16,38 @@ from src.analysis.stress import (
     format_portfolio_for_stress,
 )
 from src.analysis.whatif import whatif_macro, whatif_scenario
-from src.cli import run_analysis
 from src.collectors.cbr import CBRCollector
 from src.config import personal, settings
-from src.constants import CACHE_TTL, MAX_CACHE_SIZE
 from src.db.connection import get_session
-from src.db.models import GeoRiskScore, Instrument, News, Price, UserSetting
+from src.db.models import (
+    GeoRiskScore,
+    Instrument,
+    News,
+    UserSetting,
+)
 from src.db.models import Portfolio as PortModel
 from src.db.models import Signal as SignalModel
-from src.interfaces.telegram_guard import _check_access, _check_cooldown, analysis_cache, guard
+from src.interfaces.telegram_guard import _check_cooldown, guard
 from src.interfaces.telegram_helpers import (
-    ACTION_EMOJI,
-    TOTAL_PAGES,
     _chunk_text,
-    _extract_allocation_amount,
     _find_excluded_tickers,
-    _find_tickers,
-    _format_allocation_plan,
-    build_analyze_keyboard,
     build_main_reply_keyboard,
-    build_reply_keyboard,
     build_top_keyboard,
     format_start_html,
     get_portfolio_positions,
     html_escape,
 )
-from src.notifications.channels import (
-    ALL_CHANNELS,
-    load_preferences,
-    set_preference,
+from src.interfaces.telegram.messages import (
+    _handle_text,
+    _reply_with_allocation,
+    _reply_with_analysis,
+    _save_position,
 )
 from src.notifications.service import NotificationService
 from src.portfolio.allocator import allocator
 from src.reports import generate_portfolio_csv
 
 logger = structlog.get_logger(__name__)
-
-DETAILED_KEYWORDS = {
-    "анализ",
-    "подробн",
-    "минимальн",
-    "максимальн",
-    "прогноз",
-    "перспектив",
-    "сколько",
-    "почему",
-    "будет",
-    "изменил",
-    "вырос",
-    "упал",
-    "снизил",
-    "повысил",
-    "динамик",
-    "покажи",
-    "расскажи",
-    "объясни",
-    "оцени",
-    "сравни",
-    "каков",
-    "какова",
-    "каково",
-    "какие",
-    "какой",
-    "какое",
-    "какая",
-    "стоит",
-    "что",
-    "когда",
-    "зачем",
-    "цена",
-    "стоимость",
-    "дайте",
-    "нужн",
-    "хоч",
-    "подскаж",
-    "посоветуй",
-    "насколько",
-    "во сколько",
-    "какую",
-    "какую",
-    "каком",
-    "какому",
-    "какими",
-}
-
-TICKER, QUANTITY, PRICE = range(3)
-
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _check_access(update):
-        return
-    query = update.callback_query
-    if not query:
-        return
-    await query.answer()
-    data = query.data
-    if not data:
-        return
-    parts = data.split(":", 1)
-    msg = query.message
-
-    if parts[0] == "analyze" and len(parts) > 1:
-        ticker = parts[1]
-        if isinstance(msg, Message):
-            await msg.reply_text(f"\U0001f50d Анализирую {ticker}...")
-        await _reply_with_analysis(update, ticker)
-
-    elif parts[0] == "add" and len(parts) > 1:
-        ticker = parts[1]
-        await _save_position(update, ticker, 1.0)
-
-    elif parts[0] == "history" and len(parts) > 1:
-        ticker = parts[1]
-        context.args = [ticker]
-        await history(update, context)
-
-    elif parts[0] == "backtest" and len(parts) > 1:
-        ticker = parts[1]
-        context.args = [ticker]
-        await backtest(update, context)
-
-    elif parts[0] == "action" and len(parts) > 1:
-        action = parts[1]
-        if action == "portfolio":
-            await portfolio(update, context)
-        elif action == "daily":
-            await daily(update, context)
-        elif action == "sectors":
-            await sectors(update, context)
-        elif action == "top":
-            await top(update, context)
-        elif action == "stress":
-            await stress(update, context)
-        elif action == "export":
-            await export_portfolio(update, context)
-        elif action == "home":
-            if isinstance(msg, Message):
-                await msg.reply_text(
-                    format_start_html(),
-                    reply_markup=build_main_reply_keyboard(),
-                    parse_mode="HTML",
-                )
-        elif action == "news":
-            await news(update, context)
-
-
-async def reply_keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message or not update.effective_message.text:
-        return
-    text = update.effective_message.text
-
-    # Page navigation
-    if text == "▶️":
-        page = context.user_data.get("kb_page", 1) if context.user_data else 1
-        next_page = min(page + 1, TOTAL_PAGES)
-        if context.user_data is not None:
-            context.user_data["kb_page"] = next_page
-        await update.effective_message.reply_text(
-            f"Страница {next_page}/{TOTAL_PAGES}",
-            reply_markup=build_reply_keyboard(next_page),
-        )
-        return
-    if text == "◀️":
-        page = context.user_data.get("kb_page", 1) if context.user_data else 1
-        prev_page = max(page - 1, 1)
-        if context.user_data is not None:
-            context.user_data["kb_page"] = prev_page
-        await update.effective_message.reply_text(
-            f"Страница {prev_page}/{TOTAL_PAGES}",
-            reply_markup=build_reply_keyboard(prev_page),
-        )
-        return
-    if text.startswith("🔢"):
-        return
-
-    # Page 1 — Основное
-    if text == "🔍 Анализ":
-        await top(update, context)
-    elif text == "📊 Портфель":
-        await portfolio(update, context)
-    elif text == "🏆 Топ":
-        await top(update, context)
-    elif text == "📰 Новости":
-        await news(update, context)
-    elif text == "📋 Сводка":
-        await daily(update, context)
-    elif text == "🏭 Сектора":
-        await sectors(update, context)
-    elif text == "💰 Аллокация":
-        context.args = ["100000"]
-        await allocate(update, context)
-    elif text == "🧪 Стресс-тест":
-        await stress(update, context)
-    elif text == "🔄 Корреляция":
-        await correlation(update, context)
-    # Page 2 — Портфель
-    elif text == "➕ Добавить":
-        await add_start(update, context)
-    elif text == "➖ Удалить":
-        await remove_position(update, context)
-    elif text == "📜 История":
-        await history(update, context)
-    elif text == "📤 Экспорт CSV":
-        await export_portfolio(update, context)
-    elif text == "⏪ Бэктест":
-        context.args = ["100000"]
-        await backtest(update, context)
-    elif text == "⚙️ Профиль":
-        await profile(update, context)
-    elif text == "📊 P&L":
-        await pnl(update, context)
-    elif text == "📄 Отчёт":
-        await report(update, context)
-    elif text == "💱 Курсы":
-        await rates(update, context)
-    # Page 3 — Соц/Риски
-    elif text == "👥 Авторы":
-        await my_authors(update, context)
-    elif text == "📰 Соц.сен.":
-        context.args = []
-        await social_cmd(update, context)
-    elif text == "🌍 Гео-риск":
-        await geo(update, context)
-    elif text == "🔮 What-If":
-        await whatif(update, context)
-    elif text == "📡 Статус":
-        await bot_status(update, context)
-    elif text == "🔔 Подписки":
-        await subscribe(update, context)
-    elif text == "🏠 /start":
-        await start(update, context)
-    elif text == "🌙 Ночн.режим":
-        await profile(update, context)
-    elif text == "❓ Помощь":
-        if update.effective_message:
-            await update.effective_message.reply_text(
-                format_start_html(),
-                reply_markup=build_main_reply_keyboard(),
-                parse_mode="HTML",
-            )
 
 
 @guard()
@@ -439,7 +222,6 @@ async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @guard(with_cooldown=True)
 async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-
     amount = None
     if context.args:
         try:
@@ -493,7 +275,6 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @guard(with_cooldown=True)
 async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-
     amount: float = 100_000
     if context.args:
         try:
@@ -660,7 +441,6 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @guard(with_cooldown=True)
 async def export_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-
     db = get_session()
     try:
         rows = get_portfolio_positions(db)
@@ -691,338 +471,6 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not update.effective_message or not update.effective_message.text:
         return
     await _handle_text(update, update.effective_message.text)
-
-
-def _is_detailed_question(text: str, ticker: str) -> bool:
-    words = text.lower().split()
-    if len(words) <= 1:
-        return False
-    from src.interfaces.telegram_helpers import RUSSIAN_NAMES
-
-    ticker_variants = {ticker.lower()}
-    for russian_name, eng_ticker in RUSSIAN_NAMES.items():
-        if eng_ticker == ticker.upper():
-            ticker_variants.add(russian_name)
-    other_words = [w for w in words if w not in ticker_variants]
-    if not other_words:
-        return False
-    return any(kw in w for w in other_words for kw in DETAILED_KEYWORDS)
-
-
-def _build_stock_context(ticker: str) -> str:
-    """Build stock context for LLM question answering.
-
-    Delegates to the unified AnalysisService.load_ticker_context().
-    """
-    try:
-        from src.analysis.service import analysis_service
-        from src.db.connection import get_session
-
-        db = get_session()
-        try:
-            return analysis_service.load_ticker_context(db, ticker)
-        finally:
-            db.close()
-    except Exception:
-        return ""
-
-
-async def _handle_text(update: Update, text: str) -> None:
-    if not update.effective_message:
-        return
-    amount = _extract_allocation_amount(text)
-    if amount is not None:
-        exclude = _find_excluded_tickers(text)
-        await _reply_with_allocation(update, amount, exclude=exclude)
-        return
-    tickers = _find_tickers(text)
-    if tickers:
-        ticker = tickers[0]
-        if _is_detailed_question(text, ticker):
-            ctx = _build_stock_context(ticker)
-            await _ask_llm_general(update, text, ticker_context=ctx)
-            return
-        if len(tickers) > 1:
-            await update.effective_message.reply_text(f"Нашёл несколько, анализирую {ticker}")
-        await _reply_with_analysis(update, ticker)
-        return
-    await _ask_llm_general(update, text)
-
-
-def _describe_risk(sharpe: float, max_dd: float) -> str:
-    """Краткое словесное описание уровня риска."""
-    parts = []
-    if sharpe < 0.3:
-        parts.append("доходность нестабильна")
-    elif sharpe < 1.0:
-        parts.append("доходность умеренная")
-    else:
-        parts.append("доходность хорошая")
-
-    if max_dd > 0.3:
-        parts.append("возможны просадки до 30%+")
-    elif max_dd > 0.15:
-        parts.append("просадки в пределах разумного")
-    else:
-        parts.append("просадки небольшие")
-    return ", ".join(parts)
-
-
-def _format_data_advice(fused: dict[str, Any]) -> str:
-    parts = []
-    components = fused.get("components", {})
-    risk = fused.get("risk_metrics", {})
-    vol = fused.get("volatility_regime", {})
-
-    tech = components.get("technical", {})
-    if tech:
-        tech_score = tech.get("score", 0)
-        tech_action = tech.get("action", "NEUTRAL")
-        tech_labels = {
-            "BUY": "сигнал к покупке",
-            "SELL": "сигнал к продаже",
-            "HOLD": "нейтрально, держать",
-            "NEUTRAL": "нейтрально",
-        }
-        desc = tech_labels.get(tech_action, tech_action.lower())
-        extra = ""
-        if tech_score > 0.3:
-            extra = " — технические индикаторы на стороне покупателей"
-        elif tech_score < -0.3:
-            extra = " — технические индикаторы на стороне продавцов"
-        parts.append(f"📊 <b>Технический анализ</b>: {desc}{extra}")
-
-    if risk:
-        sharpe = risk.get("sharpe", 0)
-        max_dd = risk.get("max_drawdown", 0)
-        desc = _describe_risk(sharpe, max_dd)
-        parts.append(f"📈 <b>Риски</b>: {desc}")
-
-    vol_regime = vol.get("regime", "") if vol else ""
-    if vol_regime == "HIGH":
-        parts.append("🌊 <b>Волатильность</b>: высокая — цена может резко меняться")
-    elif vol_regime == "LOW":
-        parts.append("🌊 <b>Волатильность</b>: низкая — цена стабильна")
-    elif vol_regime:
-        parts.append("🌊 <b>Волатильность</b>: обычная")
-
-    sent = components.get("sentiment", {})
-    sent_score = sent.get("score", 0) if sent else 0
-    if sent_score > 0.1:
-        parts.append("📰 <b>Новости</b>: позитивные — рынок поддерживает актив")
-    elif sent_score < -0.1:
-        parts.append("📰 <b>Новости</b>: негативные — вокруг актива больше плохих новостей")
-    elif sent_score != 0:
-        parts.append("📰 <b>Новости</b>: нейтральные")
-
-    ml = components.get("ml", {})
-    ml_change = ml.get("change_pct") if ml else None
-    if ml_change is not None:
-        direction = "рост" if ml_change > 0 else "снижение"
-        tp = ml.get("target_price")
-        line = f"🤖 <b>Прогноз модели</b>: {direction} {abs(ml_change):.1f}%"
-        if tp:
-            line += f" (цель {tp:.0f} ₽)"
-        parts.append(line)
-
-    trends = fused.get("trends", {})
-    if trends:
-        daily = trends.get("daily", {})
-        weekly = trends.get("weekly", {})
-        trend_parts = []
-        pd_ = daily.get("price_delta") if daily else None
-        if pd_ is not None:
-            arrow = "📈" if pd_ > 0 else "📉"
-            trend_parts.append(f"{arrow} цена {'выросла' if pd_ > 0 else 'снизилась'} на {abs(pd_):.1f}% за день")
-        pw = weekly.get("price_delta") if weekly else None
-        if pw is not None:
-            arrow = "📈" if pw > 0 else "📉"
-            trend_parts.append(f"{arrow} за неделю {'+' + str(round(pw, 1)) if pw > 0 else str(round(pw, 1))}%")
-        if weekly:
-            ac = weekly.get("action_changed")
-            if ac:
-                trend_parts.append("🔄 рекомендация изменилась за неделю")
-        if trend_parts:
-            parts.append("")
-            parts.extend(trend_parts)
-
-    if parts:
-        return "\n".join(parts)
-    return ""
-
-
-async def _reply_with_analysis(update: Update, ticker: str) -> None:
-    if not update.effective_message:
-        return
-    now = time.time()
-    cached = analysis_cache.get(ticker)
-    fused: dict[str, Any] | None
-    _advice: str
-    if cached and (now - cached[0]) < CACHE_TTL:
-        fused, _advice = cached[1], cached[2]
-        logger.info("Using cached analysis for %s", ticker)
-        msg = None
-    else:
-        msg = await update.effective_message.reply_text(f"\U0001f50d Анализирую {ticker}...")
-        try:
-            fused, _advice = await run_analysis(ticker, with_llm=False)
-            analysis_cache[ticker] = (now, fused, _advice)
-            if len(analysis_cache) > MAX_CACHE_SIZE:
-                analysis_cache.popitem(last=False)
-        except Exception:
-            logger.exception("Analysis error for %s", ticker)
-            await msg.edit_text("\u274c Не удалось проанализировать. Убедитесь, что запущен `finn update`.")
-            return
-
-    if not fused:
-        await update.effective_message.reply_text(f"\u274c {_advice}")
-        return
-
-    action = fused.get("action", "HOLD")
-    confidence = fused.get("confidence", 0)
-    emoji = ACTION_EMOJI.get(action, "\u26aa")
-
-    action_labels = {
-        "BUY": "можно покупать",
-        "CAUTIOUS_BUY": "можно присмотреться",
-        "HOLD": "лучше держать",
-        "SELL": "лучше продать",
-        "NEUTRAL": "нейтрально",
-    }
-    label = action_labels.get(action, action.lower())
-
-    text = f"{emoji} <b>{html_escape(ticker)}</b> — {label}\n"
-    text += f"Уверенность: {confidence:.0%}\n"
-
-    # enrichment blocks
-    from src.db.connection import get_session
-    from src.interfaces.response_formatter import (
-        build_corporate_events_block,
-        build_financial_highlights,
-        build_profile_block,
-        load_company_profile,
-        load_financial_report,
-        load_upcoming_events,
-    )
-
-    _db = get_session()
-    try:
-        inst = _db.query(Instrument).filter_by(ticker=ticker.upper()).first()
-        if inst:
-            profile = load_company_profile(_db, inst.id)
-            pb = build_profile_block(profile) if profile else ""
-            if pb:
-                text += f"\n🏢 <b>Профиль:</b>\n{html_escape(pb)}\n"
-
-            report = load_financial_report(_db, inst.id)
-            fh = build_financial_highlights(report)
-            if fh:
-                text += "\n📊 <b>Финансовые highlights:</b>\n"
-                for hl in fh:
-                    text += f"• {html_escape(hl)}\n"
-
-            events = load_upcoming_events(_db, inst.id, days=90)
-            ce = build_corporate_events_block(events)
-            if ce:
-                text += "\n📅 <b>Корпоративные события:</b>\n"
-                for ev in ce:
-                    text += f"• {html_escape(ev)}\n"
-    finally:
-        _db.close()
-
-    data_advice = _format_data_advice(fused)
-    if data_advice:
-        text += f"\n{data_advice}"
-
-    text += f"\n\n💡 Доля в портфеле: до {fused.get('max_portfolio_pct', 10)}%"
-
-    chunks = _chunk_text(text, 4096)
-    if msg:
-        await msg.edit_text(chunks[0], parse_mode="HTML", reply_markup=build_analyze_keyboard(ticker))
-    else:
-        await update.effective_message.reply_text(chunks[0], reply_markup=build_analyze_keyboard(ticker), parse_mode="HTML")
-    for chunk in chunks[1:]:
-        await update.effective_message.reply_text(chunk, reply_markup=build_analyze_keyboard(ticker), parse_mode="HTML")
-
-
-async def _reply_with_allocation(update: Update, capital: float, exclude: set[str] | None = None) -> None:
-    if not update.effective_message:
-        return
-    msg = await update.effective_message.reply_text(f"\U0001f50d Анализирую рынок для {capital:,.0f} ₽...")
-
-    try:
-        picks = allocator.recommend(capital=capital, exclude=exclude)
-        if not picks:
-            await msg.edit_text("Не удалось подобрать варианты. Запустите `finn update` для загрузки данных.")
-            return
-
-        text = f"\U0001f4b0 <b>Рекомендации для {capital:,.0f} ₽</b>"
-        if exclude:
-            text += f" (без {', '.join(sorted(exclude))})"
-        text += "\n\n"
-
-        for i, p in enumerate(picks[:10], 1):
-            name = p.get("name") or p["ticker"]
-            reason = p.get("reason", "")
-            last_price = p.get("last_price")
-            price_str = f"цена {last_price:.0f} ₽" if last_price else ""
-            text += f"{i}. <b>{html_escape(p['ticker'])}</b> ({html_escape(name)}) — {html_escape(p['category'])}\n"
-            text += f"   {price_str}\n"
-            if reason:
-                text += f"   \u2192 {html_escape(reason)}\n"
-            risk = p.get("risk", {})
-            if risk:
-                rparts = []
-                if risk.get("var_95"):
-                    rparts.append(f"риск падения {risk['var_95']:.1f}%/день")
-                if risk.get("stop_loss_pct"):
-                    rparts.append(f"стоп-лосс {risk['stop_loss_pct']:.1f}%")
-                if risk.get("suggested_shares"):
-                    rparts.append(f"макс. {risk['suggested_shares']} шт")
-                if rparts:
-                    text += f"   {' • '.join(rparts)}\n"
-            text += "\n"
-
-        chunks = _chunk_text(text, 4096)
-        allocation_text = _format_allocation_plan(picks, capital)
-        alloc_chunks = _chunk_text(allocation_text, 4096) if allocation_text else []
-
-        await msg.edit_text(chunks[0], parse_mode="HTML")
-        for chunk in chunks[1:]:
-            await update.effective_message.reply_text(chunk, parse_mode="HTML")
-        for chunk in alloc_chunks:
-            await update.effective_message.reply_text(chunk, parse_mode="HTML")
-    except Exception:
-        logger.warning("Recommendation error", exc_info=True)
-        await msg.edit_text("\u274c Не удалось рассчитать рекомендации. Убедитесь, что запущен `finn update`.")
-
-
-async def _ask_llm_general(update: Update, text: str, ticker_context: str = "") -> None:
-    if not update.effective_message:
-        return
-    msg = await update.effective_message.reply_text("🤔 Думаю...")
-    try:
-        from src.llm.router import llm
-
-        user_id = update.effective_user.id if update.effective_user else None
-        answer = await llm.answer_question(
-            question=text,
-            user_id=user_id,
-            ticker_context=ticker_context,
-        )
-
-        if not answer:
-            answer = "Не могу сформулировать ответ. Попробуйте уточнить вопрос или указать тикер через /analyze"
-
-        chunks = _chunk_text(answer, 4096)
-        await msg.edit_text(html_escape(chunks[0]), parse_mode="HTML")
-        for chunk in chunks[1:]:
-            await update.effective_message.reply_text(html_escape(chunk), parse_mode="HTML")
-    except Exception:
-        logger.warning("LLM error", exc_info=True)
-        await msg.edit_text(
-            "Не смог ответить на вопрос. Попробуйте:\n• /analyze SBER — анализ конкретной акции\n• /allocate 50000 — куда вложить деньги"
-        )
 
 
 @guard()
@@ -1115,116 +563,6 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db.close()
 
 
-async def _save_position(update: Update, ticker: str, qty: float, avg_price: float | None = None) -> None:
-    if not update.effective_message:
-        return
-    db = get_session()
-    try:
-        inst = db.query(Instrument).filter_by(ticker=ticker).first()
-        if not inst:
-            await update.effective_message.reply_text(f"Инструмент {ticker} не найден в базе. Запустите `finn update {ticker}`.")
-            return
-        if avg_price is None:
-            price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-            avg_price = float(price.close) if price else 0
-
-        existing = db.query(PortModel).filter_by(instrument_id=inst.id).first()
-        if existing:
-            existing.quantity += qty  # type: ignore[assignment]
-            if existing.avg_price and avg_price:
-                total_qty = existing.quantity
-                existing.avg_price = float((float(existing.avg_price) * (total_qty - qty) + avg_price * qty) / total_qty)  # type: ignore[assignment]
-            db.commit()
-            await update.effective_message.reply_text(f"✅ {ticker}: добавлено {qty} шт. (всего {existing.quantity:.1f} шт.)")
-        else:
-            pos = PortModel(instrument_id=inst.id, quantity=qty, avg_price=avg_price)
-            db.add(pos)
-            db.commit()
-            await update.effective_message.reply_text(f"✅ {ticker}: {qty} шт. добавлено в портфель")
-    except Exception:
-        db.rollback()
-        logger.warning("Save position error", exc_info=True)
-        await update.effective_message.reply_text("❌ Не удалось добавить позицию. Попробуйте позже.")
-    finally:
-        db.close()
-
-
-async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not await _check_access(update):
-        return ConversationHandler.END
-    if not update.effective_message:
-        return ConversationHandler.END
-    if not await _check_cooldown(update):
-        return ConversationHandler.END
-    args = context.args or []
-    if len(args) >= 2:
-        ticker = args[0].upper()
-        try:
-            qty = float(args[1].replace(",", "."))
-        except ValueError:
-            await update.effective_message.reply_text("Количество должно быть числом: /add SBER 10")
-            return ConversationHandler.END
-        await _save_position(update, ticker, qty)
-        return ConversationHandler.END
-
-    await update.effective_message.reply_text("Введите <b>тикер</b> инструмента (например, SBER):", parse_mode="HTML")
-    return TICKER
-
-
-async def add_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.effective_message or not update.effective_message.text or not context.user_data:
-        return ConversationHandler.END
-    context.user_data["add_ticker"] = update.effective_message.text.strip().upper()
-    await update.effective_message.reply_text("Введите <b>количество</b> (например, 10):", parse_mode="HTML")
-    return QUANTITY
-
-
-async def add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.effective_message or not update.effective_message.text or not context.user_data:
-        return ConversationHandler.END
-    try:
-        qty = float(update.effective_message.text.strip().replace(",", "."))
-        context.user_data["add_qty"] = qty
-    except ValueError:
-        await update.effective_message.reply_text("Количество должно быть числом. Попробуйте ещё раз:", parse_mode="HTML")
-        return QUANTITY
-    await update.effective_message.reply_text(
-        "Введите <b>среднюю цену</b> (или отправьте <code>-</code> для автоматической):",
-        parse_mode="HTML",
-    )
-    return PRICE
-
-
-async def add_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.effective_message or not update.effective_message.text or not context.user_data:
-        return ConversationHandler.END
-    text = update.effective_message.text.strip()
-    if text == "-":
-        avg_price = None
-    else:
-        try:
-            avg_price = float(text.replace(",", "."))
-        except ValueError:
-            await update.effective_message.reply_text("Цена должна быть числом или <code>-</code>. Попробуйте ещё раз:", parse_mode="HTML")
-            return PRICE
-
-    ticker = context.user_data.get("add_ticker", "")
-    qty = context.user_data.get("add_qty", 0)
-    context.user_data.clear()
-    await _save_position(update, ticker, qty, avg_price)
-    return ConversationHandler.END
-
-
-async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not context.user_data:
-        return ConversationHandler.END
-    context.user_data.clear()
-    if not update.effective_message:
-        return ConversationHandler.END
-    await update.effective_message.reply_text("❌ Добавление отменено")
-    return ConversationHandler.END
-
-
 @guard(with_cooldown=True)
 async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     args = context.args or []
@@ -1250,7 +588,7 @@ async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.effective_message.reply_text(f"{ticker} нет в портфеле")
             return
         if qty and qty < existing.quantity:
-            existing.quantity -= qty  # type: ignore[assignment]
+            existing.quantity -= qty
             db.commit()
             await update.effective_message.reply_text(f"✅ {ticker}: продано {qty} шт. (осталось {existing.quantity:.1f} шт.)")
         else:
@@ -1322,7 +660,6 @@ async def pulse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @guard(with_cooldown=True)
 async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-
     cbr = CBRCollector()
     try:
         rates = await cbr.get_rates()
@@ -1339,7 +676,6 @@ async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @guard(with_cooldown=True)
 async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-
     db = get_session()
     try:
         score = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
@@ -1358,59 +694,6 @@ async def geo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.effective_message.reply_text("Нет данных. Запустите daily update.")
     finally:
         db.close()
-
-
-app: Optional[Application[Any, Any, Any, Any, Any, Any]] = None
-_scheduler_task: Optional["asyncio.Task[None]"] = None
-
-
-async def _set_commands(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
-    commands = [
-        BotCommand("start", "Главное меню"),
-        BotCommand("analyze", "Анализ инструмента (тикер)"),
-        BotCommand("ask", "Спросить ассистента"),
-        BotCommand("top", "Лучшие возможности сейчас"),
-        BotCommand("portfolio", "Мой портфель"),
-        BotCommand("allocate", "Куда вложить (сумма)"),
-        BotCommand("add", "Добавить позицию"),
-        BotCommand("remove", "Удалить позицию"),
-        BotCommand("history", "История сигналов (тикер)"),
-        BotCommand("daily", "Ежедневная сводка"),
-        BotCommand("weekly", "Недельная сводка"),
-        BotCommand("sectors", "Сектора рынка"),
-        BotCommand("stress", "Стресс-тест"),
-        BotCommand("backtest", "Бэктест стратегии"),
-        BotCommand("correlation", "Корреляция активов"),
-        BotCommand("whatif", "Что-если сценарий"),
-        BotCommand("news", "Последние новости"),
-        BotCommand("rates", "Курсы валют"),
-        BotCommand("geo", "Геополитический риск"),
-        BotCommand("profile", "Риск-профиль"),
-        BotCommand("subscribe", "Подписаться на уведомления"),
-        BotCommand("unsubscribe", "Отписаться от уведомлений"),
-        BotCommand("export", "CSV-отчёт портфеля"),
-        BotCommand("social", "Social sentiment (тикер)"),
-        BotCommand("pulse", "Авторы Пульса"),
-        BotCommand("report", "Отчёт за 120 дней"),
-        BotCommand("pnl", "P&L сводка"),
-        BotCommand("subscribe_author", "Подписаться на автора Pulse"),
-        BotCommand("unsubscribe_author", "Отписаться от автора Pulse"),
-        BotCommand("authors", "Мои подписки на авторов"),
-        BotCommand("favorite", "Избранное (add/list/remove)"),
-        BotCommand("allocate_interactive", "Интерактивное распределение"),
-        BotCommand("status", "Статус бота и подписки"),
-        BotCommand("help", "Помощь"),
-    ]
-    try:
-        await app.bot.set_my_commands(commands)
-    except Exception:
-        logger.warning("Failed to set bot commands", exc_info=True)
-
-
-def _stop_scheduler() -> None:
-    from src.scheduler.service import stop as _sched_stop
-
-    _sched_stop()
 
 
 @guard(with_cooldown=True)
@@ -1471,7 +754,6 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         args = context.args or []
 
-        # Change risk profile
         if args and args[0].lower() in ("conservative", "balanced", "aggressive"):
             new_profile = args[0].lower()
             allocator.set_profile(new_profile)
@@ -1484,7 +766,6 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.effective_message.reply_text(f"✅ Профиль изменён на <b>{names[new_profile]}</b>")
             return
 
-        # Set goal
         if args and args[0].lower() == "goal" and len(args) >= 2:
             try:
                 new_goal = float(args[1].replace(" ", "").replace(",", "."))
@@ -1499,7 +780,6 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.effective_message.reply_text(f"🎯 Цель изменена на {new_goal:,.0f} ₽")
             return
 
-        # Show profile
         names = {"conservative": "Консервативный", "balanced": "Сбалансированный", "aggressive": "Агрессивный"}
         desc = {
             "conservative": "50% ETF, 25% облигации, 20% дивидендные, 5% рост",
@@ -1507,7 +787,6 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "aggressive": "40% рост, 25% ETF, 25% дивидендные, 10% облигации",
         }
 
-        # Calculate actual portfolio value
         portfolio_value = 0.0
         try:
             rows = get_portfolio_positions(db)
@@ -1529,7 +808,6 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             text += "🎯 Цель: не задана\n"
         text += f"📅 Горизонт: {horizon_label.get(p_horizon, p_horizon)}\n"
 
-        # Show portfolio by sector
         if rows:
             sectors: dict[str, float] = {}
             for r in rows:
@@ -1601,6 +879,8 @@ async def pnl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from datetime import datetime, timezone
 
+    from src.interfaces.telegram.bot import app
+
     ns = NotificationService()
     signal_subs = len(ns.get_subscribers("signal"))
     daily_subs = len(ns.get_subscribers("daily"))
@@ -1624,9 +904,6 @@ async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.effective_message.reply_text(text, parse_mode="HTML")
 
 
-CHANNEL_NAMES = {"telegram": "Telegram", "email": "Email", "web": "Web Push"}
-
-
 @guard(with_cooldown=True)
 async def channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user is None:
@@ -1635,6 +912,10 @@ async def channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     args = context.args or []
     db = get_session()
     try:
+        from src.notifications.channels import ALL_CHANNELS, load_preferences, set_preference
+
+        CHANNEL_NAMES = {"telegram": "Telegram", "email": "Email", "web": "Web Push"}
+
         if not args or args[0] == "status":
             prefs = load_preferences(db, uid)
             lines = ["<b>📨 Каналы уведомлений</b>\n"]
@@ -1982,12 +1263,11 @@ async def favorite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     args = context.args or []
     subcmd = args[0].lower() if args else "list"
 
-    from src.db.connection import get_session
-    from src.db.models import Favorite as FavoriteModel
-    from src.db.models import Instrument
-
     db = get_session()
     try:
+        from src.db.models import Favorite as FavoriteModel
+        from src.db.models import Instrument
+
         if subcmd == "add":
             if len(args) < 2:
                 await update.effective_message.reply_text("Укажите тикер: /favorite add SBER")
@@ -2043,279 +1323,3 @@ async def favorite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text("❌ Ошибка при работе с избранным")
     finally:
         db.close()
-
-
-# --- Interactive Allocator ConversationHandler ---
-ALLOC_AMOUNT, ALLOC_EXCLUDE, ALLOC_PROFILE = range(10, 13)
-
-
-async def alloc_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not await _check_access(update):
-        return ConversationHandler.END
-    if not update.effective_message:
-        return ConversationHandler.END
-    await update.effective_message.reply_text(
-        "💰 Введите сумму для распределения (например, 100000):",
-    )
-    return ALLOC_AMOUNT
-
-
-async def alloc_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.effective_message or not update.effective_message.text or not context.user_data:
-        return ConversationHandler.END
-    text = update.effective_message.text.strip().replace(" ", "").replace(",", ".")
-    try:
-        amount = float(text)
-        if amount < 500:
-            await update.effective_message.reply_text("Минимальная сумма — 500 ₽. Попробуйте ещё раз:")
-            return ALLOC_AMOUNT
-        context.user_data["alloc_amount"] = amount
-    except ValueError:
-        await update.effective_message.reply_text("Введите число, например 100000:")
-        return ALLOC_AMOUNT
-
-    await update.effective_message.reply_text("Какие тикеры исключить? (через пробел, или отправьте «-» чтобы продолжить)\nНапример: GAZP SBER")
-    return ALLOC_EXCLUDE
-
-
-async def alloc_exclude(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.effective_message or not update.effective_message.text or not context.user_data:
-        return ConversationHandler.END
-    text = update.effective_message.text.strip()
-    if text and text != "-":
-        exclude = set(t.upper() for t in text.split())
-        context.user_data["alloc_exclude"] = exclude
-    else:
-        context.user_data["alloc_exclude"] = set()
-
-    await update.effective_message.reply_text(
-        "Какой риск-профиль?\n"
-        "• <b>conservative</b> — консервативный\n"
-        "• <b>balanced</b> — сбалансированный (по умолчанию)\n"
-        "• <b>aggressive</b> — агрессивный\n\n"
-        "Отправьте профиль или «-» для默认ного:",
-        parse_mode="HTML",
-    )
-    return ALLOC_PROFILE
-
-
-async def alloc_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.effective_message or not update.effective_message.text or not context.user_data:
-        return ConversationHandler.END
-    text = update.effective_message.text.strip().lower()
-    if text in ("conservative", "balanced", "aggressive"):
-        context.user_data["alloc_profile"] = text
-    else:
-        context.user_data["alloc_profile"] = "balanced"
-
-    amount = context.user_data.get("alloc_amount", "100000")
-    exclude = context.user_data.get("alloc_exclude", set())
-    profile = context.user_data.get("alloc_profile", "balanced")
-
-    allocator.set_profile(profile)
-    await _reply_with_allocation(update, amount, exclude=exclude)
-    context.user_data.clear()
-    return ConversationHandler.END
-
-
-async def alloc_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if context.user_data:
-        context.user_data.clear()
-    if update.effective_message:
-        await update.effective_message.reply_text("❌ Распределение отменено")
-    return ConversationHandler.END
-
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error("Unhandled error", exc_info=context.error)
-    if isinstance(update, Update) and update.effective_message:
-        await update.effective_message.reply_text(
-            "❌ Произошла внутренняя ошибка. Попробуйте позже или напишите /start",
-        )
-
-
-async def run_bot() -> None:
-    global app, _scheduler_task
-    if not settings.telegram_bot_token:
-        logger.warning("TELEGRAM_BOT_TOKEN not set in .env")
-        return
-
-    builder = Application.builder().token(settings.telegram_bot_token)
-    if settings.telegram_proxy_url:
-        builder.proxy(settings.telegram_proxy_url)
-        logger.info("Telegram bot using proxy: %s", settings.telegram_proxy_url)
-    app = builder.build()
-
-    from src.interfaces.telegram_broadcaster import set_app
-
-    set_app(app)
-
-    await _set_commands(app)
-
-    app.add_error_handler(error_handler)
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", start))
-    app.add_handler(CommandHandler("status", bot_status))
-    app.add_handler(CommandHandler("analyze", analyze))
-    app.add_handler(CommandHandler("ask", ask))
-    app.add_handler(CommandHandler("allocate", allocate))
-    app.add_handler(CommandHandler("portfolio", portfolio))
-    app.add_handler(CommandHandler("rates", rates))
-    app.add_handler(CommandHandler("geo", geo))
-    app.add_handler(CommandHandler("social", social_cmd))
-    app.add_handler(CommandHandler("pulse", pulse))
-    app.add_handler(CommandHandler("subscribe", subscribe))
-    app.add_handler(CommandHandler("unsubscribe", unsubscribe))
-    app.add_handler(CommandHandler("daily", daily))
-    app.add_handler(CommandHandler("weekly", weekly))
-    app.add_handler(CommandHandler("stress", stress))
-    app.add_handler(CommandHandler("backtest", backtest))
-    app.add_handler(
-        ConversationHandler(
-            entry_points=[CommandHandler("add", add_start)],
-            states={
-                TICKER: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_ticker)],
-                QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_quantity)],
-                PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_price)],
-            },
-            fallbacks=[CommandHandler("cancel", add_cancel)],
-        )
-    )
-    app.add_handler(CommandHandler("remove", remove_position))
-    app.add_handler(CommandHandler("history", history))
-    app.add_handler(CommandHandler("profile", profile))
-    app.add_handler(CommandHandler("sectors", sectors))
-    app.add_handler(CommandHandler("top", top))
-    app.add_handler(CommandHandler("news", news))
-    app.add_handler(CommandHandler("export", export_portfolio))
-    app.add_handler(CommandHandler("correlation", correlation))
-    app.add_handler(CommandHandler("whatif", whatif))
-    app.add_handler(CommandHandler("report", report))
-    app.add_handler(CommandHandler("pnl", pnl))
-    app.add_handler(CommandHandler("channel", channel_cmd))
-    app.add_handler(CommandHandler("favorite", favorite))
-    app.add_handler(CommandHandler("allocate_interactive", alloc_start))
-    app.add_handler(
-        ConversationHandler(
-            entry_points=[CommandHandler("allocate_interactive", alloc_start)],
-            states={
-                ALLOC_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, alloc_amount)],
-                ALLOC_EXCLUDE: [MessageHandler(filters.TEXT & ~filters.COMMAND, alloc_exclude)],
-                ALLOC_PROFILE: [MessageHandler(filters.TEXT & ~filters.COMMAND, alloc_profile)],
-            },
-            fallbacks=[CommandHandler("cancel", alloc_cancel)],
-        )
-    )
-    app.add_handler(CommandHandler("mute", mute_cmd))
-    app.add_handler(CommandHandler("unmute", unmute_cmd))
-    app.add_handler(CommandHandler("muted", muted_cmd))
-    app.add_handler(CommandHandler("quiet", quiet_cmd))
-    app.add_handler(CommandHandler("price", price_cmd))
-    app.add_handler(CommandHandler("subscribe_author", subscribe_author))
-    app.add_handler(CommandHandler("unsubscribe_author", unsubscribe_author))
-    app.add_handler(CommandHandler("authors", my_authors))
-
-    app.add_handler(CallbackQueryHandler(button_callback))
-
-    app.add_handler(
-        MessageHandler(
-            filters.Text(
-                [
-                    "🔍 Анализ",
-                    "📊 Портфель",
-                    "🏆 Топ",
-                    "📰 Новости",
-                    "📋 Сводка",
-                    "🏭 Сектора",
-                    "💰 Аллокация",
-                    "🧪 Стресс-тест",
-                    "🔄 Корреляция",
-                    "➕ Добавить",
-                    "➖ Удалить",
-                    "📜 История",
-                    "📤 Экспорт CSV",
-                    "⏪ Бэктест",
-                    "⚙️ Профиль",
-                    "📊 P&L",
-                    "📄 Отчёт",
-                    "💱 Курсы",
-                    "👥 Авторы",
-                    "📰 Соц.сен.",
-                    "🌍 Гео-риск",
-                    "🔮 What-If",
-                    "📡 Статус",
-                    "🔔 Подписки",
-                    "🏠 /start",
-                    "🌙 Ночн.режим",
-                    "❓ Помощь",
-                    "◀️",
-                    "▶️",
-                    "🔢 1/3",
-                    "🔢 2/3",
-                    "🔢 3/3",
-                ]
-            ),
-            reply_keyboard_handler,
-        )
-    )
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
-
-    await app.initialize()
-    await app.start()
-
-    # Start background scheduler (runs full cycle including social sentiment)
-    from src.scheduler.service import start_background as _start_scheduler
-
-    _scheduler_task = await _start_scheduler()
-
-    # Clear any stale webhook to prevent 409 Conflict
-    try:
-        await app.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Webhook cleared before polling")
-    except Exception as e:
-        logger.warning("Failed to clear webhook: %s", e)
-
-    polling_retry_delay = 10
-    poll_attempt = 0
-    assert app is not None and app.updater is not None
-    while True:
-        try:
-            await app.updater.start_polling()
-            poll_attempt = 0
-            logger.info("Bot started polling with background scheduler")
-            break
-        except NetworkError as e:
-            poll_attempt += 1
-            delay = min(polling_retry_delay * (2 ** (poll_attempt - 1)), 300)
-            logger.warning("Telegram polling connection failed (attempt %d): %s — retrying in %ds", poll_attempt, e, delay)
-            await asyncio.sleep(delay)
-
-    retry_count = 0
-    try:
-        while True:
-            await asyncio.sleep(30)
-            if not app.updater.running:
-                retry_count += 1
-                delay = min(10 * (2 ** (retry_count - 1)), 300)
-                logger.warning("Telegram polling stopped, reconnecting in %ds (attempt %d)", delay, retry_count)
-                await asyncio.sleep(delay)
-                try:
-                    await app.updater.start_polling()
-                    retry_count = 0
-                    logger.info("Telegram polling reconnected")
-                except Exception as e:
-                    logger.error("Telegram polling reconnect failed: %s", e)
-    except asyncio.CancelledError:
-        logger.info("Bot shutting down...")
-        _stop_scheduler()
-        if _scheduler_task and not _scheduler_task.done():
-            _scheduler_task.cancel()
-        await app.updater.stop()
-        await app.stop()
-        await app.shutdown()
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_bot())
