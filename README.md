@@ -25,6 +25,8 @@ finn-help/
 │   │   ├── ml/                   # XGBoost, LightGBM, CatBoost, Ensemble, StatsModels, SentimentEvolution
 │   │   ├── inference/            # Granger causality, causal impact, instrument graph
 │   │   ├── backtest.py           # Monte-Carlo backtesting engine
+│   │   ├── metrics.py            # Shared metrics helpers (returns, sharpe, sortino, drawdown)
+│   │   ├── personal_backtest.py  # Personal backtesting
 │   │   ├── fundamental.py        # Мультипликаторы, аномалии, сравнение с сектором
 │   │   ├── technical.py          # RSI, MACD, BB, SMA, ATR
 │   │   ├── sector.py             # Сектора: performance, correlation, volatility
@@ -32,20 +34,27 @@ finn-help/
 │   │   ├── risk_explorer.py      # VaR/CVaR, deep-dive, концентрация
 │   │   ├── summarizer.py         # Кластеризация новостей + LLM дайджест
 │   │   └── service.py            # AnalysisService — оркестратор
+│   ├── cli/                      # CLI interface (commands + __init__)
 │   ├── collectors/               # MOEX ISS, CBR, SmartLab, новости (RSS), Telegram
+│   ├── constants.py              # Shared constants
 │   ├── data/                     # Sector impact engine, geopolitical risk, dashboard provider
 │   ├── db/                       # SQLAlchemy модели + PostgreSQL + Alembic
+│   │   ├── models/               # Domain model files (10 files)
+│   │   └── queries.py            # Shared query helpers
 │   ├── alerts/                   # Alert engine, генераторы, дедупликация
 │   ├── interfaces/
 │   │   ├── api/                  # REST API + auth (JWT, bcrypt)
-│   │   ├── telegram.py           # Telegram bot (python-telegram-bot v20)
+│   │   ├── telegram/             # Telegram bot package (6 files)
 │   │   ├── telegram_alerter.py   # Форматирование и отправка алертов
-│   │   ├── nlq.py                # Natural Language Query engine
-│   │   ├── response_formatter.py # Сборка enrichment-блоков для ответов
+│   │   ├── nlq/                  # Natural Language Query package
+│   │   └── response_formatter.py # Сборка enrichment-блоков для ответов
 │   ├── social/                   # Социальный сентимент (LLM), агрегация, признаки
-│   ├── llm/                      # Groq + Ollama роутер, WolframAlpha, промпты
+│   ├── llm/                      # Groq + Ollama роутер, WolframAlpha
+│   │   └── prompts/              # Prompt templates (analysis, report, question)
 │   ├── notifications/            # Сигналы, алерты (price target, divergence, rebalance)
-│   ├── portfolio/                # Аллокатор портфеля (с фундаментальными метриками)
+│   ├── portfolio/
+│   │   ├── allocator/            # Аллокатор портфеля (profiles + engine)
+│   │   └── ...
 │   ├── scheduler/                # Ежедневный/еженедельный цикл
 │   ├── signal/                   # Fusion Engine
 │   ├── trading/                  # Исполнение сделок, риск-менеджмент, стоп-лоссы, аудит
@@ -56,8 +65,8 @@ finn-help/
 │   ├── cache.py                  # Redis-кэш с in-memory fallback
 │   └── user_profile.py           # Risk profiles + персонализация
 ├── web/                          # Next.js dashboard
-├── tests/                        # 1200+ pytest тестов
-├── tools/                        # audit_formatters.py
+├── tests/                        # 1400+ pytest тестов
+├── docs/                         # Документация (ARCHITECTURE, CHANGELOG)
 └── Dockerfile / docker-compose.yml
 ```
 
