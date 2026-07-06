@@ -125,7 +125,7 @@ def compute_take_profits(entry: float, resistance: float | None, atr: float, pro
     return targets
 
 
-def compute_stop_loss(entry: float, atr: float, side: Literal["buy", "sell"], profile: Profile = "balanced") -> float:
+def compute_trade_stop_loss(entry: float, atr: float, side: Literal["buy", "sell"], profile: Profile = "balanced") -> float:
     cfg = PROFILES[profile]
     if side == "buy":
         stop = entry - atr * cfg["stop_atr"]
@@ -160,10 +160,10 @@ def build_trade_plan(
 
     if side == "buy":
         targets = compute_take_profits(entry_price, resistance, atr, profile)
-        stop_loss = compute_stop_loss(entry_price, atr, "buy", profile)
+        stop_loss = compute_trade_stop_loss(entry_price, atr, "buy", profile)
     else:
         targets = compute_take_profits(entry_price, support, atr, profile)
-        stop_loss = compute_stop_loss(entry_price, atr, "sell", profile)
+        stop_loss = compute_trade_stop_loss(entry_price, atr, "sell", profile)
 
     cfg = PROFILES[profile]
     trailing_after = round(entry_price * (1 + cfg["trailing_after"]), 2) if side == "buy" else round(entry_price * (1 - cfg["trailing_after"]), 2)

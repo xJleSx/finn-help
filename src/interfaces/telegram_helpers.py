@@ -6,19 +6,13 @@ from typing import Any
 import structlog
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 
+from src.constants import ACTION_EMOJI
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
 from src.db.models import Portfolio as PortModel
 
 logger = structlog.get_logger(__name__)
 
-ACTION_EMOJI = {
-    "BUY": "\U0001f7e2",
-    "CAUTIOUS_BUY": "\U0001f7e1",
-    "HOLD": "\u26aa",
-    "SELL": "\U0001f534",
-    "NEUTRAL": "\u26aa",
-}
 
 RUSSIAN_NAMES: dict[str, str] = {
     "сбер": "SBER",

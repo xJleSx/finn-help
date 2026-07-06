@@ -77,6 +77,14 @@ RISK_PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 
+ACTION_EMOJI: dict[str, str] = {
+    "BUY": "\U0001f7e2",
+    "CAUTIOUS_BUY": "\U0001f7e1",
+    "HOLD": "\u26aa",
+    "SELL": "\U0001f534",
+    "NEUTRAL": "\u26aa",
+}
+
 CACHE_TTL: int = 300
 MAX_CACHE_SIZE: int = 100
 COOLDOWN_SECONDS: int = 5

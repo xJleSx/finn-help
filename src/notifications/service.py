@@ -12,6 +12,7 @@ from src.core.executor import get_executor
 from src.db.connection import get_session
 from src.db.models import AuthorSubscription, GeoRiskScore, Instrument, Notification, Portfolio, Price, Subscription
 from src.db.models import Signal as SignalModel
+from src.constants import ACTION_EMOJI
 from src.notifications import (
     DailySummaryNotification,
     DivergenceAlert,
@@ -23,14 +24,6 @@ from src.notifications import (
 )
 
 logger = structlog.get_logger(__name__)
-
-ACTION_EMOJI = {
-    "BUY": "🟢",
-    "CAUTIOUS_BUY": "🟡",
-    "HOLD": "⚪",
-    "SELL": "🔴",
-    "NEUTRAL": "⚪",
-}
 
 
 def _geo_level(score: float) -> str:

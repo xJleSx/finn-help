@@ -7,6 +7,8 @@ from typing import Any
 import structlog
 from jinja2 import BaseLoader, Environment, FileSystemLoader, select_autoescape
 
+from src.constants import ACTION_EMOJI
+
 logger = structlog.get_logger(__name__)
 
 PRIORITY_EMOJI = {
@@ -21,14 +23,6 @@ PRIORITY_COLORS = {
     "HIGH": "#f57c00",
     "MEDIUM": "#fbc02d",
     "LOW": "#388e3c",
-}
-
-ACTION_EMOJI = {
-    "BUY": "\U0001f7e2",
-    "CAUTIOUS_BUY": "\U0001f7e1",
-    "HOLD": "\u26aa",
-    "SELL": "\U0001f534",
-    "NEUTRAL": "\u26aa",
 }
 
 TEMPLATE_DIR = Path(__file__).resolve().parent
