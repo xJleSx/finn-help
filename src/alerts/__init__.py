@@ -1,10 +1,10 @@
-from src.alerts.deduplicator import AlertDeduplicator as AlertDeduplicator
-from src.alerts.deduplicator import AlertTimer as AlertTimer
-from src.alerts.engine import AlertEngine as AlertEngine
-from src.alerts.history import AlertHistory as AlertHistory
-from src.alerts.preferences import UserAlertPreferences as UserAlertPreferences
-from src.alerts.prioritizer import AlertAggregator as AlertAggregator
-from src.alerts.push import AlertPushService as AlertPushService
+from src.alerts.deduplicator import AlertDeduplicator
+from src.alerts.deduplicator import AlertTimer
+from src.alerts.engine import AlertEngine
+from src.alerts.history import AlertHistory
+from src.alerts.preferences import UserAlertPreferences
+from src.alerts.prioritizer import AlertAggregator
+from src.alerts.push import AlertPushService
 
 __all__ = [
     "AlertAggregator",

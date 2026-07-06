@@ -1,3 +1,3 @@
-from src.notifications.templates.renderer import AlertTemplateRenderer as AlertTemplateRenderer
+from src.notifications.templates.renderer import AlertTemplateRenderer
 
 __all__ = ["AlertTemplateRenderer"]

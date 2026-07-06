@@ -15,7 +15,6 @@ from sqlalchemy import (
     Index,
     text as sa_text,
 )
-from sqlalchemy.orm import relationship
 
 from .base import Base
 

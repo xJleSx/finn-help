@@ -16,11 +16,6 @@ COMMISSION_FIXED = 0.0  # no fixed commission
 REBALANCE_THRESHOLD = 0.05  # 5% drift triggers rebalance
 
 
-def _returns(prices: list[float]) -> np.ndarray:
-    arr = np.array(prices, dtype=float)
-    return np.diff(arr) / arr[:-1]  # type: ignore[no-any-return]
-
-
 def _sharpe(returns: np.ndarray, annual_factor: int = 252) -> float:
     if len(returns) < 5 or np.std(returns) == 0:
         return 0.0
