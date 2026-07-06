@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     password_min_length: int = 8
     tinkoff_token: str = ""
     tinkoff_sandbox: bool = True
+    bcs_refresh_token: str = ""
+    bcs_sandbox: bool = True
     database_url: str = "postgresql://finn:finn@localhost:5432/finn"
     telegram_bot_token: str = ""
     telegram_proxy_url: str = ""
@@ -84,6 +86,7 @@ class Settings(BaseSettings):
     wolfram_app_id: str = ""
     wolfram_enabled: bool = True
 
+    fm_api_token: str = ""
     moex_iss_url: str = "https://iss.moex.com/iss"
     cbr_url: str = "https://www.cbr.ru/scripts/XML_daily.asp"
 
