@@ -4,6 +4,7 @@ from typing import Any, Optional, cast
 
 import numpy as np
 
+from src.analysis.metrics import compute_calmar, compute_max_drawdown, compute_sharpe, compute_sortino
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
 from src.portfolio.allocator import allocator
@@ -14,36 +15,6 @@ SLIPPAGE_BPS = 5  # 0.05% slippage per trade
 COMMISSION_PCT = 0.0004  # 0.04% broker commission
 COMMISSION_FIXED = 0.0  # no fixed commission
 REBALANCE_THRESHOLD = 0.05  # 5% drift triggers rebalance
-
-
-def _sharpe(returns: np.ndarray, annual_factor: int = 252) -> float:
-    if len(returns) < 5 or np.std(returns) == 0:
-        return 0.0
-    return float(np.mean(returns) / np.std(returns) * np.sqrt(annual_factor))
-
-
-def _max_drawdown(prices: list[float]) -> float:
-    arr = np.array(prices)
-    peak = np.maximum.accumulate(arr)
-    dd = (arr - peak) / peak
-    return float(np.min(dd))
-
-
-def _sortino(returns: np.ndarray, annual_factor: int = 252) -> float:
-    if len(returns) < 5:
-        return 0.0
-    downside = returns[returns < 0]
-    if len(downside) == 0 or np.std(downside) == 0:
-        return 0.0
-    return float(np.mean(returns) / np.std(downside) * np.sqrt(annual_factor))
-
-
-def _calmar(returns: np.ndarray, prices: list[float]) -> float:
-    dd = _max_drawdown(prices)
-    if dd == 0:
-        return 0.0
-    total_ret = float(np.prod(1 + returns)) - 1
-    return total_ret / abs(dd)
 
 
 @dataclass
@@ -116,22 +87,22 @@ class BacktestResult:
 
     @property
     def portfolio_sharpe(self) -> float:
-        return _sharpe(np.array(self.portfolio_returns))
+        return compute_sharpe(np.array(self.portfolio_returns))
 
     @property
     def portfolio_sortino(self) -> float:
-        return _sortino(np.array(self.portfolio_returns))
+        return compute_sortino(np.array(self.portfolio_returns))
 
     @property
     def portfolio_max_dd(self) -> float:
         if not self.portfolio_returns:
             return 0.0
         cumulative = np.cumprod([1 + r for r in self.portfolio_returns])
-        return _max_drawdown(cumulative.tolist())
+        return compute_max_drawdown(cumulative.tolist())
 
     @property
     def portfolio_calmar(self) -> float:
-        return _calmar(np.array(self.portfolio_returns), np.cumprod([1 + r for r in self.portfolio_returns]).tolist())
+        return compute_calmar(np.array(self.portfolio_returns), np.cumprod([1 + r for r in self.portfolio_returns]).tolist())
 
     @property
     def win_rate(self) -> float:

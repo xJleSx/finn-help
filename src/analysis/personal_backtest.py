@@ -5,6 +5,7 @@ from typing import Any, Optional, cast
 
 import numpy as np
 
+from src.analysis.metrics import compute_calmar, compute_max_drawdown, compute_returns, compute_sharpe, compute_sortino
 from src.config import personal
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
@@ -104,41 +105,6 @@ class PersonalBacktestResult:
 def _prices_for_ticker(db: Any, ticker: str, start: date, end: date) -> list[dict[str, Any]]:
     rows = db.query(Price).join(Instrument).filter(Instrument.ticker == ticker, Price.date >= start, Price.date <= end).order_by(Price.date).all()
     return [{"date": r.date, "close": r.close} for r in rows if r.close]
-
-
-def _returns(arr: list[float]) -> np.ndarray:
-    a = np.array(arr, dtype=float)
-    return np.diff(a) / a[:-1]  # type: ignore[no-any-return]
-
-
-def _sharpe(returns: np.ndarray, annual: int = 252) -> float:
-    if len(returns) < 5 or np.std(returns) == 0:
-        return 0.0
-    return float(np.mean(returns) / np.std(returns) * np.sqrt(annual))
-
-
-def _sortino(returns: np.ndarray, annual: int = 252) -> float:
-    if len(returns) < 5:
-        return 0.0
-    downside = returns[returns < 0]
-    if len(downside) == 0 or np.std(downside) == 0:
-        return 0.0
-    return float(np.mean(returns) / np.std(downside) * np.sqrt(annual))
-
-
-def _max_dd(values: list[float]) -> float:
-    arr = np.array(values)
-    peak = np.maximum.accumulate(arr)
-    dd = (arr - peak) / peak
-    return float(np.min(dd))
-
-
-def _calmar(returns: np.ndarray, prices: list[float]) -> float:
-    dd = _max_dd(prices)
-    if dd == 0:
-        return 0.0
-    total = float(np.prod(1 + returns)) - 1
-    return total / abs(dd)
 
 
 def run_personal_backtest(
@@ -259,7 +225,7 @@ def run_personal_backtest(
 
         equity_curve = [{"date": portfolio_dates[i].isoformat(), "portfolio": equity[i], "benchmark": bench_equity[i]} for i in range(min_len)]
 
-        port_returns = _returns(equity)
+        port_returns = compute_returns(equity)
 
         total_return = (equity[-1] / equity[0]) - 1
         bench_total_return = (bench_equity[-1] / bench_equity[0]) - 1
@@ -289,8 +255,8 @@ def run_personal_backtest(
             wf_port_ret = (test_slice[-1] / test_slice[0]) - 1 if len(test_slice) > 1 else 0
             wf_bench_slice = bench_equity[te:] if fold == 0 else bench_equity[te:]
             wf_bench_ret = (wf_bench_slice[-1] / wf_bench_slice[0]) - 1 if len(wf_bench_slice) > 1 else 0
-            wf_sharpe = _sharpe(_returns(test_slice)) if len(test_slice) > 5 else 0
-            wf_mdd = _max_dd(test_slice) if len(test_slice) > 1 else 0
+            wf_sharpe = compute_sharpe(compute_returns(test_slice)) if len(test_slice) > 5 else 0
+            wf_mdd = compute_max_drawdown(test_slice) if len(test_slice) > 1 else 0
 
             wf_folds.append(
                 WalkForwardFold(
@@ -316,10 +282,10 @@ def run_personal_backtest(
             total_return=total_return,
             benchmark_return=bench_total_return,
             alpha=total_return - bench_total_return,
-            sharpe=_sharpe(port_returns),
-            sortino=_sortino(port_returns),
-            calmar=_calmar(port_returns, equity),
-            max_drawdown=_max_dd(equity),
+            sharpe=compute_sharpe(port_returns),
+            sortino=compute_sortino(port_returns),
+            calmar=compute_calmar(port_returns, equity),
+            max_drawdown=compute_max_drawdown(equity),
             win_rate=float(np.mean(port_returns > 0)) if len(port_returns) > 0 else 0,
             profit_factor=float(sum(port_returns[port_returns > 0]) / abs(sum(port_returns[port_returns < 0])))
             if any(port_returns < 0)

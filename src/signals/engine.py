@@ -5,6 +5,8 @@ from typing import Any, Optional
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.analysis.metrics import compute_max_drawdown
+
 from src.constants import (
     BASE_POSITION_PCT,
     FUND_RISK_HIGH,
@@ -44,19 +46,12 @@ def _sortino_ratio(returns: np.ndarray, rf: float = 0.0) -> float:
     return float(excess / np.std(downside) * np.sqrt(252))
 
 
-def _max_drawdown(prices: np.ndarray) -> float:
-    if len(prices) < 2:
-        return 0.0
-    peak = np.maximum.accumulate(prices)
-    dd = (prices - peak) / peak
-    return float(abs(dd.min()))
-
 
 def _calmar_ratio(returns: np.ndarray, prices: np.ndarray) -> float:
     if len(returns) < 2:
         return 0.0
     cagr = float(np.mean(returns) * 252)
-    mdd = _max_drawdown(prices)
+    mdd = abs(compute_max_drawdown(prices.tolist()))
     return cagr / mdd if mdd > 0 else 0.0
 
 
@@ -78,7 +73,7 @@ def compute_risk_metrics(price_series: list[float]) -> dict[str, Any]:
     return {
         "sharpe": round(_sharpe_ratio(returns), 2),
         "sortino": round(_sortino_ratio(returns), 2),
-        "max_drawdown": round(_max_drawdown(arr), 4),
+        "max_drawdown": round(abs(compute_max_drawdown(arr.tolist())), 4),
         "calmar": round(_calmar_ratio(returns, arr), 2),
         "omega": round(_omega_ratio(returns), 2),
     }
