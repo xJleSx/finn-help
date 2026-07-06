@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 from typing import Optional
 
@@ -379,3 +380,257 @@ try:
     )
 except Exception:
     logger.warning("Could not load risk params from config, using defaults")
+
+
+# ═══════════════════════════════════════════════════════════════
+# Weekly Loss Tracker
+# ═══════════════════════════════════════════════════════════════
+
+class WeeklyLossTracker:
+    def __init__(self, initial_capital: float = 100000.0):
+        self._initial_capital = initial_capital
+        self._trades: list[tuple[float, datetime.date]] = []
+
+    def record_trade(self, pnl: float, timestamp: datetime.date) -> None:
+        self._trades.append((pnl, timestamp))
+
+    def current_week_pnl(self) -> float:
+        today = datetime.date.today()
+        total = 0.0
+        for pnl, ts in self._trades:
+            if self._same_week(ts, today):
+                total += pnl
+        return total
+
+    def weekly_loss_level(self) -> str:
+        pnl = self.current_week_pnl()
+        pnl_pct = pnl / self._initial_capital if self._initial_capital else 0.0
+        if pnl_pct >= -0.05:
+            return "normal"
+        if pnl_pct >= -0.07:
+            return "reduce_50"
+        if pnl_pct >= -0.10:
+            return "minimum_only"
+        return "full_halt"
+
+    def consecutive_loss_days(self) -> int:
+        from collections import defaultdict
+        daily_pnl: dict[datetime.date, float] = defaultdict(float)
+        for pnl, ts in self._trades:
+            daily_pnl[ts] += pnl
+        sorted_days = sorted(daily_pnl, reverse=True)
+        count = 0
+        for day in sorted_days:
+            if daily_pnl[day] < 0:
+                count += 1
+            else:
+                break
+        return count
+
+    def reset_week(self) -> None:
+        self._trades.clear()
+
+    @staticmethod
+    def _same_week(d1: datetime.date, d2: datetime.date) -> bool:
+        iso1 = d1.isocalendar()
+        iso2 = d2.isocalendar()
+        return iso1[0] == iso2[0] and iso1[1] == iso2[1]
+
+
+# ═══════════════════════════════════════════════════════════════
+# Drawdown Stage Manager
+# ═══════════════════════════════════════════════════════════════
+
+_DRAWDOWN_STAGE_RESPONSES: dict[str, str] = {
+    "normal": "No action required",
+    "caution": "Reduce position sizes, tighten stops",
+    "warning": "Reduce exposure by 50%, halt new positions",
+    "critical": "Close high-risk positions, reduce to minimum exposure",
+    "emergency": "Liquidate all positions, halt trading",
+}
+
+
+class DrawdownStageManager:
+    def __init__(self) -> None:
+        self._peak: float | None = None
+        self._current: float | None = None
+
+    def update(self, equity_curve) -> None:
+        if hasattr(equity_curve, "iloc"):
+            values = equity_curve.tolist()
+        else:
+            values = list(equity_curve)
+        if not values:
+            return
+        self._current = values[-1]
+        running_peak = max(values)
+        if self._peak is None or running_peak > self._peak:
+            self._peak = running_peak
+
+    def current_drawdown(self) -> float:
+        if self._peak is None or self._current is None or self._peak <= 0:
+            return 0.0
+        return (self._current - self._peak) / self._peak
+
+    def stage(self) -> str:
+        dd = abs(self.current_drawdown())
+        if dd < 0.05:
+            return "normal"
+        if dd < 0.10:
+            return "caution"
+        if dd < 0.15:
+            return "warning"
+        if dd < 0.20:
+            return "critical"
+        return "emergency"
+
+    def response(self) -> str:
+        return _DRAWDOWN_STAGE_RESPONSES.get(self.stage(), "Unknown stage")
+
+
+# ═══════════════════════════════════════════════════════════════
+# Exposure limit function
+# ═══════════════════════════════════════════════════════════════
+
+def compute_exposure_limit(drawdown_pct: float, base_exposure: float = 0.8) -> float:
+    dd = abs(drawdown_pct)
+    if dd > 0.15:
+        return 0.20
+    if dd > 0.10:
+        return 0.30
+    if dd > 0.05:
+        return 0.50
+    return base_exposure
+
+
+# ═══════════════════════════════════════════════════════════════
+# Consecutive loss / win tracking
+# ═══════════════════════════════════════════════════════════════
+
+def track_consecutive_losses(trade_results: list[float]) -> tuple[int, int]:
+    consecutive_losses = 0
+    consecutive_wins = 0
+    for pnl in trade_results:
+        if pnl < 0:
+            consecutive_losses += 1
+            consecutive_wins = 0
+        elif pnl > 0:
+            consecutive_wins += 1
+            consecutive_losses = 0
+    return consecutive_losses, consecutive_wins
+
+
+# ═══════════════════════════════════════════════════════════════
+# Circuit Breaker
+# ═══════════════════════════════════════════════════════════════
+
+VALID_BREAKER_TYPES = frozenset({"time", "loss", "volatility"})
+
+
+class CircuitBreaker:
+    def __init__(self, breaker_type: str) -> None:
+        if breaker_type not in VALID_BREAKER_TYPES:
+            raise ValueError(f"Invalid breaker_type '{breaker_type}'. Choose from {sorted(VALID_BREAKER_TYPES)}")
+        self._breaker_type = breaker_type
+        self._triggered: bool = False
+        self._triggered_at: datetime.datetime | None = None
+        self._cooldown_seconds: float = 3600.0
+        self._daily_loss_limit: float = float("inf")
+        self._weekly_loss_limit: float = float("inf")
+        self._daily_pnl: float = 0.0
+        self._weekly_pnl: float = 0.0
+        self._volatility_samples: list[float] = []
+        self._vol_percentile_threshold: float = 0.95
+
+    def record_trade(self, pnl: float, ts: datetime.date | None = None) -> None:
+        self._daily_pnl += pnl
+        self._weekly_pnl += pnl
+
+    def reset_pnl(self) -> None:
+        self._daily_pnl = 0.0
+        self._weekly_pnl = 0.0
+
+    def record_volatility(self, value: float) -> None:
+        self._volatility_samples.append(value)
+
+    def time_breaker(self, cooldown_minutes: float = 60.0) -> None:
+        self._cooldown_seconds = cooldown_minutes * 60.0
+        self._triggered = True
+        self._triggered_at = datetime.datetime.now()
+
+    def loss_breaker(self, daily_loss_limit: float, weekly_loss_limit: float) -> None:
+        self._daily_loss_limit = daily_loss_limit
+        self._weekly_loss_limit = weekly_loss_limit
+        if self._daily_pnl <= -daily_loss_limit or self._weekly_pnl <= -weekly_loss_limit:
+            self._triggered = True
+            self._triggered_at = datetime.datetime.now()
+
+    def volatility_breaker(self, vol_percentile_threshold: float = 0.95) -> None:
+        self._vol_percentile_threshold = vol_percentile_threshold
+        if len(self._volatility_samples) < 2:
+            return
+        sorted_vols = sorted(self._volatility_samples)
+        idx = min(int(len(sorted_vols) * vol_percentile_threshold), len(sorted_vols) - 1)
+        threshold_val = sorted_vols[idx]
+        if self._volatility_samples[-1] >= threshold_val:
+            self._triggered = True
+            self._triggered_at = datetime.datetime.now()
+
+    def is_triggered(self) -> bool:
+        if not self._triggered or self._triggered_at is None:
+            return False
+        elapsed = (datetime.datetime.now() - self._triggered_at).total_seconds()
+        if elapsed >= self._cooldown_seconds:
+            self._triggered = False
+            self._triggered_at = None
+            return False
+        return True
+
+    def remaining_cooldown(self) -> float:
+        if not self._triggered or self._triggered_at is None:
+            return 0.0
+        elapsed = (datetime.datetime.now() - self._triggered_at).total_seconds()
+        return max(self._cooldown_seconds - elapsed, 0.0)
+
+    def reset(self) -> None:
+        self._triggered = False
+        self._triggered_at = None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Correlation risk adjustment
+# ═══════════════════════════════════════════════════════════════
+
+def compute_correlation_risk_adjustment(
+    position_sizes: dict[str, float],
+    correlations: dict[str, float],
+    max_correlation: float = 0.7,
+) -> float:
+    tickers = list(position_sizes.keys())
+    if len(tickers) < 2:
+        return 1.0
+    total_size = sum(position_sizes.values())
+    if total_size <= 0:
+        return 1.0
+    weighted_corr_sum = 0.0
+    weight_sum = 0.0
+    pairs_considered = 0
+    for i in range(len(tickers)):
+        for j in range(i + 1, len(tickers)):
+            a, b = tickers[i], tickers[j]
+            pair_key = f"{a}_{b}" if a < b else f"{b}_{a}"
+            corr = correlations.get(pair_key)
+            if corr is None:
+                corr = correlations.get(f"{b}_{a}")
+            if corr is not None:
+                w = (position_sizes[a] + position_sizes[b]) / 2.0
+                weighted_corr_sum += corr * w
+                weight_sum += w
+                pairs_considered += 1
+    if pairs_considered == 0 or weight_sum <= 0:
+        return 1.0
+    avg_corr = weighted_corr_sum / weight_sum
+    if avg_corr <= max_correlation:
+        return 1.0
+    excess = (avg_corr - max_correlation) / (1.0 - max_correlation)
+    return max(0.0, 1.0 - excess)

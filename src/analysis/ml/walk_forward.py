@@ -169,3 +169,75 @@ def compute_classification_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> di
         "fn": int(fn),
         "tn": int(tn),
     }
+
+
+def compute_profit_factor_threshold(
+    y_true: np.ndarray, y_pred_proba: np.ndarray, n_thresholds: int = 100
+) -> tuple[float, float, np.ndarray, np.ndarray]:
+    thresholds = np.linspace(0, 1, n_thresholds)
+    profit_factors = np.zeros(n_thresholds)
+
+    for i, t in enumerate(thresholds):
+        y_pred = (y_pred_proba >= t).astype(int)
+        tp = ((y_pred == 1) & (y_true == 1)).sum()
+        fp = ((y_pred == 1) & (y_true == 0)).sum()
+        avg_win = 1.0
+        avg_loss = 1.0
+        if tp > 0:
+            avg_win = float(
+                (y_true[y_pred == 1]).sum() / tp
+            )
+        if fp > 0:
+            avg_loss = float(
+                (1 - y_true[y_pred == 1]).sum() / fp
+            )
+        pf = (tp * avg_win) / (fp * avg_loss) if (fp * avg_loss) > 0 else 0.0
+        profit_factors[i] = pf
+
+    best_idx = int(np.argmax(profit_factors))
+    best_threshold = float(thresholds[best_idx])
+    best_pf = float(profit_factors[best_idx])
+    return best_threshold, best_pf, thresholds, profit_factors
+
+
+def multiclass_labels(
+    returns: pd.Series, thresholds: tuple[float, float] = (-0.01, 0.01)
+) -> pd.Series:
+    lower, upper = thresholds
+    return returns.apply(
+        lambda x: 0 if x < lower else (2 if x > upper else 1)
+    ).astype(int)
+
+
+def multiclass_classification_report(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    class_names: list[str] | None = None,
+) -> pd.DataFrame:
+    classes = sorted(set(y_true) | set(y_pred))
+    names = class_names or [str(c) for c in classes]
+    rows: list[dict[str, Any]] = []
+
+    for cls, name in zip(classes, names):
+        tp = int(((y_pred == cls) & (y_true == cls)).sum())
+        fp = int(((y_pred == cls) & (y_true != cls)).sum())
+        fn = int(((y_pred != cls) & (y_true == cls)).sum())
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall) > 0
+            else 0.0
+        )
+        rows.append(
+            {
+                "class": name,
+                "precision": round(precision, 3),
+                "recall": round(recall, 3),
+                "f1": round(f1, 3),
+                "support": tp + fn,
+            }
+        )
+
+    return pd.DataFrame(rows)
