@@ -114,3 +114,130 @@ def compute_position_size(
         "risk_pct": risk_per_trade_pct,
         "method": method,
     }
+
+
+def compute_vol_adjusted_size(
+    account_value: float,
+    risk_per_trade: float,
+    atr: float,
+    entry_price: float,
+    atr_multiplier: float = 2.0,
+) -> int:
+    if atr <= 0 or entry_price <= 0 or account_value <= 0 or risk_per_trade <= 0:
+        return 0
+    risk_amount = account_value * risk_per_trade
+    position_value = risk_amount / (atr * atr_multiplier)
+    shares = int(position_value / entry_price)
+    return max(shares, 0)
+
+
+def compute_liquidity_constrained_size(
+    position_size: int,
+    daily_volume: float,
+    max_volume_pct: float = 0.1,
+) -> int:
+    if daily_volume <= 0 or position_size <= 0:
+        return 0
+    max_by_volume = int(daily_volume * max_volume_pct)
+    return min(position_size, max_by_volume)
+
+
+def compute_anti_martingale_size(
+    base_size: float,
+    consecutive_wins: int,
+    multiplier: float = 1.5,
+    max_multiplier: float = 3.0,
+) -> float:
+    if base_size <= 0:
+        return 0.0
+    if consecutive_wins > 0:
+        factor = min(multiplier ** consecutive_wins, max_multiplier)
+    else:
+        factor = max(multiplier ** consecutive_wins, 1.0 / max_multiplier)
+    return base_size * factor
+
+
+def compute_sizing_ladder(
+    account_value: float,
+    prices: float | list[float] | np.ndarray,
+    risk_params: dict,
+) -> dict[str, float | int | str]:
+    if isinstance(prices, (list, np.ndarray)):
+        price = float(prices[-1]) if len(prices) > 0 else 0.0
+    else:
+        price = float(prices)
+
+    if price <= 0 or account_value <= 0:
+        return {"shares": 0, "amount": 0.0, "method": "ladder"}
+
+    candidates: list[int] = []
+
+    risk_pt = risk_params.get("risk_per_trade", 0.02)
+
+    # fixed_fractional
+    sl_pct = risk_params.get("stop_loss_pct")
+    ff = compute_position_size(account_value, price, risk_per_trade_pct=risk_pt * 100, stop_loss_pct=sl_pct)
+    candidates.append(ff["shares"])
+
+    # volatility_adjusted
+    atr = risk_params.get("atr")
+    if atr is not None and atr > 0:
+        va = compute_vol_adjusted_size(account_value, risk_pt, atr, price)
+        candidates.append(va)
+
+    # kelly
+    win_rate = risk_params.get("win_rate", 0.0)
+    payoff_ratio = risk_params.get("payoff_ratio")
+    if win_rate > 0 and payoff_ratio is not None and payoff_ratio > 0:
+        avg_win_pct = risk_params.get("avg_win_pct", payoff_ratio * 10.0)
+        avg_loss_pct = risk_params.get("avg_loss_pct", 10.0)
+        kelly_frac = kelly_fraction(win_rate, avg_win_pct, avg_loss_pct)
+        if kelly_frac > 0:
+            shares_kelly = int(account_value * kelly_frac / price)
+            candidates.append(shares_kelly)
+
+    # liquidity_constrained
+    daily_volume = risk_params.get("daily_volume")
+    max_vol_pct = risk_params.get("max_volume_pct", 0.1)
+    if daily_volume is not None and daily_volume > 0:
+        base = min(candidates) if candidates else 0
+        lc = compute_liquidity_constrained_size(int(base), daily_volume, max_vol_pct)
+        candidates.append(lc)
+
+    min_shares = min(candidates) if candidates else 0
+    amount = round(min_shares * price, 2)
+
+    return {
+        "shares": min_shares,
+        "amount": amount,
+        "method": "ladder",
+    }
+
+
+def compute_correlation_adjusted_size(
+    position_sizes: dict[str, float],
+    correlation_matrix: np.ndarray,
+    max_correlation: float = 0.7,
+) -> dict[str, float]:
+    tickers = list(position_sizes.keys())
+    n = len(tickers)
+    if n == 0 or correlation_matrix.shape != (n, n):
+        return dict(position_sizes)
+
+    adjusted = {}
+    for i, ticker in enumerate(tickers):
+        excess = 0.0
+        count = 0
+        for j in range(n):
+            if i != j:
+                corr = correlation_matrix[i, j]
+                if corr > max_correlation:
+                    excess += corr - max_correlation
+                    count += 1
+        if count > 0:
+            penalty = 1.0 / (1.0 + excess / count)
+        else:
+            penalty = 1.0
+        adjusted[ticker] = position_sizes[ticker] * penalty
+
+    return adjusted

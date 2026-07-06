@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
 import pandas as pd
+from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.spatial.distance import squareform
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -142,6 +145,73 @@ class CorrelationAnalyzer:
             return None
 
         return returns.corr(method="pearson")
+
+
+def spearman_correlation(df: pd.DataFrame, method: str = "spearman") -> pd.DataFrame:
+    return df.corr(method=method)
+
+
+def kendall_correlation(df: pd.DataFrame) -> pd.DataFrame:
+    return df.corr(method="kendall")
+
+
+def rolling_correlation(
+    df: pd.DataFrame, window: int = 60, method: str = "pearson"
+) -> dict[str, pd.Series]:
+    rolling_corr = df.rolling(window=window).corr(method=method)
+    pairs: dict[str, pd.Series] = {}
+    for i, col1 in enumerate(df.columns):
+        for col2 in df.columns[i + 1 :]:
+            pair_name = f"{col1}_{col2}"
+            pairs[pair_name] = rolling_corr.loc[(slice(None), col1), col2].dropna()
+    return pairs
+
+
+def ewma_correlation(df: pd.DataFrame, lam: float = 0.94) -> pd.DataFrame:
+    alpha = 1.0 - lam
+    return df.ewm(alpha=alpha).corr()
+
+
+def tail_dependence(
+    x: pd.Series,
+    y: pd.Series,
+    upper_tail: bool = False,
+    lower_tail: bool = False,
+) -> float:
+    n = len(x)
+    if n < 10:
+        return 0.0
+
+    rx = x.rank() / (n + 1)
+    ry = y.rank() / (n + 1)
+    k = max(int(np.sqrt(n)), int(n * 0.05))
+
+    if upper_tail:
+        u = 1.0 - k / n
+        joint = ((rx > u) & (ry > u)).sum()
+        margin = (rx > u).sum()
+        return joint / margin if margin > 0 else 0.0
+
+    if lower_tail:
+        u = k / n
+        joint = ((rx < u) & (ry < u)).sum()
+        margin = (rx < u).sum()
+        return joint / margin if margin > 0 else 0.0
+
+    return 0.0
+
+
+def hierarchical_clustering(
+    corr_matrix: pd.DataFrame, method: str = "single"
+) -> dict[str, Any]:
+    dist = 1.0 - corr_matrix.abs()
+    condensed = squareform(dist.values)
+    Z = linkage(condensed, method=method)
+    labels = fcluster(Z, t=0.5 * Z[:, 2].max(), criterion="distance")
+    return {
+        "linkage_matrix": Z,
+        "labels": pd.Series(labels, index=corr_matrix.index, name="cluster"),
+    }
 
 
 correlation = CorrelationAnalyzer()
