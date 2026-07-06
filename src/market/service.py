@@ -20,11 +20,17 @@ logger = structlog.get_logger(__name__)
 
 
 class MarketService:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        analysis_service: AnalysisService | None = None,
+        llm_router: LLMRouter | None = None,
+        notification_service: NotificationService | None = None,
+    ) -> None:
         self.db = db
-        self._analysis = AnalysisService()
-        self._llm = LLMRouter()
-        self._notifications = NotificationService(db=self.db)
+        self._analysis = analysis_service if analysis_service is not None else AnalysisService()
+        self._llm = llm_router if llm_router is not None else LLMRouter()
+        self._notifications = notification_service if notification_service is not None else NotificationService(db=self.db)
 
     async def list_instruments(self, type_filter: Optional[str] = None) -> list[dict[str, Any]]:
         q = select(Instrument)
