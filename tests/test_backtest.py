@@ -8,50 +8,52 @@ from src.analysis.backtest import (
     BacktestResult,
     MonteCarloResult,
     RegimeInfo,
-    _max_drawdown,
-    _returns,
-    _sharpe,
-    _sortino,
     apply_costs,
     detect_regime,
     run_monte_carlo,
+)
+from src.analysis.metrics import (
+    compute_max_drawdown,
+    compute_returns,
+    compute_sharpe,
+    compute_sortino,
 )
 
 
 class TestBacktestHelpers:
     def test_returns_empty(self):
-        assert len(_returns([])) == 0
+        assert len(compute_returns([])) == 0
 
     def test_returns_single(self):
-        assert len(_returns([100])) == 0
+        assert len(compute_returns([100])) == 0
 
     def test_returns_correct(self):
-        r = _returns([100, 110, 121])
+        r = compute_returns([100, 110, 121])
         np.testing.assert_almost_equal(r, [0.1, 0.1])
 
     def test_sharpe_zero_std(self):
-        assert _sharpe(np.array([0.01])) == 0.0
+        assert compute_sharpe(np.array([0.01])) == 0.0
 
     def test_sharpe_normal(self):
         rng = np.random.default_rng(42)
         r = rng.normal(0.001, 0.02, 252)
-        s = _sharpe(r)
+        s = compute_sharpe(r)
         assert s > 0
 
     def test_max_drawdown_zero(self):
-        assert _max_drawdown([100]) == 0.0
+        assert compute_max_drawdown([100]) == 0.0
 
     def test_max_drawdown_known(self):
-        dd = _max_drawdown([100, 110, 90, 80, 105])
+        dd = compute_max_drawdown([100, 110, 90, 80, 105])
         assert round(dd, 2) == -0.27
 
     def test_sortino_no_downside(self):
-        assert _sortino(np.array([0.01, 0.02])) == 0.0
+        assert compute_sortino(np.array([0.01, 0.02])) == 0.0
 
     def test_sortino_normal(self):
         rng = np.random.default_rng(99)
         r = rng.normal(0.001, 0.02, 252)
-        s = _sortino(r)
+        s = compute_sortino(r)
         assert isinstance(s, float)
 
 

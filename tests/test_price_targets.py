@@ -15,7 +15,7 @@ from src.analysis.ml.price_targets import (
     build_trade_plan,
     compute_entry_zone,
     compute_risk_reward,
-    compute_stop_loss,
+    compute_trade_stop_loss,
     compute_support_resistance,
     compute_take_profits,
     to_dict,
@@ -90,22 +90,22 @@ class TestSupportResistance:
 
 class TestStopLoss:
     def test_compute_stop_loss_conservative(self):
-        sl = compute_stop_loss(entry=200.0, atr=10.0, side="buy", profile="conservative")
+        sl = compute_trade_stop_loss(entry=200.0, atr=10.0, side="buy", profile="conservative")
         expected = round(200.0 - PROFILES["conservative"]["stop_atr"] * 10.0, 2)
         assert sl == expected
 
     def test_compute_stop_loss_aggressive(self):
-        sl = compute_stop_loss(entry=200.0, atr=10.0, side="buy", profile="aggressive")
+        sl = compute_trade_stop_loss(entry=200.0, atr=10.0, side="buy", profile="aggressive")
         expected = round(200.0 - PROFILES["aggressive"]["stop_atr"] * 10.0, 2)
         assert sl == expected
 
     def test_stop_loss_below_entry_for_buy(self):
         for profile in ("conservative", "balanced", "aggressive"):
-            sl = compute_stop_loss(entry=200.0, atr=10.0, side="buy", profile=profile)
+            sl = compute_trade_stop_loss(entry=200.0, atr=10.0, side="buy", profile=profile)
             assert sl < 200.0
 
     def test_stop_loss_above_entry_for_sell(self):
-        sl = compute_stop_loss(entry=200.0, atr=10.0, side="sell", profile="balanced")
+        sl = compute_trade_stop_loss(entry=200.0, atr=10.0, side="sell", profile="balanced")
         assert sl > 200.0
 
 
