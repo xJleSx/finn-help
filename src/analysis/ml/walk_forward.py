@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 logger = logging.getLogger(__name__)
 
@@ -241,3 +242,36 @@ def multiclass_classification_report(
         )
 
     return pd.DataFrame(rows)
+
+
+def deflated_sharpe_ratio(
+    observed_sr: float,
+    num_trials: int,
+    backtest_length: int,
+    skewness: float = 0.0,
+    kurtosis: float = 3.0,
+) -> float:
+    sr_std = np.sqrt(
+        (1 - skewness * observed_sr + (kurtosis - 1) / 4 * observed_sr**2)
+        / (backtest_length - 1)
+    )
+    euler_mascheroni = 0.5772156649
+    expected_max_sr = norm.ppf(1 - 1 / num_trials) * (
+        1 - euler_mascheroni
+    ) + euler_mascheroni * norm.ppf(1 - 1 / (num_trials * np.e))
+    dsr = float(norm.cdf((observed_sr - expected_max_sr) / sr_std))
+    return dsr
+
+
+def probability_of_backtest_overfitting(
+    path_srs: list[float],
+) -> float:
+    paths = np.array(path_srs)
+    if paths.ndim == 1:
+        return 0.5
+    n_paths, n_folds = paths.shape
+    rank = np.argsort(paths, axis=0).argsort(axis=0).astype(float)
+    rank = rank / (n_paths - 1)
+    logit = np.log(rank / (1 - rank + 1e-10))
+    rank_above_median = (rank > 0.5).mean()
+    return float(rank_above_median)
