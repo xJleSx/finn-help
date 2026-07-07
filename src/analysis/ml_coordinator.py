@@ -24,6 +24,58 @@ ml_error_count = Counter("ml_error_rate_total", "ML prediction errors", ["model_
 ml_model_version = Gauge("ml_model_version", "ML model version", ["ticker", "model_type", "version"])
 ml_model_load_time = Histogram("ml_model_load_time_seconds", "ML model load time", ["ticker", "model_type"])
 
+try:
+    import mlflow
+
+    _MLFLOW_AVAILABLE = True
+except ImportError:
+    _MLFLOW_AVAILABLE = False
+
+
+class MLflowTracker:
+    _active_run: Any = None
+
+    @classmethod
+    def start_run(cls, experiment_name: str = "finn-help", run_name: str | None = None) -> None:
+        if not _MLFLOW_AVAILABLE:
+            return
+        if cls._active_run is not None:
+            return
+        mlflow.set_experiment(experiment_name)
+        cls._active_run = mlflow.start_run(run_name=run_name)
+
+    @classmethod
+    def log_params(cls, params: dict[str, Any]) -> None:
+        if not _MLFLOW_AVAILABLE or cls._active_run is None:
+            return
+        mlflow.log_params(params)
+
+    @classmethod
+    def log_metrics(cls, metrics: dict[str, float], step: int | None = None) -> None:
+        if not _MLFLOW_AVAILABLE or cls._active_run is None:
+            return
+        mlflow.log_metrics(metrics, step=step)
+
+    @classmethod
+    def log_artifact(cls, local_path: str) -> None:
+        if not _MLFLOW_AVAILABLE or cls._active_run is None:
+            return
+        mlflow.log_artifact(local_path)
+
+    @classmethod
+    def end_run(cls) -> None:
+        if not _MLFLOW_AVAILABLE or cls._active_run is None:
+            return
+        mlflow.end_run()
+        cls._active_run = None
+
+    @classmethod
+    def log_model_params(cls, model_type: str, ticker: str, params: dict[str, Any], metrics: dict[str, float]) -> None:
+        cls.start_run(run_name=f"{ticker}_{model_type}")
+        cls.log_params({"ticker": ticker, "model_type": model_type, **params})
+        cls.log_metrics(metrics)
+        cls.end_run()
+
 
 def _train_news_impact_sync(sym: str) -> bool:
     """Sync helper for training NewsImpactModel inside run_in_executor."""
@@ -94,6 +146,11 @@ class MLCoordinator:
             with ml_inference_latency.labels(model_type="ensemble", ticker=ticker or "unknown").time():
                 ensemble_res = await loop.run_in_executor(get_executor(), ensemble.predict, ind_df, anomaly_mask)
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="success").inc()
+
+            MLflowTracker.log_metrics(
+                {"prophet_confidence": pr.get("confidence", 0), "ensemble_confidence": ensemble_res.get("confidence", 0)},
+            )
+
             ml = pr
             ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble_res.get("confidence", 0))
             ml["xgb_action"] = ensemble_res.get("xgb_action", "NEUTRAL")
@@ -171,6 +228,11 @@ class MLCoordinator:
             ensemble_res = ensemble.predict(ind_df, anomaly_mask=anomaly_mask)
             ml_inference_latency.labels(model_type="ensemble", ticker=ticker or "unknown").observe(time.monotonic() - t0)
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="success").inc()
+
+            MLflowTracker.log_metrics(
+                {"prophet_confidence": pr.get("confidence", 0), "ensemble_confidence": ensemble_res.get("confidence", 0)},
+            )
+
             ml = pr
             ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble_res.get("confidence", 0))
             ml["xgb_action"] = ensemble_res.get("xgb_action", "NEUTRAL")
@@ -246,6 +308,18 @@ class MLCoordinator:
             news_ok = await loop.run_in_executor(get_executor(), _train_news_impact_sync, sym)
 
             all_results[sym] = all(ensemble_ok.values()) and prophet_ok
+
+            MLflowTracker.log_model_params(
+                "ensemble", sym,
+                {"n_estimators": 100, "max_depth": 6},
+                {"accuracy": float(ensemble_ok.get("accuracy", 0)) if isinstance(ensemble_ok, dict) else 0.0},
+            )
+            MLflowTracker.log_model_params(
+                "prophet", sym,
+                {"seasonality_mode": "multiplicative"},
+                {"rmse": 0.0},
+            )
+
             logger.info(
                 "Model training for %s: ensemble=%s prophet=%s news=%s",
                 sym,
