@@ -375,12 +375,17 @@ class LLMRouter:
         return "\n".join(lines)
 
     def _fallback_text(self, signal: dict[str, object]) -> str:
+        ticker = signal.get("ticker", "N/A")
         action = signal.get("action", "HOLD")
         confidence = signal.get("confidence", 0)
+        max_pct = signal.get("max_portfolio_pct")
         reasons = signal.get("reasons", [])
+        parts = [f"Тикер: {ticker}", f"Рекомендация: {action} (уверенность {confidence:.0%})"]
+        if max_pct:
+            parts.append(f"Макс. доля портфеля: {max_pct}%")
         if isinstance(reasons, list) and reasons:
-            return f"Рекомендация: {action} (уверенность {confidence:.0%}).\nОбоснование: {'; '.join(str(r) for r in reasons[:5])}."
-        return f"Рекомендация: {action} (уверенность {confidence:.0%})."
+            parts.append(f"Обоснование: {'; '.join(str(r) for r in reasons[:5])}")
+        return ".\n".join(parts) + "."
 
     def _fallback_report(self, signal: dict[str, object]) -> str:
         ticker = signal.get("ticker", "N/A")

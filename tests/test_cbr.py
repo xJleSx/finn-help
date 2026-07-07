@@ -21,15 +21,9 @@ class TestCBRCollector:
   </Valute>
 </ValCurs>"""
 
-        mock_response = MagicMock()
-        mock_response.content = xml_data.encode("utf-8")
-        inner_client = AsyncMock()
-        inner_client.get.return_value = mock_response
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = inner_client
-
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            collector = CBRCollector()
+        collector = CBRCollector()
+        with patch.object(collector, "_fetch_text") as mock_fetch:
+            mock_fetch.return_value = xml_data
             rates = await collector.get_rates("01/01/2024")
             assert len(rates) == 1
             assert rates[0]["code"] == "USD"
@@ -46,14 +40,8 @@ class TestCBRCollector:
   </Valute>
 </ValCurs>"""
 
-        mock_response = MagicMock()
-        mock_response.content = xml_data.encode("utf-8")
-        inner_client = AsyncMock()
-        inner_client.get.return_value = mock_response
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = inner_client
-
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            collector = CBRCollector()
+        collector = CBRCollector()
+        with patch.object(collector, "_fetch_text") as mock_fetch:
+            mock_fetch.return_value = xml_data
             rates = await collector.get_rates("01/01/2024")
             assert rates == []

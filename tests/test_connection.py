@@ -51,14 +51,10 @@ class TestGetAsyncSession:
             from src.db.connection import get_async_session
 
             gen = get_async_session()
-            session = await gen.__anext__()
+            session = await gen.__aenter__()
             assert session is mock_session
 
-            try:
-                await gen.__anext__()
-            except StopAsyncIteration:
-                pass
-
+            await gen.__aexit__(None, None, None)
             mock_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -70,10 +66,8 @@ class TestGetAsyncSession:
             from src.db.connection import get_async_session
 
             gen = get_async_session()
-            session = await gen.__anext__()
+            session = await gen.__aenter__()
             assert session is mock_session
 
-            with pytest.raises(RuntimeError):
-                await gen.athrow(RuntimeError("test error"))
-
+            await gen.__aexit__(RuntimeError, RuntimeError("test error"), None)
             mock_session.rollback.assert_awaited_once()

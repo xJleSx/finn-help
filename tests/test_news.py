@@ -36,12 +36,14 @@ class TestNewsCollector:
         class FakeFeed:
             entries = [entry]
 
-        with patch("feedparser.parse", return_value=FakeFeed()):
-            with patch("src.collectors.news.analyze_sentiment", return_value={"score": 0.0, "weighted_score": 0.0}):
-                items = collector._fetch_feed("http://feed.url", "TestSource", 5)
-                assert len(items) == 1
-                assert items[0]["title"] == "Test Title"
-                assert items[0]["source_name"] == "TestSource"
+        with patch.object(collector, "_fetch_text") as mock_fetch_text:
+            mock_fetch_text.return_value = "<rss><channel><item><title>Test</title></item></channel></rss>"
+            with patch("feedparser.parse", return_value=FakeFeed()):
+                with patch("src.collectors.news.analyze_sentiment", return_value={"score": 0.0, "weighted_score": 0.0}):
+                    items = await collector._fetch_feed("http://feed.url", "TestSource", 5)
+                    assert len(items) == 1
+                    assert items[0]["title"] == "Test Title"
+                    assert items[0]["source_name"] == "TestSource"
 
     @pytest.mark.asyncio
     async def test_fetch_feed_with_description(self):
@@ -60,11 +62,13 @@ class TestNewsCollector:
         class FakeFeed:
             entries = [entry]
 
-        with patch("feedparser.parse", return_value=FakeFeed()):
-            with patch("src.collectors.news.analyze_sentiment", return_value={"score": 0.0, "weighted_score": 0.0}):
-                items = collector._fetch_feed("http://feed.url", "TestSource", 5)
-                assert len(items) == 1
-                assert items[0]["source_name"] == "TestSource"
+        with patch.object(collector, "_fetch_text") as mock_fetch_text:
+            mock_fetch_text.return_value = "<rss><channel><item><title>No</title></item></channel></rss>"
+            with patch("feedparser.parse", return_value=FakeFeed()):
+                with patch("src.collectors.news.analyze_sentiment", return_value={"score": 0.0, "weighted_score": 0.0}):
+                    items = await collector._fetch_feed("http://feed.url", "TestSource", 5)
+                    assert len(items) == 1
+                    assert items[0]["source_name"] == "TestSource"
 
     @pytest.mark.asyncio
     async def test_fetch_all_exception_from_feed(self):
@@ -104,8 +108,10 @@ class TestNewsCollector:
         class FakeFeed:
             entries = [entry]
 
-        with patch("feedparser.parse", return_value=FakeFeed()):
-            with patch("src.collectors.news.analyze_sentiment", return_value={"score": 0.0, "weighted_score": 0.0}):
-                items = collector._fetch_feed("http://feed.url", "TestSource", 5)
-                assert len(items) == 1
-                assert items[0]["published_at"] is not None
+        with patch.object(collector, "_fetch_text") as mock_fetch_text:
+            mock_fetch_text.return_value = "<rss><channel><item><title>Dated</title></item></channel></rss>"
+            with patch("feedparser.parse", return_value=FakeFeed()):
+                with patch("src.collectors.news.analyze_sentiment", return_value={"score": 0.0, "weighted_score": 0.0}):
+                    items = await collector._fetch_feed("http://feed.url", "TestSource", 5)
+                    assert len(items) == 1
+                    assert items[0]["published_at"] is not None

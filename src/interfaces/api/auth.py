@@ -87,7 +87,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def get_read_db() -> AsyncGenerator[AsyncSession, None]:
     from src.db.connection import get_read_replica_session
 
-    async for session in get_read_replica_session():
+    async with get_read_replica_session() as session:
         yield session
 
 

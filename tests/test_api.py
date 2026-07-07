@@ -33,8 +33,34 @@ def mock_db():
 
 @pytest.fixture
 def mock_client(mock_db):
+    from unittest.mock import MagicMock
+
+    from src.core.container import container
+
+    container._instances["analysis_service"] = MagicMock()
+    container._instances["sector_analyzer"] = MagicMock()
+    container._instances["ml_coordinator"] = MagicMock()
+    container._instances["event_features"] = MagicMock()
+    container._instances["data_loader"] = MagicMock()
+    container._instances["ticker_context_builder"] = MagicMock()
+    container._instances["correlation_analyzer"] = MagicMock()
+    container._instances["rebalancing_engine"] = MagicMock()
+    container._instances["profile_manager"] = MagicMock()
+    container._instances["social_registry"] = MagicMock()
+    container._instances["social_aggregator"] = MagicMock()
+    container._instances["social_analyzer"] = MagicMock()
+    container._instances["position_tracker"] = MagicMock()
+    container._instances["scheduler_divergence"] = MagicMock()
+    container._instances["scheduler_geo_risk"] = MagicMock()
+    container._instances["scheduler_fusion"] = MagicMock()
+    container._instances["nlq_engine"] = MagicMock()
+    container._instances["groq_retry_handler"] = MagicMock()
+    container._instances["portfolio_allocator"] = MagicMock()
+    container._instances["llm_router"] = MagicMock()
+    container._instances["notification_service"] = MagicMock()
+
     from src.db.models import User
-    from src.interfaces.api.auth import get_current_user, get_db, require_user
+    from src.interfaces.api.auth import get_current_user, get_db, get_read_db, require_user
     from src.interfaces.api.server import app
 
     def override_get_db():
@@ -49,6 +75,7 @@ def mock_client(mock_db):
         return None
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_read_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_anon
     app.dependency_overrides[require_user] = override_user
 

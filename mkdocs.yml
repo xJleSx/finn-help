@@ -1,0 +1,26 @@
+site_name: FinAdvisor
+site_description: AI financial advisor for MOEX markets
+site_url: https://example.com/finn-help
+repo_url: https://github.com/xJleSx/finn-help
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+
+nav:
+  - Home: README.md
+  - Architecture: docs/ARCHITECTURE.md
+  - ADR:
+    - Package Decomposition: docs/adr/ADR-001-package-decomposition.md
+    - Deduplication: docs/adr/ADR-002-deduplication-metrics.md
+    - Dependency Injection: docs/adr/ADR-003-dependency-injection.md
+    - Collector Unification: docs/adr/ADR-004-collector-unification.md
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - toc:
+      permalink: true

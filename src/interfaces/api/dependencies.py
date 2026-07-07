@@ -4,11 +4,13 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.auth_service import AuthService
-from src.core.container import container
+from src.core.container import container, wire
 from src.interfaces.api.auth import get_db, get_read_db
 from src.market.service import MarketService
 from src.notifications.service import NotificationService
 from src.portfolio.service import PortfolioService
+
+wire()
 
 
 def get_auth_service(db: AsyncSession = Depends(get_db)) -> AuthService:

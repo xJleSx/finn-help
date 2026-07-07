@@ -56,6 +56,10 @@ HTTP_LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
+    from src.core.container import wire
+    wire()
+    from src.core.tracing import setup_tracing
+    setup_tracing("finn-help")
     from src.db.connection import close_db, init_db
 
     try:
