@@ -19,14 +19,10 @@ class TestSmartLabProfileCollector:
 
     def test_fetch_profile_http_error(self):
         collector = SmartLabProfileCollector()
-        with patch.object(collector, "_get_client") as mock_get:
-            client = MagicMock()
-            resp = MagicMock()
-            resp.raise_for_status.side_effect = Exception("HTTP error")
-            client.get.return_value = resp
-            mock_get.return_value = client
+        with patch.object(collector, "_fetch_text") as mock_fetch:
+            mock_fetch.side_effect = Exception("HTTP error")
             result = collector.fetch_profile("SBER")
-        assert result == {}  # graceful empty on error
+        assert result == {}
 
     def test_fetch_profile_success(self):
         collector = SmartLabProfileCollector()
@@ -44,13 +40,8 @@ class TestSmartLabProfileCollector:
         </body>
         </html>
         """
-        with patch.object(collector, "_get_client") as mock_get:
-            client = MagicMock()
-            resp = MagicMock()
-            resp.text = html
-            resp.raise_for_status.return_value = None
-            client.get.return_value = resp
-            mock_get.return_value = client
+        with patch.object(collector, "_fetch_text") as mock_fetch:
+            mock_fetch.return_value = html
             result = collector.fetch_profile("SBER")
 
         assert result["description"] == "Сбер — крупнейший банк России."

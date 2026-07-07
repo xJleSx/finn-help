@@ -5,6 +5,7 @@ Sources:
   - MOEX ISS for corporate events (dividends, buybacks, splits)
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -28,23 +29,17 @@ class SmartLabProfileCollector(BaseCollector):
     def __init__(self) -> None:
         super().__init__()
 
-    async def fetch_profile(self, ticker: str) -> dict[str, Any]:
-        """Fetch company profile: description, website, employees, founded_year."""
+    async def _fetch_profile_async(self, ticker: str) -> dict[str, Any]:
         url = f"{SMARTLAB_BASE}/{ticker}/"
         profile: dict[str, Any] = {}
-
         try:
             html = await self._fetch_text(url, headers={"User-Agent": "Mozilla/5.0"})
             soup = BeautifulSoup(html, "html.parser")
-
-            # Description — first paragraph after "О компании"
             desc_section = soup.find("h2", string=re.compile(r"О компании|Описание", re.IGNORECASE))
             if desc_section:
                 desc_p = desc_section.find_next("p")
                 if desc_p:
                     profile["description"] = desc_p.get_text(strip=True)
-
-            # Sidebar info table
             info_table = soup.find("table", class_="simple")
             if info_table:
                 for row in info_table.find_all("tr"):
@@ -53,7 +48,6 @@ class SmartLabProfileCollector(BaseCollector):
                         continue
                     label = cols[0].get_text(strip=True).lower()
                     value = cols[1].get_text(strip=True)
-
                     if "сайт" in label or "website" in label:
                         profile["website"] = value
                     elif "сотрудник" in label or "employees" in label:
@@ -70,13 +64,14 @@ class SmartLabProfileCollector(BaseCollector):
                         profile["state_reg_number"] = value
                     elif "инн" in label:
                         profile["tax_id"] = value
-
         except httpx.HTTPError as e:
             logger.warning("SmartLab profile fetch failed for %s: %s", ticker, e)
         except Exception as e:
             logger.error("Unexpected error fetching profile for %s: %s", ticker, e)
-
         return profile
+
+    def fetch_profile(self, ticker: str) -> dict[str, Any]:
+        return asyncio.run(self._fetch_profile_async(ticker))
 
     @staticmethod
     def _parse_int(value: str) -> Optional[int]:
