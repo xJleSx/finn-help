@@ -13,6 +13,7 @@ from typing import Any, Optional
 import httpx
 from bs4 import BeautifulSoup
 
+from src.collectors.base import BaseCollector
 from src.config import settings
 from src.db.models import Instrument
 
@@ -21,27 +22,20 @@ logger = logging.getLogger(__name__)
 SMARTLAB_BASE = "https://smart-lab.ru/q"
 
 
-class SmartLabProfileCollector:
+class SmartLabProfileCollector(BaseCollector):
     """Fetches company profile info from smart-lab.ru."""
 
     def __init__(self) -> None:
-        self._client: Optional[httpx.Client] = None
+        super().__init__()
 
-    def _get_client(self) -> httpx.Client:
-        if self._client is None:
-            self._client = httpx.Client(timeout=30.0, follow_redirects=True)
-        return self._client
-
-    def fetch_profile(self, ticker: str) -> dict[str, Any]:
+    async def fetch_profile(self, ticker: str) -> dict[str, Any]:
         """Fetch company profile: description, website, employees, founded_year."""
         url = f"{SMARTLAB_BASE}/{ticker}/"
         profile: dict[str, Any] = {}
 
         try:
-            client = self._get_client()
-            resp = client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "html.parser")
+            html = await self._fetch_text(url, headers={"User-Agent": "Mozilla/5.0"})
+            soup = BeautifulSoup(html, "html.parser")
 
             # Description — first paragraph after "О компании"
             desc_section = soup.find("h2", string=re.compile(r"О компании|Описание", re.IGNORECASE))
@@ -84,11 +78,6 @@ class SmartLabProfileCollector:
 
         return profile
 
-    def close(self) -> None:
-        if self._client:
-            self._client.close()
-            self._client = None
-
     @staticmethod
     def _parse_int(value: str) -> Optional[int]:
         cleaned = re.sub(r"[^\d]", "", value)
@@ -98,32 +87,24 @@ class SmartLabProfileCollector:
             return None
 
 
-class MOEXCorporateEventCollector:
+class MOEXCorporateEventCollector(BaseCollector):
     """Fetches corporate events from MOEX ISS API."""
 
     BASE = settings.moex_iss_url
 
     def __init__(self) -> None:
-        self._client: Optional[httpx.AsyncClient] = None
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=30.0)
-        return self._client
+        super().__init__()
 
     async def fetch_corporate_events(self, ticker: str) -> list[dict[str, Any]]:
         """Fetch corporate events for a ticker.
 
         MOEX endpoint: /securities/{ticker}/events.json
         """
-        client = await self._get_client()
         try:
-            resp = await client.get(
+            data = await self._fetch_json(
                 f"{self.BASE}/securities/{ticker}/events.json",
                 params={"iss.meta": "off"},
             )
-            resp.raise_for_status()
-            data = resp.json()
 
             events_table = (data or {}).get("events", {}).get("data", [])
             columns = (data or {}).get("events", {}).get("columns", [])
@@ -172,11 +153,6 @@ class MOEXCorporateEventCollector:
         event["description"] = raw.get("description") or raw.get("name", "")
         event["extra"] = raw
         return event
-
-    async def close(self) -> None:
-        if self._client:
-            await self._client.aclose()
-            self._client = None
 
 
 # ── DB helpers ───────────────────────────────────────────────────────────────

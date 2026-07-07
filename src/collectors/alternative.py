@@ -4,10 +4,12 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from datetime import date
-from typing import Any
+from typing import Any, Self
 from xml.etree import ElementTree
 
 import httpx
+
+from src.collectors.base import BaseCollector
 
 from src.config import settings
 from src.core.executor import get_executor
@@ -226,8 +228,9 @@ class GoogleTrendsSource(AltDataSource):
         return {"trends": results}
 
 
-class AlternativeDataCollector:
+class AlternativeDataCollector(BaseCollector):
     def __init__(self, sources: list[AltDataSource] | None = None) -> None:
+        super().__init__()
         self.sources = sources or [
             CBRSource(),
             RosstatSource(),
@@ -281,3 +284,10 @@ class AlternativeDataCollector:
         for source in self.sources:
             if hasattr(source, "close"):
                 await source.close()  # type: ignore[misc]
+        await super().close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self.close()

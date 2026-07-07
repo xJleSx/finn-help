@@ -7,6 +7,8 @@ import re
 from datetime import timezone
 from typing import Any
 
+from src.collectors.base import BaseCollector
+
 logger = logging.getLogger(__name__)
 
 MOEX_TICKERS: set[str] = {
@@ -116,8 +118,9 @@ NEGATIVE_WORDS: set[str] = {
 }
 
 
-class SocialMediaCollector:
+class SocialMediaCollector(BaseCollector):
     def __init__(self, api_id: str, api_hash: str, session_name: str = "telegram_social") -> None:
+        super().__init__()
         self.api_id = api_id
         self.api_hash = api_hash
         self.session_name = session_name

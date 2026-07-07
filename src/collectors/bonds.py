@@ -2,15 +2,17 @@ import logging
 from datetime import date
 from typing import Any, Optional, Self
 
+from src.collectors.base import BaseCollector
 from src.collectors.moex import MOEXCollector
 
 logger = logging.getLogger(__name__)
 
 
-class BondOfferingCollector:
+class BondOfferingCollector(BaseCollector):
     """Collects bond offering details from MOEX ISS."""
 
     def __init__(self) -> None:
+        super().__init__()
         self._moex: Optional[MOEXCollector] = None
 
     async def _get_moex(self) -> MOEXCollector:

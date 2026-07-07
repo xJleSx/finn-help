@@ -5,8 +5,8 @@ from typing import Any
 
 import feedparser  # type: ignore[import-untyped]
 
+from src.collectors.base import BaseCollector
 from src.collectors.sentiment import analyze_sentiment
-from src.core.executor import get_executor
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +20,9 @@ RSS_FEEDS = [
 ]
 
 
-class NewsCollector:
+class NewsCollector(BaseCollector):
     def __init__(self) -> None:
+        super().__init__()
         self.feeds = RSS_FEEDS
 
     @staticmethod
@@ -45,7 +46,7 @@ class NewsCollector:
         saved = 0
         for feed in collector.feeds:
             try:
-                articles = collector._fetch_feed(feed["url"], feed["name"], NEWS_MAX_PER_FEED)
+                articles = asyncio.run(collector._fetch_feed(feed["url"], feed["name"], NEWS_MAX_PER_FEED))
             except Exception as exc:
                 logger.warning("News feed error %s: %s", feed["name"], exc)
                 continue
@@ -104,11 +105,11 @@ class NewsCollector:
         return all_news
 
     async def _fetch_feed_async(self, url: str, source: str, max_items: int) -> list[dict[str, Any]]:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(get_executor(), self._fetch_feed, url, source, max_items)
+        return await self._fetch_feed(url, source, max_items)
 
-    def _fetch_feed(self, url: str, source: str, max_items: int) -> list[dict[str, Any]]:
-        parsed = feedparser.parse(url)
+    async def _fetch_feed(self, url: str, source: str, max_items: int) -> list[dict[str, Any]]:
+        raw_xml = await self._fetch_text(url)
+        parsed = feedparser.parse(raw_xml)
         items = []
         for entry in parsed.entries[:max_items]:
             published = None

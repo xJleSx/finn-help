@@ -2,8 +2,9 @@ import logging
 import re
 from typing import Any, Optional, Self
 
-import httpx
 from bs4 import BeautifulSoup  # type: ignore[import-not-found]
+
+from src.collectors.base import BaseCollector
 
 logger = logging.getLogger(__name__)
 
@@ -68,31 +69,24 @@ def _parse_value(text: str, unit: str = "") -> Optional[float]:
         return None
 
 
-class FinancialReportCollector:
+class FinancialReportCollector(BaseCollector):
     """Collects IFRS financial report data from SmartLab."""
 
     def __init__(self) -> None:
-        self._client: Optional[httpx.AsyncClient] = None
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
-        return self._client
+        super().__init__()
 
     async def fetch(self, ticker: str) -> dict[str, Any]:
         """Fetch latest IFRS financial data for a given ticker.
 
         Returns dict with period info and mapped fields, or empty dict on failure.
         """
-        client = await self._get_client()
         url = SMARTLAB_URL.format(ticker=ticker.upper())
         try:
-            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            resp.raise_for_status()
-        except httpx.HTTPError as e:
+            html = await self._fetch_text(url, headers={"User-Agent": "Mozilla/5.0"})
+        except Exception as e:
             logger.warning("SmartLab fetch failed for %s: %s", ticker, e)
             return {}
-        return self._parse(resp.text)
+        return self._parse(html)
 
     def _parse(self, html: str) -> dict[str, Any]:
         soup = BeautifulSoup(html, "lxml")

@@ -2,27 +2,24 @@ import logging
 from datetime import date
 from typing import Any, Optional
 
-import httpx
-
+from src.collectors.base import BaseCollector
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-class CBRCollector:
+class CBRCollector(BaseCollector):
     BASE = settings.cbr_url
 
     async def get_rates(self, date_req: Optional[str] = None) -> list[dict[str, Any]]:
         if date_req is None:
             date_req = date.today().strftime("%d/%m/%Y")
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(self.BASE, params={"date_req": date_req})
-            resp.raise_for_status()
+        text = await self._fetch_text(self.BASE, params={"date_req": date_req})
 
         import xml.etree.ElementTree as ET
 
-        root = ET.fromstring(resp.content)
+        root = ET.fromstring(text)
         rates = []
         for valute in root.findall("Valute"):
             try:

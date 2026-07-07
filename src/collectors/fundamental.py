@@ -2,12 +2,13 @@ import logging
 from decimal import Decimal
 from typing import Any, Optional, Self
 
+from src.collectors.base import BaseCollector
 from src.collectors.moex import MOEXCollector
 
 logger = logging.getLogger(__name__)
 
 
-class FundamentalDataCollector:
+class FundamentalDataCollector(BaseCollector):
     """Сбор фундаментальных данных о компаниях.
 
     Текущий источник: MOEX ISS (shares outstanding, market cap via price × shares).
@@ -16,6 +17,7 @@ class FundamentalDataCollector:
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self._moex: Optional[MOEXCollector] = None
 
     async def _get_moex(self) -> MOEXCollector:

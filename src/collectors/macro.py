@@ -2,7 +2,7 @@ import logging
 from datetime import date
 from typing import Any, cast
 
-import httpx
+from src.collectors.base import BaseCollector
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ MACRO_TYPES = (
 )
 
 
-class MacroCollector:
+class MacroCollector(BaseCollector):
     async def fetch_all(self) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         for method in (
@@ -38,84 +38,77 @@ class MacroCollector:
         return results
 
     async def _fetch_brent(self) -> dict[str, Any] | None:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities.json",
-                params={
-                    "securities.columns": "SECID,LASTTRADEDATE,PREVOPENPOSITION,ASSETCODE",
-                    "iss.only": "securities",
-                    "limit": "100",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            rows = (data.get("securities") or {}).get("data", [])
-            cols = (data.get("securities") or {}).get("columns", [])
+        data = await self._fetch_json(
+            "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities.json",
+            params={
+                "securities.columns": "SECID,LASTTRADEDATE,PREVOPENPOSITION,ASSETCODE",
+                "iss.only": "securities",
+                "limit": "100",
+            },
+        )
+        rows = (data.get("securities") or {}).get("data", [])
+        cols = (data.get("securities") or {}).get("columns", [])
 
-            contracts = []
-            for row in rows:
-                try:
-                    asset_idx = cols.index("ASSETCODE")
-                    secid_idx = cols.index("SECID")
-                    ltd_idx = cols.index("LASTTRADEDATE")
-                    oi_idx = cols.index("PREVOPENPOSITION")
-                    if row[asset_idx] == "BR":
-                        contracts.append(
-                            {
-                                "secid": row[secid_idx],
-                                "last_trade": date.fromisoformat(row[ltd_idx]) if row[ltd_idx] else None,
-                                "oi": int(row[oi_idx]) if row[oi_idx] else 0,
-                            }
-                        )
-                except (ValueError, IndexError, TypeError):
-                    continue
-
-            if not contracts:
-                return None
-
-            today = date.today()
-            active = [c for c in contracts if c["last_trade"] and c["last_trade"] >= today]
-            if not active:
-                active = contracts
-            front = max(active, key=lambda c: c["oi"])
-
-            resp2 = await client.get(
-                f"https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities/{front['secid']}.json",
-                params={
-                    "iss.only": "marketdata",
-                    "marketdata.columns": "SECID,LAST",
-                },
-            )
-            resp2.raise_for_status()
-            data2 = resp2.json()
-            md_rows = (data2.get("marketdata") or {}).get("data", [])
-            md_cols = (data2.get("marketdata") or {}).get("columns", [])
-
-            for row in md_rows:
-                try:
-                    last_idx = md_cols.index("LAST")
-                    val = row[last_idx]
-                    if val is not None:
-                        return {
-                            "date": today,
-                            "indicator_type": "brent",
-                            "value": float(val),
-                            "source": f"MOEX/{front['secid']}",
+        contracts = []
+        for row in rows:
+            try:
+                asset_idx = cols.index("ASSETCODE")
+                secid_idx = cols.index("SECID")
+                ltd_idx = cols.index("LASTTRADEDATE")
+                oi_idx = cols.index("PREVOPENPOSITION")
+                if row[asset_idx] == "BR":
+                    contracts.append(
+                        {
+                            "secid": row[secid_idx],
+                            "last_trade": date.fromisoformat(row[ltd_idx]) if row[ltd_idx] else None,
+                            "oi": int(row[oi_idx]) if row[oi_idx] else 0,
                         }
-                except (ValueError, IndexError, TypeError):
-                    continue
+                    )
+            except (ValueError, IndexError, TypeError):
+                continue
+
+        if not contracts:
+            return None
+
+        today = date.today()
+        active = [c for c in contracts if c["last_trade"] and c["last_trade"] >= today]
+        if not active:
+            active = contracts
+        front = max(active, key=lambda c: c["oi"])
+
+        data2 = await self._fetch_json(
+            f"https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities/{front['secid']}.json",
+            params={
+                "iss.only": "marketdata",
+                "marketdata.columns": "SECID,LAST",
+            },
+        )
+        md_rows = (data2.get("marketdata") or {}).get("data", [])
+        md_cols = (data2.get("marketdata") or {}).get("columns", [])
+
+        for row in md_rows:
+            try:
+                last_idx = md_cols.index("LAST")
+                val = row[last_idx]
+                if val is not None:
+                    return {
+                        "date": today,
+                        "indicator_type": "brent",
+                        "value": float(val),
+                        "source": f"MOEX/{front['secid']}",
+                    }
+            except (ValueError, IndexError, TypeError):
+                continue
         return None
 
     async def _fetch_key_rate(self) -> dict[str, Any] | None:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://www.cbr.ru/hd_base/KeyRate",
-                params={"UniDbQuery.Formatted": "True", "UniDbQuery.Date": date.today().strftime("%d.%m.%Y")},
-            )
-            resp.raise_for_status()
+        text = await self._fetch_text(
+            "https://www.cbr.ru/hd_base/KeyRate",
+            params={"UniDbQuery.Formatted": "True", "UniDbQuery.Date": date.today().strftime("%d.%m.%Y")},
+        )
         from lxml import html
 
-        tree = html.fromstring(resp.text)
+        tree = html.fromstring(text)
         rows = cast(list[Any], tree.xpath("//table[@class='data']//tr"))
         for row in rows[1:]:
             cells = cast(list[Any], row.xpath(".//td"))
@@ -148,42 +141,37 @@ class MacroCollector:
         return None
 
     async def _fetch_imoex(self) -> dict[str, Any] | None:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://iss.moex.com/iss/engines/stock/markets/index/securities/IMOEX.json",
-                params={"iss.only": "marketdata"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            rows = (data.get("marketdata") or {}).get("data", [])
-            cols = (data.get("marketdata") or {}).get("columns", [])
-            if not rows or not cols:
-                return None
-            for row in rows:
-                try:
-                    idx = cols.index("LAST")
-                    val = row[idx]
-                    if val is not None:
-                        return {
-                            "date": date.today(),
-                            "indicator_type": "imoex",
-                            "value": float(val),
-                            "source": "MOEX",
-                        }
-                except (ValueError, IndexError, TypeError):
-                    continue
+        data = await self._fetch_json(
+            "https://iss.moex.com/iss/engines/stock/markets/index/securities/IMOEX.json",
+            params={"iss.only": "marketdata"},
+        )
+        rows = (data.get("marketdata") or {}).get("data", [])
+        cols = (data.get("marketdata") or {}).get("columns", [])
+        if not rows or not cols:
+            return None
+        for row in rows:
+            try:
+                idx = cols.index("LAST")
+                val = row[idx]
+                if val is not None:
+                    return {
+                        "date": date.today(),
+                        "indicator_type": "imoex",
+                        "value": float(val),
+                        "source": "MOEX",
+                    }
+            except (ValueError, IndexError, TypeError):
+                continue
         return None
 
     async def _fetch_cpi(self) -> dict[str, Any] | None:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://www.cbr.ru/hd_base/infl",
-                params={"UniDbQuery.Formatted": "True", "UniDbQuery.Date": date.today().strftime("%d.%m.%Y")},
-            )
-            resp.raise_for_status()
+        text = await self._fetch_text(
+            "https://www.cbr.ru/hd_base/infl",
+            params={"UniDbQuery.Formatted": "True", "UniDbQuery.Date": date.today().strftime("%d.%m.%Y")},
+        )
         from lxml import html
 
-        tree = html.fromstring(resp.text)
+        tree = html.fromstring(text)
         rows = cast(list[Any], tree.xpath("//table[@class='data']//tr"))
         for row in rows[1:]:
             cells = cast(list[Any], row.xpath(".//td"))
@@ -201,12 +189,10 @@ class MacroCollector:
         return None
 
     async def _fetch_ofz_yield(self) -> dict[str, Any] | None:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get("https://www.cbr.ru/hd_base/zcyc_params")
-            resp.raise_for_status()
+        text = await self._fetch_text("https://www.cbr.ru/hd_base/zcyc_params")
         from lxml import html
 
-        tree = html.fromstring(resp.text)
+        tree = html.fromstring(text)
         rows = cast(list[Any], tree.xpath("//table[contains(@class, 'data')]//tr"))
         for row in rows[1:]:
             cells = cast(list[Any], row.xpath(".//td"))

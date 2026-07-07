@@ -35,7 +35,7 @@ class BaseCollector(ABC):
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self.TIMEOUT)
+            self._client = httpx.AsyncClient(timeout=self.TIMEOUT, follow_redirects=True)
         return self._client
 
     async def _fetch_json(self, url: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -52,6 +52,78 @@ class BaseCollector(ABC):
             stop=stop_after_attempt(self.MAX_RETRIES),
             wait=wait_exponential(multiplier=self.RETRY_DELAY, max=30.0),
             retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError, ValueError)),
+            before=before_log(logger, logging.DEBUG),
+            reraise=True,
+        ):
+            with attempt:
+                try:
+                    return await self._circuit_breaker.call(_do_fetch)
+                except CircuitBreakerOpenError:
+                    if attempt.retry_state.attempt_number < self.MAX_RETRIES:
+                        delay = self.RETRY_DELAY * (2 ** (attempt.retry_state.attempt_number - 1))
+                        logger.warning(
+                            "circuit_breaker.open.%s attempt %d/%d, retrying in %.1fs",
+                            self.__class__.__name__,
+                            attempt.retry_state.attempt_number,
+                            self.MAX_RETRIES,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        raise
+                    logger.error(
+                        "circuit_breaker.open.%s exhausted after %d attempts",
+                        self.__class__.__name__,
+                        self.MAX_RETRIES,
+                    )
+                    raise
+
+    async def _fetch_text(self, url: str, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None) -> str:
+        async def _do_fetch() -> str:
+            client = await self._get_client()
+            resp = await client.get(url, params=params, headers=headers)
+            resp.raise_for_status()
+            return resp.text
+
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(self.MAX_RETRIES),
+            wait=wait_exponential(multiplier=self.RETRY_DELAY, max=30.0),
+            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
+            before=before_log(logger, logging.DEBUG),
+            reraise=True,
+        ):
+            with attempt:
+                try:
+                    return await self._circuit_breaker.call(_do_fetch)
+                except CircuitBreakerOpenError:
+                    if attempt.retry_state.attempt_number < self.MAX_RETRIES:
+                        delay = self.RETRY_DELAY * (2 ** (attempt.retry_state.attempt_number - 1))
+                        logger.warning(
+                            "circuit_breaker.open.%s attempt %d/%d, retrying in %.1fs",
+                            self.__class__.__name__,
+                            attempt.retry_state.attempt_number,
+                            self.MAX_RETRIES,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        raise
+                    logger.error(
+                        "circuit_breaker.open.%s exhausted after %d attempts",
+                        self.__class__.__name__,
+                        self.MAX_RETRIES,
+                    )
+                    raise
+
+    async def _fetch_json_or_list(self, url: str, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None) -> dict[str, Any] | list[Any]:
+        async def _do_fetch() -> dict[str, Any] | list[Any]:
+            client = await self._get_client()
+            resp = await client.get(url, params=params, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(self.MAX_RETRIES),
+            wait=wait_exponential(multiplier=self.RETRY_DELAY, max=30.0),
+            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
             before=before_log(logger, logging.DEBUG),
             reraise=True,
         ):
