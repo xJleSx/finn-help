@@ -79,6 +79,6 @@ def span(name: str, attributes: dict[str, Any] | None = None):
         yield
 
 
-def record_exception(span, exception: Exception) -> None:
+def record_exception(otel_span, exception: Exception) -> None:
     if _OTEL_AVAILABLE:
-        span.record_exception(exception)
+        otel_span.record_exception(exception)

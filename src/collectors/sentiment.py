@@ -370,7 +370,7 @@ def _get_bert_pipeline() -> Any:
         )
         logger.info("ruBERT sentiment model loaded")
     except Exception as e:
-        logger.warning(f"ruBERT load failed ({e}), using keyword fallback")
+        logger.warning("ruBERT load failed (%s), using keyword fallback", e)
         _bert_pipeline = False
     return _bert_pipeline
 
@@ -414,7 +414,7 @@ def _bert_analyze(text: str) -> float | None:
         negative = scores.get("NEGATIVE", 0.0)
         return cast(float, round(positive - negative, 3))
     except Exception as e:
-        logger.warning(f"BERT sentiment failed: {e}")
+        logger.warning("BERT sentiment failed: %s", e)
         return None
 
 

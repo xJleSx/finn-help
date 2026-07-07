@@ -113,6 +113,35 @@ class MLCoordinator:
             self._ensemble_cache[ticker] = EnsemblePredictor(ticker=ticker)
         return self._ensemble_cache[ticker]
 
+    def _prepare_events(self, ind_df: pd.DataFrame, events: list[MarketEvent] | None, event_builder: EventFeatureBuilder | None) -> tuple[pd.DataFrame, Any]:
+        if not events:
+            return ind_df, None
+        builder = event_builder or event_features
+        ef = builder.build_features(events, ind_df["date"])
+        ind_df = ind_df.merge(ef, on="date", how="left")
+        for c in ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]:
+            if c in ind_df.columns:
+                ind_df[c] = ind_df[c].fillna(0)
+        anomaly_mask = None
+        if "is_anomaly" in ind_df.columns:
+            anomaly_mask = ind_df["is_anomaly"].fillna(False).to_numpy(dtype=bool)
+            ind_df = ind_df.drop(columns=["is_anomaly"])
+        return ind_df, anomaly_mask
+
+    def _build_result(self, pr: dict[str, Any], ensemble_res: dict[str, Any]) -> dict[str, Any]:
+        MLflowTracker.log_metrics(
+            {"prophet_confidence": pr.get("confidence", 0), "ensemble_confidence": ensemble_res.get("confidence", 0)},
+        )
+        ml = pr
+        ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble_res.get("confidence", 0))
+        ml["xgb_action"] = ensemble_res.get("xgb_action", "NEUTRAL")
+        ml["ensemble"] = {
+            "lgb_action": ensemble_res.get("lgb_action", "NEUTRAL"),
+            "cat_action": ensemble_res.get("cat_action", "NEUTRAL"),
+            "model_votes": ensemble_res.get("model_votes", {}),
+        }
+        return cast(dict[str, Any], ml)
+
     async def compute_ml(
         self,
         df: pd.DataFrame,
@@ -125,18 +154,7 @@ class MLCoordinator:
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="skipped").inc()
             return None
         try:
-            anomaly_mask = None
-            if events:
-                builder = event_builder or event_features
-                ef = builder.build_features(events, ind_df["date"])
-                ind_df = ind_df.merge(ef, on="date", how="left")
-                for c in ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]:
-                    if c in ind_df.columns:
-                        ind_df[c] = ind_df[c].fillna(0)
-                if "is_anomaly" in ind_df.columns:
-                    anomaly_mask = ind_df["is_anomaly"].fillna(False).to_numpy(dtype=bool)
-                    ind_df = ind_df.drop(columns=["is_anomaly"])
-
+            ind_df, anomaly_mask = self._prepare_events(ind_df, events, event_builder)
             loop = asyncio.get_running_loop()
             prophet = self.get_prophet(ticker)
             ensemble = self.get_ensemble(ticker)
@@ -146,20 +164,7 @@ class MLCoordinator:
             with ml_inference_latency.labels(model_type="ensemble", ticker=ticker or "unknown").time():
                 ensemble_res = await loop.run_in_executor(get_executor(), ensemble.predict, ind_df, anomaly_mask)
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="success").inc()
-
-            MLflowTracker.log_metrics(
-                {"prophet_confidence": pr.get("confidence", 0), "ensemble_confidence": ensemble_res.get("confidence", 0)},
-            )
-
-            ml = pr
-            ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble_res.get("confidence", 0))
-            ml["xgb_action"] = ensemble_res.get("xgb_action", "NEUTRAL")
-            ml["ensemble"] = {
-                "lgb_action": ensemble_res.get("lgb_action", "NEUTRAL"),
-                "cat_action": ensemble_res.get("cat_action", "NEUTRAL"),
-                "model_votes": ensemble_res.get("model_votes", {}),
-            }
-            return cast(dict[str, Any], ml)
+            return self._build_result(pr, ensemble_res)
         except Exception:
             logger.warning("ML prediction failed", exc_info=True)
             ml_error_count.labels(model_type="ensemble", ticker=ticker or "unknown").inc()
@@ -206,18 +211,7 @@ class MLCoordinator:
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="skipped").inc()
             return None
         try:
-            anomaly_mask = None
-            if events:
-                builder = event_builder or event_features
-                ef = builder.build_features(events, ind_df["date"])
-                ind_df = ind_df.merge(ef, on="date", how="left")
-                for c in ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]:
-                    if c in ind_df.columns:
-                        ind_df[c] = ind_df[c].fillna(0)
-                if "is_anomaly" in ind_df.columns:
-                    anomaly_mask = ind_df["is_anomaly"].fillna(False).to_numpy(dtype=bool)
-                    ind_df = ind_df.drop(columns=["is_anomaly"])
-
+            ind_df, anomaly_mask = self._prepare_events(ind_df, events, event_builder)
             prophet = self.get_prophet(ticker)
             ensemble = self.get_ensemble(ticker)
             t0 = time.monotonic()
@@ -228,20 +222,7 @@ class MLCoordinator:
             ensemble_res = ensemble.predict(ind_df, anomaly_mask=anomaly_mask)
             ml_inference_latency.labels(model_type="ensemble", ticker=ticker or "unknown").observe(time.monotonic() - t0)
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="success").inc()
-
-            MLflowTracker.log_metrics(
-                {"prophet_confidence": pr.get("confidence", 0), "ensemble_confidence": ensemble_res.get("confidence", 0)},
-            )
-
-            ml = pr
-            ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble_res.get("confidence", 0))
-            ml["xgb_action"] = ensemble_res.get("xgb_action", "NEUTRAL")
-            ml["ensemble"] = {
-                "lgb_action": ensemble_res.get("lgb_action", "NEUTRAL"),
-                "cat_action": ensemble_res.get("cat_action", "NEUTRAL"),
-                "model_votes": ensemble_res.get("model_votes", {}),
-            }
-            return cast(dict[str, Any], ml)
+            return self._build_result(pr, ensemble_res)
         except Exception:
             logger.warning("Sync ML prediction failed", exc_info=True)
             ml_error_count.labels(model_type="ensemble", ticker=ticker or "unknown").inc()

@@ -72,7 +72,7 @@ def wire(settings_override: Any = None) -> None:
     container.register("correlation_analyzer", correlation)
     container.register("rebalancing_engine", rebalancing_engine)
     container.register("profile_manager", profile_manager)
-    container.register("alert_push_service", AlertPushService())
+    container.register_factory("alert_push_service", lambda: AlertPushService())
     container.register("social_registry", social_registry)
     container.register("social_aggregator", social_aggregator)
     container.register("social_analyzer", social_analyzer)
@@ -85,7 +85,7 @@ def wire(settings_override: Any = None) -> None:
     container.register("portfolio_allocator", allocator)
 
     container.register("llm_router", llm_router)
-    container.register("notification_service", NotificationService())
+    container.register_factory("notification_service", lambda: NotificationService())
 
 
 def container_for_testing() -> Container:

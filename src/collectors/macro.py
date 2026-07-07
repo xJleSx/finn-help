@@ -34,7 +34,7 @@ class MacroCollector(BaseCollector):
                 if item:
                     results.append(item)
             except Exception as e:
-                logger.warning(f"{method.__name__} failed: {e}")
+                logger.warning("%s failed: %s", method.__name__, e)
         return results
 
     async def _fetch_brent(self) -> dict[str, Any] | None:

@@ -44,8 +44,6 @@ class CBRCollector(BaseCollector):
                 if not all([char_code, num_code, name, vunit_text, nominal_text]):
                     logger.warning("Skipping Valute with missing text")
                     continue
-                    logger.warning("Skipping Valute with missing text")
-                    continue
                 rates.append(
                     {
                         "code": char_code,
@@ -56,5 +54,5 @@ class CBRCollector(BaseCollector):
                     }
                 )
             except (AttributeError, ValueError, TypeError) as e:
-                logger.warning(f"Error parsing rate: {e}")
+                logger.warning("Error parsing rate: %s", e)
         return rates
