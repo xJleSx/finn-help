@@ -11,14 +11,22 @@ import MacroPanel from "@/components/MacroPanel";
 import NewsPanel from "@/components/NewsPanel";
 import GeoRiskPanel from "@/components/GeoRiskPanel";
 
+function ErrorBox({ message }: { message: string }) {
+  return (
+    <div className="bg-white/[0.04] border border-red-400/20 rounded-2xl p-4">
+      <p className="text-xs text-red-400">{message}</p>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
-  const { data: positions, isLoading: posLoading } = useQuery({
+  const { data: positions, isLoading: posLoading, isError: posError } = useQuery({
     queryKey: ["portfolio"],
     queryFn: () => api.portfolio.list(),
     refetchInterval: 30_000,
   });
 
-  const { data: riskData, isLoading: riskLoading } = useQuery({
+  const { data: riskData, isLoading: riskLoading, isError: riskError } = useQuery({
     queryKey: ["risk-portfolio"],
     queryFn: () => api.analysis.riskPortfolio(),
     refetchInterval: 60_000,
@@ -48,6 +56,9 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-light text-white">Dashboard</h1>
         <p className="text-sm text-gray-500 mt-1">Обзор портфеля, риск-метрики и рынок</p>
       </div>
+
+      {posError && <ErrorBox message="Не удалось загрузить портфель" />}
+      {riskError && <ErrorBox message="Не удалось загрузить риск-метрики" />}
 
       <ErrorBoundary>
         <PortfolioOverview positions={positions ?? []} isLoading={posLoading} />

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import time
 from typing import Any, Callable
 
@@ -15,26 +16,29 @@ logger = logging.getLogger(__name__)
 
 _pool: ConnectionPool | None = None
 _memory_cache: dict[str, tuple[float, Any]] = {}
+_lock = threading.Lock()
 
 
 def _get_pool() -> ConnectionPool | None:
     global _pool
     if _pool is None:
-        try:
-            url = settings.redis_url or "redis://localhost:6379/0"
-            _pool = ConnectionPool.from_url(
-                url,
-                max_connections=settings.redis_max_connections,
-                socket_connect_timeout=settings.redis_socket_connect_timeout,
-                socket_timeout=settings.redis_socket_timeout,
-                decode_responses=True,
-            )
-            r = redis_mod.Redis(connection_pool=_pool)
-            r.ping()
-            logger.info("Redis connected: %s", url)
-        except Exception:
-            logger.warning("Redis unavailable, using in-memory fallback")
-            _pool = False
+        with _lock:
+            if _pool is None:
+                try:
+                    url = settings.redis_url or "redis://localhost:6379/0"
+                    _pool = ConnectionPool.from_url(
+                        url,
+                        max_connections=settings.redis_max_connections,
+                        socket_connect_timeout=settings.redis_socket_connect_timeout,
+                        socket_timeout=settings.redis_socket_timeout,
+                        decode_responses=True,
+                    )
+                    r = redis_mod.Redis(connection_pool=_pool)
+                    r.ping()
+                    logger.info("Redis connected: %s", url)
+                except Exception:
+                    logger.warning("Redis unavailable, using in-memory fallback")
+                    _pool = False
     return _pool if _pool else None
 
 
@@ -70,9 +74,10 @@ def cached(
                 except Exception as e:
                     logger.debug("Redis get failed: %s", e)
             else:
-                entry = _memory_cache.get(key)
-                if entry and time.time() - entry[0] < ttl:
-                    return entry[1]
+                with _lock:
+                    entry = _memory_cache.get(key)
+                    if entry and time.time() - entry[0] < ttl:
+                        return entry[1]
 
             result = func(*args, **kwargs)
 
@@ -82,7 +87,8 @@ def cached(
                 except Exception as e:
                     logger.debug("Redis set failed: %s", e)
             else:
-                _memory_cache[key] = (time.time(), result)
+                with _lock:
+                    _memory_cache[key] = (time.time(), result)
 
             return result
 
@@ -105,18 +111,20 @@ def invalidate(pattern: str) -> None:
                     break
         except Exception as e:
             logger.debug("Redis invalidate failed: %s", e)
-    keys_to_delete = [k for k in _memory_cache if k.startswith(key.replace("*", ""))]
-    for k in keys_to_delete:
-        _memory_cache.pop(k, None)
+    with _lock:
+        keys_to_delete = [k for k in _memory_cache if k.startswith(key.replace("*", ""))]
+        for k in keys_to_delete:
+            _memory_cache.pop(k, None)
 
 
 def close_redis() -> None:
     global _pool
-    if _pool and _pool is not False:
-        try:
-            _pool.disconnect()
-            logger.info("Redis connection pool closed")
-        except Exception as e:
-            logger.warning("Failed to close Redis pool: %s", e)
-    _pool = None
-    _memory_cache.clear()
+    with _lock:
+        if _pool and _pool is not False:
+            try:
+                _pool.disconnect()
+                logger.info("Redis connection pool closed")
+            except Exception as e:
+                logger.warning("Failed to close Redis pool: %s", e)
+        _pool = None
+        _memory_cache.clear()

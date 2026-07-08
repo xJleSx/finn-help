@@ -25,7 +25,6 @@ async def check_ml_health() -> dict[str, Any]:
     from src.analysis.ml_coordinator import ml_coordinator
 
     try:
-        len(ml_coordinator._prophet_cache) > 0 or len(ml_coordinator._ensemble_cache) > 0
         return {"status": "ok", "models_loaded": len(ml_coordinator._prophet_cache) + len(ml_coordinator._ensemble_cache)}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -70,9 +69,10 @@ async def check_tbank_health() -> dict[str, Any]:
         if not settings.tinkoff_token:
             return {"status": "not_configured"}
         from src.trading.brokers.tbank import TBankClient
+        import asyncio
 
         client = TBankClient(token=settings.tinkoff_token, sandbox=settings.tinkoff_sandbox)
-        accounts = client.get_accounts()
+        accounts = await asyncio.to_thread(client.get_accounts)
         has_accounts = len(accounts) > 0 if accounts else False
         return {"status": "ok" if has_accounts else "no_accounts"}
     except Exception as e:

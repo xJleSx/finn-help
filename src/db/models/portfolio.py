@@ -23,7 +23,7 @@ class Portfolio(Base):
     __tablename__ = "portfolio"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, default=0)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
     quantity = Column(Float, nullable=False, default=0)
     avg_price = Column(Float)
@@ -39,7 +39,7 @@ class Transaction(Base):
     __tablename__ = "transactions"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, default=0)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
     tx_type = Column("type", String(4), nullable=False)
     quantity = Column(Float, nullable=False)
@@ -106,7 +106,7 @@ class ShortPosition(Base):
     __tablename__ = "short_positions"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, default=0)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     ticker = Column(String(20), nullable=False)
     quantity = Column(Integer, nullable=False, default=0)
     avg_price = Column(Float, nullable=True)
@@ -127,7 +127,7 @@ class MarginAccount(Base):
     __tablename__ = "margin_accounts"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, default=0)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     total_loan = Column(Float, default=0.0)
     margin_used = Column(Float, default=0.0)
     margin_limit = Column(Float, default=0.0)
@@ -165,7 +165,7 @@ class ComplianceEvent(Base):
     __tablename__ = "compliance_events"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, default=0)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     event_type = Column(String(50), nullable=False)  # aml_flag / position_limit / margin_call / short_limit
     ticker = Column(String(20), nullable=True)
     details = Column(Text, nullable=True)
@@ -185,7 +185,7 @@ class TaxReportRecord(Base):
     __tablename__ = "tax_report_records"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, default=0)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     year = Column(Integer, nullable=False)
     total_pnl = Column(Float, default=0.0)
     total_dividends = Column(Float, default=0.0)

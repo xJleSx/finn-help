@@ -38,7 +38,8 @@ export function LoginForm() {
     try {
       await login(username, password);
       toast.success("Вход выполнен");
-      router.push("/dashboard");
+      const redirectTo = new URL(window.location.href).searchParams.get("redirect") || "/dashboard";
+      router.push(redirectTo);
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Ошибка входа";
       toast.error(message);

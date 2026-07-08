@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -160,7 +161,7 @@ def compute_anti_martingale_size(
 def compute_sizing_ladder(
     account_value: float,
     prices: float | list[float] | np.ndarray,
-    risk_params: dict,
+    risk_params: dict[str, Any],
 ) -> dict[str, float | int | str]:
     if isinstance(prices, (list, np.ndarray)):
         price = float(prices[-1]) if len(prices) > 0 else 0.0
@@ -170,20 +171,20 @@ def compute_sizing_ladder(
     if price <= 0 or account_value <= 0:
         return {"shares": 0, "amount": 0.0, "method": "ladder"}
 
-    candidates: list[int] = []
+    candidates_list: list[int] = []
 
     risk_pt = risk_params.get("risk_per_trade", 0.02)
 
     # fixed_fractional
     sl_pct = risk_params.get("stop_loss_pct")
     ff = compute_position_size(account_value, price, risk_per_trade_pct=risk_pt * 100, stop_loss_pct=sl_pct)
-    candidates.append(ff["shares"])
+    candidates_list.append(int(ff["shares"]))
 
     # volatility_adjusted
     atr = risk_params.get("atr")
     if atr is not None and atr > 0:
         va = compute_vol_adjusted_size(account_value, risk_pt, atr, price)
-        candidates.append(va)
+        candidates_list.append(va)
 
     # kelly
     win_rate = risk_params.get("win_rate", 0.0)
@@ -194,17 +195,17 @@ def compute_sizing_ladder(
         kelly_frac = kelly_fraction(win_rate, avg_win_pct, avg_loss_pct)
         if kelly_frac > 0:
             shares_kelly = int(account_value * kelly_frac / price)
-            candidates.append(shares_kelly)
+            candidates_list.append(shares_kelly)
 
     # liquidity_constrained
     daily_volume = risk_params.get("daily_volume")
     max_vol_pct = risk_params.get("max_volume_pct", 0.1)
     if daily_volume is not None and daily_volume > 0:
-        base = min(candidates) if candidates else 0
+        base = min(candidates_list) if candidates_list else 0
         lc = compute_liquidity_constrained_size(int(base), daily_volume, max_vol_pct)
-        candidates.append(lc)
+        candidates_list.append(lc)
 
-    min_shares = min(candidates) if candidates else 0
+    min_shares = min(candidates_list) if candidates_list else 0
     amount = round(min_shares * price, 2)
 
     return {

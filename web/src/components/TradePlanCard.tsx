@@ -1,5 +1,7 @@
 "use client";
 
+import { formatNumber } from "../lib/format";
+
 type TradePlan = {
   ticker: string;
   profile: string;
@@ -10,10 +12,6 @@ type TradePlan = {
   trailing_after: number;
   risk_reward: number;
 };
-
-function formatCurrency(v: number) {
-  return v.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 const profileLabels: Record<string, string> = {
   conservative: "Консервативный",
@@ -43,7 +41,7 @@ export function TradePlanCard({ plan }: { plan: TradePlan }) {
       </div>
 
       <div className="text-xs text-gray-400 mb-4">
-        Текущая цена: <span className="font-mono text-white">{formatCurrency(plan.current_price)} ₽</span>
+        Текущая цена: <span className="font-mono text-white">{formatNumber(plan.current_price)} ₽</span>
       </div>
 
       {/* Visual price range */}
@@ -62,8 +60,8 @@ export function TradePlanCard({ plan }: { plan: TradePlan }) {
           <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-amber-400 whitespace-nowrap">
             Зона входа
           </span>
-          <div className="absolute -top-3 left-0 text-[8px] text-amber-400/60">{formatCurrency(plan.entry_zone.low)}</div>
-          <div className="absolute -top-3 right-0 text-[8px] text-amber-400/60">{formatCurrency(plan.entry_zone.high)}</div>
+          <div className="absolute -top-3 left-0 text-[8px] text-amber-400/60">{formatNumber(plan.entry_zone.low)}</div>
+          <div className="absolute -top-3 right-0 text-[8px] text-amber-400/60">{formatNumber(plan.entry_zone.high)}</div>
         </div>
 
         {/* Current price marker */}
@@ -72,7 +70,7 @@ export function TradePlanCard({ plan }: { plan: TradePlan }) {
           style={{ left: `${((plan.current_price - minPrice) / range) * 100}%` }}
         >
           <div className="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-mono text-white whitespace-nowrap">
-            {formatCurrency(plan.current_price)}
+            {formatNumber(plan.current_price)}
           </div>
         </div>
 
@@ -82,7 +80,7 @@ export function TradePlanCard({ plan }: { plan: TradePlan }) {
           style={{ left: `${((plan.stop_loss - minPrice) / range) * 100}%` }}
         >
           <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[9px] text-red-400 whitespace-nowrap">
-            SL {formatCurrency(plan.stop_loss)}
+            SL {formatNumber(plan.stop_loss)}
           </span>
         </div>
 
@@ -94,7 +92,7 @@ export function TradePlanCard({ plan }: { plan: TradePlan }) {
             style={{ left: `${((target.level - minPrice) / range) * 100}%` }}
           >
             <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] text-emerald-400 whitespace-nowrap">
-              T{i + 1} {formatCurrency(target.level)}
+              T{i + 1} {formatNumber(target.level)}
             </span>
             <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[8px] text-emerald-400/60 whitespace-nowrap">
               +{target.return_pct.toFixed(1)}%
@@ -113,7 +111,7 @@ export function TradePlanCard({ plan }: { plan: TradePlan }) {
         </div>
         <div className="bg-white/[0.03] rounded-xl p-2.5 border border-white/5">
           <p className="text-[10px] text-gray-500">Stop Loss</p>
-          <p className="text-sm font-mono text-red-400">{formatCurrency(plan.stop_loss)} ₽</p>
+          <p className="text-sm font-mono text-red-400">{formatNumber(plan.stop_loss)} ₽</p>
         </div>
         <div className="bg-white/[0.03] rounded-xl p-2.5 border border-white/5">
           <p className="text-[10px] text-gray-500">Risk/Reward</p>
@@ -133,7 +131,7 @@ export function TradePlanCard({ plan }: { plan: TradePlan }) {
             {plan.targets.map((target, i) => (
               <div key={i} className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
                 <span className="text-xs text-gray-400">T{i + 1} — {target.type === "tp" ? "Take Profit" : target.type}</span>
-                <span className="text-xs font-mono text-emerald-400">{formatCurrency(target.level)} ₽ (+{target.return_pct.toFixed(1)}%, RR {target.rr.toFixed(1)})</span>
+                <span className="text-xs font-mono text-emerald-400">{formatNumber(target.level)} ₽ (+{target.return_pct.toFixed(1)}%, RR {target.rr.toFixed(1)})</span>
               </div>
             ))}
           </div>

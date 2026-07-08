@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -147,7 +147,7 @@ class CorrelationAnalyzer:
         return returns.corr(method="pearson")
 
 
-def spearman_correlation(df: pd.DataFrame, method: str = "spearman") -> pd.DataFrame:
+def spearman_correlation(df: pd.DataFrame, method: Literal["pearson", "kendall", "spearman"] = "spearman") -> pd.DataFrame:
     return df.corr(method=method)
 
 
@@ -158,7 +158,7 @@ def kendall_correlation(df: pd.DataFrame) -> pd.DataFrame:
 def rolling_correlation(
     df: pd.DataFrame, window: int = 60, method: str = "pearson"
 ) -> dict[str, pd.Series]:
-    rolling_corr = df.rolling(window=window).corr(method=method)
+    rolling_corr = df.rolling(window=window).corr(method=method)  # type: ignore[call-arg]
     pairs: dict[str, pd.Series] = {}
     for i, col1 in enumerate(df.columns):
         for col2 in df.columns[i + 1 :]:

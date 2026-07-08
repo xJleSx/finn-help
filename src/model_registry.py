@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -13,6 +14,7 @@ from src.core.executor import get_executor
 logger = logging.getLogger(__name__)
 
 _MODEL_DIR_ENV_OVERRIDE = None
+_registry_lock = threading.Lock()
 
 
 def _get_model_dir() -> Path:
@@ -29,24 +31,27 @@ REGISTRY_FILE = MODEL_DIR / "registry.json"
 
 def set_model_dir(path: str | Path) -> None:
     global MODEL_DIR, REGISTRY_FILE, _MODEL_DIR_ENV_OVERRIDE  # noqa: PLW0603
-    _MODEL_DIR_ENV_OVERRIDE = str(path)
-    MODEL_DIR = Path(path)
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    REGISTRY_FILE = MODEL_DIR / "registry.json"
+    with _registry_lock:
+        _MODEL_DIR_ENV_OVERRIDE = str(path)
+        MODEL_DIR = Path(path)
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        REGISTRY_FILE = MODEL_DIR / "registry.json"
 
 
 def _load_registry() -> dict[str, Any]:
-    if REGISTRY_FILE.exists():
-        try:
-            return json.loads(REGISTRY_FILE.read_text())
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to load registry: %s", e)
-            return {}
-    return {}
+    with _registry_lock:
+        if REGISTRY_FILE.exists():
+            try:
+                return json.loads(REGISTRY_FILE.read_text())
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to load registry: %s", e)
+                return {}
+        return {}
 
 
 def _save_registry(registry: dict[str, Any]) -> None:
-    REGISTRY_FILE.write_text(json.dumps(registry, indent=2, ensure_ascii=False))
+    with _registry_lock:
+        REGISTRY_FILE.write_text(json.dumps(registry, indent=2, ensure_ascii=False))
 
 
 def save_model(

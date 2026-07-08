@@ -170,10 +170,10 @@ class PortfolioAllocator:
         instruments_data: list[dict[str, Any]],
         db: Any,
     ) -> dict[str, Any]:
-        async def score_fn(data, cat, budget, _existing):
+        async def score_fn(data: list[dict[str, Any]], cat: str, budget: float, _existing: list[dict[str, Any]]) -> list[dict[str, Any]]:
             return self._score_candidates(data, cat, budget, _existing, db)
 
-        async def risk_fn(item):
+        async def risk_fn(item: dict[str, Any]) -> dict[str, Any]:
             return item_risk(item, db, capital)
 
         return asyncio.run(self._allocate_from_data_core(capital, existing, instruments_data, score_fn, risk_fn))
@@ -185,13 +185,13 @@ class PortfolioAllocator:
         instruments_data: list[dict[str, Any]],
         db: AsyncSession,
     ) -> dict[str, Any]:
-        async def score(data, cat, budget, _existing):
+        async def score_async_fn(data: list[dict[str, Any]], cat: str, budget: float, _existing: list[dict[str, Any]]) -> list[dict[str, Any]]:
             return await self._score_candidates_async(data, cat, budget, _existing, db)
 
-        async def risk(item):
+        async def risk_async_fn(item: dict[str, Any]) -> dict[str, Any]:
             return await item_risk_async(item, db, capital)
 
-        return await self._allocate_from_data_core(capital, existing, instruments_data, score, risk)
+        return await self._allocate_from_data_core(capital, existing, instruments_data, score_async_fn, risk_async_fn)
 
     def allocate(self, capital: float, db: Any = None) -> dict[str, Any]:
         should_close = db is None
@@ -231,13 +231,14 @@ class PortfolioAllocator:
         for inst in instruments:
             price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
             last_price = price.close if price else None
-            sector = SECTOR_NAMES.get(inst.ticker, inst.sector or "")
+            inst_ticker_sync = str(inst.ticker)
+            sector = SECTOR_NAMES.get(inst_ticker_sync, str(inst.sector or ""))
 
             div_yield = 0.0
             one_year_ago = date.today() - timedelta(days=365)
             divs = db.query(Dividend).filter_by(instrument_id=inst.id).filter(Dividend.date >= one_year_ago).order_by(Dividend.date.desc()).all()
             if divs and last_price and last_price > 0:
-                div_yield = sum(d.amount for d in divs) / last_price * 100
+                div_yield = float(sum(d.amount for d in divs) / last_price * 100)
                 if div_yield > 25:
                     logger.warning(
                         "Suspicious div yield %.1f%% for %s (divs=%s, price=%s)",
@@ -268,8 +269,8 @@ class PortfolioAllocator:
                 "sector": sector,
                 "last_price": float(last_price) if last_price else None,
                 "div_yield": round(div_yield, 2),
-                "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "dividend",
-                "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "growth",
+                "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_sync) == "dividend",
+                "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_sync) == "growth",
             }
             if fm:
                 entry["pe_ratio"] = float(fm.pe_ratio) if fm.pe_ratio else None
@@ -295,7 +296,8 @@ class PortfolioAllocator:
             price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()))
             price = price_result.scalars().first()
             last_price = price.close if price else None
-            sector = SECTOR_NAMES.get(inst.ticker, inst.sector or "")
+            inst_ticker_async = str(inst.ticker)
+            sector = SECTOR_NAMES.get(inst_ticker_async, str(inst.sector or ""))
 
             div_yield = 0.0
             divs_result = await db.execute(
@@ -303,7 +305,7 @@ class PortfolioAllocator:
             )
             divs = divs_result.scalars().all()
             if divs and last_price and last_price > 0:
-                div_yield = sum(d.amount for d in divs) / last_price * 100
+                div_yield = float(sum(d.amount for d in divs) / last_price * 100)
                 if div_yield > 25:
                     logger.warning(
                         "Suspicious div yield %.1f%% for %s (divs=%s, price=%s)",
@@ -323,8 +325,8 @@ class PortfolioAllocator:
                     "sector": sector,
                     "last_price": float(last_price) if last_price else None,
                     "div_yield": round(div_yield, 2),
-                    "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "dividend",
-                    "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst.ticker) == "growth",
+                    "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_async) == "dividend",
+                    "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_async) == "growth",
                 }
             )
         return result
@@ -635,29 +637,6 @@ class PortfolioAllocator:
             dividend_fn=lambda c: self._upcoming_dividend_score(c, db),
             volume_fn=lambda c: self._volume_score(c, db),
             momentum_fn=lambda c: self._momentum_score(c, db),
-        )
-
-    async def _score_candidates_async(
-        self,
-        instruments: list[dict[str, Any]],
-        category: str,
-        budget: float,
-        existing: list[dict[str, Any]],
-        db: AsyncSession,
-    ) -> list[dict[str, Any]]:
-        existing_tickers = set(e["ticker"] for e in existing)
-        existing_tickers_list = list(existing_tickers)
-        candidates = self._filter_candidates_by_category(instruments, category)
-        if not candidates:
-            return []
-
-        return await self._score_candidates_core_async(
-            candidates,
-            category,
-            budget,
-            existing_tickers,
-            existing_tickers_list,
-            db,
         )
 
     def _upcoming_dividend_score(self, inst: dict[str, Any], db: Any) -> dict[str, Any]:

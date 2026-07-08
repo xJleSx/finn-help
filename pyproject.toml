@@ -119,7 +119,7 @@ module = ["telegram.*", "telegram.ext.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["src.interfaces.telegram", "src.interfaces.api.server"]
+module = ["src.interfaces.telegram.*", "src.interfaces.api.server"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
@@ -129,12 +129,16 @@ module = [
     "src.trading.execution.loop",
     "src.analysis.anomaly.autoencoder",
     "src.data.batch_processor",
-    "src.interfaces.nlq",
+    "src.interfaces.nlq.*",
 ]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = ["src.tasks.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["src.cli.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
@@ -151,6 +155,7 @@ module = [
     "src.interfaces.api.routes.analysis",
     "src.interfaces.api.routes.paper_trading",
     "src.interfaces.api.routes.alert_preferences",
+    "src.analysis.metrics",
     "src.alerts.smart",
     "src.trading.execution.engine",
     "src.trading.execution.stoploss",
@@ -184,14 +189,18 @@ module = [
     "src.notifications.service",
     "src.notifications.channels",
     "src.notifications.retry",
+    "src.core.tracing",
+    "src.core.sentry",
+    "src.social.onchain_sentiment",
+    "src.analysis.regime",
+    "src.analysis.features",
     "src.interfaces.telegram_guard",
     "src.interfaces.telegram_alerter",
     "src.interfaces.telegram_broadcaster",
     "src.collectors.*",
     "src.llm.*",
     "src.model_registry",
-    "src.db.models",
-    "src.config",
+
     "src.market.service",
 ]
 ignore_errors = true

@@ -118,7 +118,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("instrument_id", sa.Integer(), nullable=False),
         sa.Column("date", sa.DateTime(), nullable=False),
-        sa.Column("action", sa.String(length=10), nullable=False),
+        sa.Column("action", sa.String(length=20), nullable=False),
         sa.Column("confidence", sa.Float(), nullable=True),
         sa.Column("technical_json", sa.JSON(), nullable=True),
         sa.Column("fundamental_json", sa.JSON(), nullable=True),

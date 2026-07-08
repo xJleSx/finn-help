@@ -1,4 +1,4 @@
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { type UserInfo } from "./auth";
 
 type ApiOptions = {
   token?: string | null;
@@ -10,95 +10,30 @@ type RequestOptions = ApiOptions & {
   body?: unknown;
 };
 
-type StoredAuth = {
-  token: string;
-  refreshToken: string;
-  user: { id: number; username: string; email: string | null; role: string; risk_profile: string; is_active: boolean };
-};
-
-function getStoredAuth(): StoredAuth | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem("finn_auth");
-    if (!raw) return null;
-    return JSON.parse(raw) as StoredAuth;
-  } catch {
-    return null;
-  }
-}
-
-function setStoredAuth(auth: StoredAuth): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem("finn_auth", JSON.stringify(auth));
-  } catch { /* ignore */ }
-}
-
-let isRefreshing = false;
-let refreshPromise: Promise<boolean> | null = null;
-
-async function tryRefreshToken(): Promise<boolean> {
-  if (isRefreshing && refreshPromise) return refreshPromise;
-  isRefreshing = true;
-  refreshPromise = (async () => {
-    try {
-      const stored = getStoredAuth();
-      if (!stored?.refreshToken) return false;
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-      const res = await fetch(`${API_URL}/api/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: stored.refreshToken }),
-      });
-      if (!res.ok) return false;
-      const data = await res.json();
-      setStoredAuth({ ...stored, token: data.access_token });
-      return true;
-    } catch {
-      return false;
-    } finally {
-      isRefreshing = false;
-      refreshPromise = null;
-    }
-  })();
-  return refreshPromise;
-}
-
-function buildHeaders(token?: string | null, extra?: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = { ...extra };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-  return headers;
-}
-
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, token, signal } = opts;
+  const { method = "GET", body, signal } = opts;
 
-  const getEffectiveToken = async (): Promise<string | null> => {
-    if (token) return token;
-    const stored = getStoredAuth();
-    return stored?.token ?? null;
-  };
+  const headers: Record<string, string> = {};
+  if (body) {
+    headers["Content-Type"] = "application/json";
+  }
 
-  const doFetch = async (tok: string | null): Promise<Response> => {
-    const headers = buildHeaders(tok, body ? { "Content-Type": "application/json" } : undefined);
-    return fetch(`${API}${path}`, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal,
-    });
-  };
+  let res = await fetch(path, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+    signal,
+  });
 
-  let resolvedToken = await getEffectiveToken();
-  let res = await doFetch(resolvedToken);
-
-  if (res.status === 401 && !token) {
-    const refreshed = await tryRefreshToken();
-    if (refreshed) {
-      resolvedToken = getStoredAuth()?.token ?? null;
-      res = await doFetch(resolvedToken);
+  if (res.status === 401) {
+    const refreshRes = await fetch("/api/auth/refresh", { method: "POST" });
+    if (refreshRes.ok) {
+      res = await fetch(path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal,
+      });
     }
   }
 
@@ -107,7 +42,8 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     throw new ApiError(res.status, text);
   }
 
-  if (res.headers.get("content-type")?.includes("application/json")) {
+  const contentType = res.headers.get("content-type");
+  if (contentType?.includes("application/json")) {
     return res.json();
   }
 
@@ -124,65 +60,66 @@ export class ApiError extends Error {
   }
 }
 
+type LoginResponse = { user_id: number; username: string };
+type MeResponse = UserInfo;
+
+async function authFetch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "Request failed");
+    throw new ApiError(res.status, text);
+  }
+  return res.json();
+}
+
 export const api = {
   auth: {
     register: (username: string, password: string, riskProfile = "balanced") =>
-      request<{ access_token: string; refresh_token: string; token_type: string; user_id: number; username: string }>(
-        "/api/auth/register",
-        { method: "POST", body: { username, password, risk_profile: riskProfile } },
-      ),
+      authFetch<LoginResponse>("/api/auth/register", { username, password, risk_profile: riskProfile }),
     login: (username: string, password: string) =>
-      request<{ access_token: string; refresh_token: string; token_type: string; user_id: number; username: string }>(
-        "/api/auth/login",
-        { method: "POST", body: { username, password } },
-      ),
-    me: (token: string) =>
-      request<{ id: number; username: string; email: string | null; role: string; risk_profile: string; is_active: boolean }>(
-        "/api/auth/me",
-        { token },
-      ),
-    refresh: (refreshToken: string) =>
-      request<{ access_token: string; token_type: string }>("/api/auth/refresh", {
-        method: "POST",
-        body: { refresh_token: refreshToken },
-      }),
-    logout: (refreshToken: string) =>
-      request<{ status: string }>("/api/auth/logout", {
-        method: "POST",
-        body: { refresh_token: refreshToken },
-      }),
+      authFetch<LoginResponse>("/api/auth/login", { username, password }),
+    me: () =>
+      request<MeResponse>("/api/auth/me"),
+    refresh: () =>
+      request<{ status: string }>("/api/auth/refresh", { method: "POST" }),
+    logout: () =>
+      request<{ status: string }>("/api/auth/logout", { method: "POST" }),
   },
 
   instruments: {
     list: (type = "stock") =>
       request<Array<{ id: number; ticker: string; full_name: string; sector: string | null; type: string; last_price: number | null; last_date: string | null }>>(
-        `/api/instruments?type=${type}`,
+        `/api/instruments?type=${encodeURIComponent(type)}`,
       ),
     detail: (ticker: string, opts?: ApiOptions) =>
       request<{ id: number; ticker: string; full_name: string; isin: string | null; sector: string | null; type: string; lot_size: number | null; currency: string | null }>(
-        `/api/instruments/${ticker}`,
+        `/api/instruments/${encodeURIComponent(ticker)}`,
         opts,
       ),
     prices: (ticker: string, days = 365, opts?: ApiOptions) =>
       request<Array<{ date: string; open: number; high: number; low: number; close: number; volume: number | null }>>(
-        `/api/instruments/${ticker}/prices?days=${days}`,
+        `/api/instruments/${encodeURIComponent(ticker)}/prices?days=${days}`,
         opts,
       ),
     indicators: (ticker: string, days = 90, opts?: ApiOptions) =>
       request<Array<{ date: string; rsi: number | null; macd_line: number | null; macd_signal: number | null; macd_hist: number | null; sma_20: number | null; sma_50: number | null; sma_200: number | null; bb_upper: number | null; bb_lower: number | null; bb_mid: number | null; volume_sma_20: number | null; atr: number | null }>>(
-        `/api/instruments/${ticker}/indicators?days=${days}`,
+        `/api/instruments/${encodeURIComponent(ticker)}/indicators?days=${days}`,
         opts,
       ),
     signal: (ticker: string, opts?: ApiOptions) =>
-      request<Record<string, unknown>>(`/api/instruments/${ticker}/signal`, opts),
+      request<Record<string, unknown>>(`/api/instruments/${encodeURIComponent(ticker)}/signal`, opts),
     tradePlan: (ticker: string, profile = "balanced", opts?: ApiOptions) =>
       request<{ ticker: string; profile: string; current_price: number; entry_zone: { low: number; high: number; current: string }; targets: Array<{ level: number; type: string; return_pct: number; rr: number }>; stop_loss: number; trailing_after: number; risk_reward: number }>(
-        `/api/instruments/${ticker}/trade-plan?profile=${profile}`,
+        `/api/instruments/${encodeURIComponent(ticker)}/trade-plan?profile=${encodeURIComponent(profile)}`,
         opts,
       ),
     advice: (ticker: string, opts?: ApiOptions) =>
       request<{ signal: Record<string, unknown>; advice: string; user_id: number | null }>(
-        `/api/instruments/${ticker}/advice`,
+        `/api/instruments/${encodeURIComponent(ticker)}/advice`,
         opts,
       ),
   },
@@ -230,11 +167,7 @@ export const api = {
         capital: number;
         total_allocated: number;
         reserve: number;
-        plan: Record<string, {
-          label: string;
-          budget: number;
-          items: Array<{ ticker: string; name: string; amount: number; reason: string; expected_yield: number }>;
-        }>;
+        plan: Record<string, { label: string; budget: number; items: Array<{ ticker: string; name: string; amount: number; reason: string; expected_yield: number }> }>;
         projected_monthly_yield: number;
         projected_monthly_pct: number;
         existing_portfolio: Array<{ ticker: string; quantity: number; current_value: number }>;
@@ -259,7 +192,7 @@ export const api = {
       ),
     divergence: (ticker: string, opts?: ApiOptions) =>
       request<Array<{ ticker: string; divergence_type: string; indicator: string; strength: number }>>(
-        `/api/alerts/divergence/${ticker}`,
+        `/api/alerts/divergence/${encodeURIComponent(ticker)}`,
         opts,
       ),
     rebalance: (opts?: ApiOptions) =>
@@ -279,9 +212,9 @@ export const api = {
           { method: "PUT", body, ...opts },
         ),
       mute: (ticker: string, opts?: ApiOptions) =>
-        request<{ status: string }>(`/api/alert-preferences/mute/${ticker}`, { method: "POST", ...opts }),
+        request<{ status: string }>(`/api/alert-preferences/mute/${encodeURIComponent(ticker)}`, { method: "POST", ...opts }),
       unmute: (ticker: string, opts?: ApiOptions) =>
-        request<{ status: string }>(`/api/alert-preferences/unmute/${ticker}`, { method: "POST", ...opts }),
+        request<{ status: string }>(`/api/alert-preferences/unmute/${encodeURIComponent(ticker)}`, { method: "POST", ...opts }),
     },
   },
 
@@ -291,10 +224,10 @@ export const api = {
     riskPortfolio: (opts?: ApiOptions) =>
       request<Record<string, unknown>>("/api/risk/portfolio", opts),
     riskDeepDive: (ticker: string, opts?: ApiOptions) =>
-      request<Record<string, unknown>>(`/api/risk/deep-dive/${ticker}`, opts),
+      request<Record<string, unknown>>(`/api/risk/deep-dive/${encodeURIComponent(ticker)}`, opts),
     causal: (ticker: string, target?: string, opts?: ApiOptions) =>
       request<Record<string, unknown>>(
-        `/api/analysis/causal/${ticker}${target ? `?target=${target}` : ""}`,
+        `/api/analysis/causal/${encodeURIComponent(ticker)}${target ? `?target=${encodeURIComponent(target)}` : ""}`,
         opts,
       ),
   },

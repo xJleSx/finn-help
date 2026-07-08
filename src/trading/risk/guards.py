@@ -3,6 +3,8 @@ import datetime
 import logging
 from typing import Optional
 
+import pandas as pd
+
 from src.config import personal
 
 logger = logging.getLogger(__name__)
@@ -455,8 +457,8 @@ class DrawdownStageManager:
         self._peak: float | None = None
         self._current: float | None = None
 
-    def update(self, equity_curve) -> None:
-        if hasattr(equity_curve, "iloc"):
+    def update(self, equity_curve: list[float] | pd.Series) -> None:
+        if isinstance(equity_curve, pd.Series):
             values = equity_curve.tolist()
         else:
             values = list(equity_curve)

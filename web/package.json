@@ -10,8 +10,6 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.2",
-    "clsx": "^2.1.1",
-    "date-fns": "^4.4.0",
     "jose": "^6.2.3",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^1.23.0",
@@ -25,6 +23,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "postcss": "^8",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

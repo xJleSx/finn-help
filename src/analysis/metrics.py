@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
@@ -38,19 +42,21 @@ def compute_calmar(returns: np.ndarray, prices: list[float]) -> float:
     return ann_return / mdd
 
 
-def compute_cvar(returns, confidence=0.95):
+def compute_cvar(returns: pd.Series | np.ndarray, confidence: float = 0.95) -> float:
     if isinstance(returns, pd.Series):
-        returns = returns.values
-    returns = np.asarray(returns, dtype=float)
-    var = np.percentile(returns, (1 - confidence) * 100)
-    return float(np.mean(returns[returns < var]))
+        returns_arr = returns.values
+    else:
+        returns_arr = np.asarray(returns, dtype=float)
+    var = np.percentile(returns_arr, (1 - confidence) * 100)
+    return float(np.mean(returns_arr[returns_arr < var]))
 
 
-def compute_omega_ratio(returns, target_return=0.0):
+def compute_omega_ratio(returns: pd.Series | np.ndarray, target_return: float = 0.0) -> float:
     if isinstance(returns, pd.Series):
-        returns = returns.values
-    returns = np.asarray(returns, dtype=float)
-    excess = returns - target_return
+        returns_arr = returns.values
+    else:
+        returns_arr = np.asarray(returns, dtype=float)
+    excess = returns_arr - target_return
     gains = excess[excess > 0].sum()
     losses = -excess[excess < 0].sum()
     if losses == 0:
@@ -58,28 +64,31 @@ def compute_omega_ratio(returns, target_return=0.0):
     return float(gains / losses)
 
 
-def compute_information_ratio(returns, benchmark_returns):
+def compute_information_ratio(returns: pd.Series | np.ndarray, benchmark_returns: pd.Series | np.ndarray) -> float:
     if isinstance(returns, pd.Series):
-        returns = returns.values
+        returns_arr = returns.values
+    else:
+        returns_arr = np.asarray(returns, dtype=float)
     if isinstance(benchmark_returns, pd.Series):
-        benchmark_returns = benchmark_returns.values
-    returns = np.asarray(returns, dtype=float)
-    benchmark_returns = np.asarray(benchmark_returns, dtype=float)
-    excess = returns - benchmark_returns
+        benchmark_arr = benchmark_returns.values
+    else:
+        benchmark_arr = np.asarray(benchmark_returns, dtype=float)
+    excess = returns_arr - benchmark_arr
     tracking_error = np.std(excess, ddof=1)
     if tracking_error == 0:
         return 0.0
     return float(np.mean(excess) / tracking_error)
 
 
-def compute_calmar_ratio(returns, periods_per_year=252):
+def compute_calmar_ratio(returns: pd.Series | np.ndarray, periods_per_year: int = 252) -> float:
     if isinstance(returns, pd.Series):
-        returns = returns.values
-    returns = np.asarray(returns, dtype=float)
-    total_ret = np.prod(1 + returns) - 1
-    n = len(returns)
+        returns_arr = returns.values
+    else:
+        returns_arr = np.asarray(returns, dtype=float)
+    total_ret = np.prod(1 + returns_arr) - 1
+    n = len(returns_arr)
     cagr = (1 + total_ret) ** (periods_per_year / n) - 1 if n > 0 else 0.0
-    eq = np.cumprod(1 + returns)
+    eq = np.cumprod(1 + returns_arr)
     peak = np.maximum.accumulate(eq)
     dd = (eq - peak) / peak
     max_dd = abs(float(np.min(dd)))
@@ -88,10 +97,12 @@ def compute_calmar_ratio(returns, periods_per_year=252):
     return float(cagr / max_dd)
 
 
-def compute_max_drawdown_details(equity_curve):
+def compute_max_drawdown_details(equity_curve: pd.Series | np.ndarray) -> dict[str, int | float]:
     if isinstance(equity_curve, pd.Series):
-        equity_curve = equity_curve.values
-    eq = np.asarray(equity_curve, dtype=float)
+        eq_arr = equity_curve.values
+    else:
+        eq_arr = np.asarray(equity_curve, dtype=float)
+    eq = np.asarray(eq_arr, dtype=float)
     peak = np.maximum.accumulate(eq)
     dd = (eq - peak) / peak
     trough_idx = np.argmin(dd)
@@ -100,7 +111,7 @@ def compute_max_drawdown_details(equity_curve):
             "start_idx": 0, "end_idx": 0, "recovery_idx": 0,
             "depth": 0.0, "duration": 0
         }
-    peak_idx = np.argmax(eq[:trough_idx + 1])
+    peak_idx = int(np.argmax(eq[:trough_idx + 1]))
     peak_val = eq[peak_idx]
     recovery_idx = trough_idx
     for i in range(trough_idx + 1, len(eq)):
@@ -108,7 +119,7 @@ def compute_max_drawdown_details(equity_curve):
             recovery_idx = i
             break
     return {
-        "start_idx": int(peak_idx),
+        "start_idx": peak_idx,
         "end_idx": int(trough_idx),
         "recovery_idx": int(recovery_idx),
         "depth": float(dd[trough_idx]),
@@ -116,7 +127,7 @@ def compute_max_drawdown_details(equity_curve):
     }
 
 
-def monthly_returns_table(returns):
+def monthly_returns_table(returns: pd.Series) -> pd.DataFrame:
     if not isinstance(returns, pd.Series):
         raise TypeError("monthly_returns_table requires a pandas Series with DatetimeIndex")
     monthly = returns.groupby([returns.index.year, returns.index.month]).apply(
@@ -128,12 +139,12 @@ def monthly_returns_table(returns):
     return table
 
 
-def yearly_returns_table(returns, periods_per_year=252):
+def yearly_returns_table(returns: pd.Series, periods_per_year: int = 252) -> pd.DataFrame:
     if not isinstance(returns, pd.Series):
         raise TypeError("yearly_returns_table requires a pandas Series with DatetimeIndex")
     years = returns.groupby(returns.index.year)
 
-    def yearly_stats(group):
+    def yearly_stats(group: pd.Series) -> pd.Series:
         r = group.values
         n = len(r)
         ret = float(np.prod(1 + r) - 1)
@@ -157,20 +168,26 @@ def yearly_returns_table(returns, periods_per_year=252):
     return table
 
 
-def benchmark_comparison(returns, benchmark_returns, periods_per_year=252):
+def benchmark_comparison(
+    returns: pd.Series | np.ndarray,
+    benchmark_returns: pd.Series | np.ndarray,
+    periods_per_year: int = 252,
+) -> dict[str, float]:
     if isinstance(returns, pd.Series):
-        returns = returns.values
+        returns_arr = returns.values
+    else:
+        returns_arr = np.asarray(returns, dtype=float)
     if isinstance(benchmark_returns, pd.Series):
-        benchmark_returns = benchmark_returns.values
-    returns = np.asarray(returns, dtype=float)
-    benchmark_returns = np.asarray(benchmark_returns, dtype=float)
-    cov = np.cov(returns, benchmark_returns, ddof=1)
+        benchmark_arr = benchmark_returns.values
+    else:
+        benchmark_arr = np.asarray(benchmark_returns, dtype=float)
+    cov = np.cov(returns_arr, benchmark_arr, ddof=1)
     beta = cov[0, 1] / cov[1, 1] if cov[1, 1] != 0 else 0.0
-    alpha = (np.mean(returns) - beta * np.mean(benchmark_returns)) * periods_per_year
-    corr = np.corrcoef(returns, benchmark_returns)[0, 1]
-    tracking_error = np.std(returns - benchmark_returns, ddof=1)
+    alpha = (np.mean(returns_arr) - beta * np.mean(benchmark_arr)) * periods_per_year
+    corr = np.corrcoef(returns_arr, benchmark_arr)[0, 1]
+    tracking_error = np.std(returns_arr - benchmark_arr, ddof=1)
     ann_tracking_error = tracking_error * np.sqrt(periods_per_year)
-    info_ratio = (np.mean(returns - benchmark_returns) / tracking_error * np.sqrt(periods_per_year)) if tracking_error > 0 else 0.0
+    info_ratio = (np.mean(returns_arr - benchmark_arr) / tracking_error * np.sqrt(periods_per_year)) if tracking_error > 0 else 0.0
     return {
         "Alpha": float(alpha),
         "Beta": float(beta),
@@ -180,17 +197,17 @@ def benchmark_comparison(returns, benchmark_returns, periods_per_year=252):
     }
 
 
-def compute_win_rate(trades):
-    trades = np.asarray(trades, dtype=float)
-    if len(trades) == 0:
+def compute_win_rate(trades: np.ndarray | list[float]) -> float:
+    trades_arr = np.asarray(trades, dtype=float)
+    if len(trades_arr) == 0:
         return 0.0
-    return float(np.sum(trades > 0) / len(trades))
+    return float(np.sum(trades_arr > 0) / len(trades_arr))
 
 
-def compute_profit_factor(trades):
-    trades = np.asarray(trades, dtype=float)
-    gross_profit = trades[trades > 0].sum()
-    gross_loss = abs(trades[trades < 0].sum())
+def compute_profit_factor(trades: np.ndarray | list[float]) -> float:
+    trades_arr = np.asarray(trades, dtype=float)
+    gross_profit = trades_arr[trades_arr > 0].sum()
+    gross_loss = abs(trades_arr[trades_arr < 0].sum())
     if gross_loss == 0:
         return float("inf") if gross_profit > 0 else 0.0
     return float(gross_profit / gross_loss)

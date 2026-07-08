@@ -13,6 +13,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 revision: str = "c3d4e5f6a7b8"
@@ -39,13 +40,19 @@ USER_SCOPED_TABLES = [
 ]
 
 
+def _is_postgresql() -> bool:
+    conn = op.get_bind()
+    return conn.dialect.name == "postgresql"
+
+
 def upgrade() -> None:
     op.create_index(op.f("ix_portfolio_user_id"), "portfolio", ["user_id"], unique=False)
     op.create_index(op.f("ix_transactions_user_id"), "transactions", ["user_id"], unique=False)
     op.create_index(op.f("ix_notifications_user_id"), "notifications", ["user_id"], unique=False)
     op.create_index(op.f("ix_alert_log_user_id"), "alert_log", ["user_id"], unique=False)
     op.create_index(op.f("ix_subscriptions_user_id"), "subscriptions", ["user_id"], unique=False)
-    _run_rls_sql("upgrade")
+    if _is_postgresql():
+        _run_rls_sql("upgrade")
 
 
 def downgrade() -> None:
@@ -54,7 +61,8 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_notifications_user_id"), table_name="notifications")
     op.drop_index(op.f("ix_alert_log_user_id"), table_name="alert_log")
     op.drop_index(op.f("ix_subscriptions_user_id"), table_name="subscriptions")
-    _run_rls_sql("downgrade")
+    if _is_postgresql():
+        _run_rls_sql("downgrade")
 
 
 def _run_rls_sql(direction: str) -> None:

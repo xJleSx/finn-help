@@ -16,6 +16,15 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizeCss: false,
   },
+
+  async rewrites() {
+    return [
+      {
+        source: "/api/:path*",
+        destination: "/api/proxy/:path*",
+      },
+    ];
+  },
 };
 
 export default nextConfig;

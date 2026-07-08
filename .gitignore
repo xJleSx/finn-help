@@ -45,3 +45,8 @@ tmp/
 
 # AI skill tools (reference, not part of project)
 .opencode/skills-tools/
+
+# AI agent artifacts (personal tooling, not project code)
+AGENTS.md
+opencode.json
+tui.json

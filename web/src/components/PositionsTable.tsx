@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { formatCurrency } from "../lib/format";
 
 type Position = {
   id: number;
@@ -11,10 +12,6 @@ type Position = {
   value: number;
   profit_pct: number | null;
 };
-
-function formatCurrency(v: number) {
-  return v.toLocaleString("ru-RU", { style: "currency", currency: "RUB", minimumFractionDigits: 0, maximumFractionDigits: 0 });
-}
 
 export function PositionsTable({ positions, isLoading }: { positions: Position[]; isLoading: boolean }) {
   if (isLoading) {

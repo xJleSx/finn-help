@@ -94,6 +94,7 @@ export function AlertPreferences() {
                   <button
                     onClick={() => unmuteMutation.mutate(t)}
                     className="text-red-400 hover:text-red-300 transition"
+                    aria-label={`Убрать заглушение для ${t}`}
                   >
                     ×
                   </button>

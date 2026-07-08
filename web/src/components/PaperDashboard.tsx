@@ -5,6 +5,29 @@ import { useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "@/lib/api-client";
 
+function MetricGrid({ metrics }: { metrics: Record<string, number> }) {
+  const items = [
+    { label: "Sharpe", value: metrics.sharpe?.toFixed(2), color: "text-white" },
+    { label: "Sortino", value: metrics.sortino?.toFixed(2), color: "text-white" },
+    { label: "Calmar", value: metrics.calmar?.toFixed(2), color: "text-white" },
+    { label: "Max DD", value: metrics.max_drawdown != null ? `${(metrics.max_drawdown * 100).toFixed(1)}%` : "-", color: metrics.max_drawdown < -0.2 ? "text-red-400" : "text-amber-400" },
+    { label: "Win Rate", value: metrics.win_rate != null ? `${(metrics.win_rate * 100).toFixed(1)}%` : "-", color: "text-emerald-400" },
+    { label: "Profit Factor", value: metrics.profit_factor?.toFixed(2), color: "text-white" },
+    { label: "Total Return", value: metrics.total_return != null ? `${(metrics.total_return * 100).toFixed(1)}%` : "-", color: (metrics.total_return || 0) >= 0 ? "text-emerald-400" : "text-red-400" },
+    { label: "Annual Return", value: metrics.annual_return != null ? `${(metrics.annual_return * 100).toFixed(1)}%` : "-", color: (metrics.annual_return || 0) >= 0 ? "text-emerald-400" : "text-red-400" },
+    { label: "Volatility", value: metrics.volatility != null ? `${(metrics.volatility * 100).toFixed(1)}%` : "-", color: "text-white" },
+    { label: "VaR(95%)", value: metrics.var_95 != null ? `${(metrics.var_95 * 100).toFixed(1)}%` : "-", color: "text-red-400" },
+    { label: "CVaR(95%)", value: metrics.cvar_95 != null ? `${(metrics.cvar_95 * 100).toFixed(1)}%` : "-", color: "text-red-400" },
+    { label: "Сделок", value: String(metrics.n_trades ?? 0), color: "text-white" },
+  ];
+  return items.map((item) => (
+    <div key={item.label} className="bg-white/[0.03] rounded-xl p-3 border border-white/5">
+      <p className="text-[10px] text-gray-500 font-mono mb-1">{item.label}</p>
+      <p className={`text-lg font-mono font-light ${item.color}`}>{item.value}</p>
+    </div>
+  ));
+}
+
 export function PaperDashboard() {
   const queryClient = useQueryClient();
   const [ticker, setTicker] = useState("");
@@ -224,29 +247,7 @@ export function PaperDashboard() {
         <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
           <h2 className="text-sm font-light text-white mb-4">Метрики производительности</h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-            {(() => {
-              const m = metrics as Record<string, number>;
-              const items = [
-                { label: "Sharpe", value: m.sharpe?.toFixed(2), color: "text-white" },
-                { label: "Sortino", value: m.sortino?.toFixed(2), color: "text-white" },
-                { label: "Calmar", value: m.calmar?.toFixed(2), color: "text-white" },
-                { label: "Max DD", value: m.max_drawdown != null ? `${(m.max_drawdown * 100).toFixed(1)}%` : "-", color: m.max_drawdown < -0.2 ? "text-red-400" : "text-amber-400" },
-                { label: "Win Rate", value: m.win_rate != null ? `${(m.win_rate * 100).toFixed(1)}%` : "-", color: "text-emerald-400" },
-                { label: "Profit Factor", value: m.profit_factor?.toFixed(2), color: "text-white" },
-                { label: "Total Return", value: m.total_return != null ? `${(m.total_return * 100).toFixed(1)}%` : "-", color: (m.total_return || 0) >= 0 ? "text-emerald-400" : "text-red-400" },
-                { label: "Annual Return", value: m.annual_return != null ? `${(m.annual_return * 100).toFixed(1)}%` : "-", color: (m.annual_return || 0) >= 0 ? "text-emerald-400" : "text-red-400" },
-                { label: "Volatility", value: m.volatility != null ? `${(m.volatility * 100).toFixed(1)}%` : "-", color: "text-white" },
-                { label: "VaR(95%)", value: m.var_95 != null ? `${(m.var_95 * 100).toFixed(1)}%` : "-", color: "text-red-400" },
-                { label: "CVaR(95%)", value: m.cvar_95 != null ? `${(m.cvar_95 * 100).toFixed(1)}%` : "-", color: "text-red-400" },
-                { label: "Сделок", value: String(m.n_trades ?? 0), color: "text-white" },
-              ];
-              return items.map((item) => (
-                <div key={item.label} className="bg-white/[0.03] rounded-xl p-3 border border-white/5">
-                  <p className="text-[10px] text-gray-500 font-mono mb-1">{item.label}</p>
-                  <p className={`text-lg font-mono font-light ${item.color}`}>{item.value}</p>
-                </div>
-              ));
-            })()}
+            <MetricGrid metrics={metrics as Record<string, number>} />
           </div>
         </section>
       )}

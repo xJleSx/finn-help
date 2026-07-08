@@ -226,7 +226,7 @@ class CompanyProfile(Base):
 
     instrument = relationship("Instrument", backref="profile", uselist=False)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<CompanyProfile instrument_id={self.instrument_id}>"
 
 
@@ -286,7 +286,7 @@ class CorporateEvent(Base):
         Index("ix_corporate_event_instr_date", "instrument_id", "announcement_date"),
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<CorporateEvent {self.event_type} instr={self.instrument_id}>"
 
 

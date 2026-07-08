@@ -12,25 +12,25 @@ import { PriceTargetAlerts } from "@/components/PriceTargetAlerts";
 export default function AlertsPage() {
   const [filter, setFilter] = useState<string>("all");
 
-  const { data: alertsData, isLoading: alertsLoading, refetch: refetchAlerts } = useQuery({
+  const { data: alertsData, isLoading: alertsLoading, isError: alertsError, refetch: refetchAlerts } = useQuery({
     queryKey: ["alerts"],
     queryFn: () => api.alerts.list(50),
     refetchInterval: 30_000,
   });
 
-  const { data: analyticsData } = useQuery({
+  const { data: analyticsData, isError: analyticsError } = useQuery({
     queryKey: ["alert-analytics"],
     queryFn: () => api.alerts.analytics(30),
     refetchInterval: 120_000,
   });
 
-  const { data: priceTargets } = useQuery({
+  const { data: priceTargets, isError: ptError } = useQuery({
     queryKey: ["price-targets"],
     queryFn: () => api.alerts.priceTargets(),
     refetchInterval: 60_000,
   });
 
-  const { data: rebalanceAlerts } = useQuery({
+  const { data: rebalanceAlerts, isError: rebalanceError } = useQuery({
     queryKey: ["rebalance-alerts"],
     queryFn: () => api.alerts.rebalance(),
     refetchInterval: 120_000,
@@ -67,10 +67,32 @@ export default function AlertsPage() {
         <button
           onClick={handleRefresh}
           className="px-4 py-2 rounded-xl text-xs font-medium bg-amber-400/20 text-amber-400 hover:bg-amber-400/30 transition"
+          aria-label="Обновить алерты"
         >
           Обновить
         </button>
       </div>
+
+      {alertsError && (
+        <div className="bg-white/[0.04] border border-red-400/20 rounded-2xl p-4">
+          <p className="text-xs text-red-400">Не удалось загрузить алерты</p>
+        </div>
+      )}
+      {analyticsError && (
+        <div className="bg-white/[0.04] border border-red-400/20 rounded-2xl p-4">
+          <p className="text-xs text-red-400">Не удалось загрузить аналитику</p>
+        </div>
+      )}
+      {ptError && (
+        <div className="bg-white/[0.04] border border-red-400/20 rounded-2xl p-4">
+          <p className="text-xs text-red-400">Не удалось загрузить ценовые цели</p>
+        </div>
+      )}
+      {rebalanceError && (
+        <div className="bg-white/[0.04] border border-red-400/20 rounded-2xl p-4">
+          <p className="text-xs text-red-400">Не удалось загрузить ребалансировку</p>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {tabs.map((tab) => (

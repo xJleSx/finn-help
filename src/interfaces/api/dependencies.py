@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.auth_service import AuthService
 from src.core.container import container, wire
 from src.interfaces.api.auth import get_db, get_read_db
+from src.analysis.service import AnalysisService
 from src.market.service import MarketService
 from src.notifications.service import NotificationService
 from src.portfolio.service import PortfolioService
@@ -48,5 +49,4 @@ def get_notification_service(db: AsyncSession = Depends(get_db)) -> Notification
 
 
 def get_analysis_service() -> AnalysisService:
-    from src.analysis.service import AnalysisService
-    return container.get("analysis_service")
+    return container.get("analysis_service")  # type: ignore[no-any-return]

@@ -8,7 +8,7 @@ import { api } from "@/lib/api-client";
 export default function InstrumentsPage() {
   const [type, setType] = useState("stock");
 
-  const { data: instruments, isLoading } = useQuery({
+  const { data: instruments, isLoading, isError } = useQuery({
     queryKey: ["instruments", type],
     queryFn: () => api.instruments.list(type),
     refetchInterval: 60_000,
@@ -41,6 +41,12 @@ export default function InstrumentsPage() {
           ))}
         </div>
       </div>
+
+      {isError && (
+        <div className="bg-white/[0.04] border border-red-400/20 rounded-2xl p-4">
+          <p className="text-xs text-red-400">Не удалось загрузить инструменты</p>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="space-y-2">

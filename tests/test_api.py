@@ -6,18 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
-class AsyncMagicMock(MagicMock):
-    """MagicMock that supports async/await like AsyncMock."""
-
-    async def __call__(self, *args, **kwargs):
-        return super().__call__(*args, **kwargs)
-
-    def __await__(self):
-        async def _():
-            return self
-
-        return _().__await__()
+from tests.conftest import AsyncMagicMock
 
 
 @pytest.fixture

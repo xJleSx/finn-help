@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from typing import Any, Callable
 
 
@@ -75,7 +76,7 @@ def wire(settings_override: Any = None) -> None:
     container.register("social_registry", social_registry)
     container.register("social_aggregator", social_aggregator)
     container.register("social_analyzer", social_analyzer)
-    container.register_factory("position_tracker", lambda: __import__("src.trading.execution.stoploss", fromlist=["position_tracker"]).position_tracker)
+    container.register_factory("position_tracker", lambda: importlib.import_module("src.trading.execution.stoploss").position_tracker)
     container.register("scheduler_divergence", sched_divergence)
     container.register("scheduler_geo_risk", sched_geo_risk)
     container.register("scheduler_fusion", sched_fusion)
@@ -85,9 +86,9 @@ def wire(settings_override: Any = None) -> None:
 
     container.register("llm_router", llm_router)
     container.register_factory("notification_service", lambda: NotificationService())
-    container.register_factory("telegram_bot", lambda: __import__("src.interfaces.telegram", fromlist=["run_bot"]).run_bot)
-    container.register_factory("bot_app", lambda: __import__("src.interfaces.telegram", fromlist=["app"]).app)
-    container.register_factory("run_analysis", lambda: __import__("src.cli", fromlist=["run_analysis"]).run_analysis)
+    container.register_factory("telegram_bot", lambda: importlib.import_module("src.interfaces.telegram").run_bot)
+    container.register_factory("bot_app", lambda: importlib.import_module("src.interfaces.telegram").app)
+    container.register_factory("run_analysis", lambda: importlib.import_module("src.cli").run_analysis)
 
 
 def container_for_testing() -> Container:

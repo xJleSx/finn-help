@@ -8,6 +8,72 @@ import { CandlestickChart } from "@/components/CandlestickChart";
 import { TradePlanCard } from "@/components/TradePlanCard";
 import { SignalBadge } from "@/components/SignalBadge";
 
+function SignalCard({ signal }: { signal: Record<string, unknown> }) {
+  const fv = signal.fused;
+  const cv = signal.confidence;
+  const tv = signal.technical;
+  const fuv = signal.fundamental;
+
+  return (
+    <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
+      <h2 className="text-sm font-light text-white mb-3">Сигнал</h2>
+      <div className="space-y-2 text-xs">
+        {fv != null && (
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500">Fused:</span>
+            <span className="font-mono text-white">{String(fv)}</span>
+          </div>
+        )}
+        {cv != null && (
+          <div>
+            <span className="text-gray-500">Уверенность:</span>
+            <div className="mt-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-amber-400 rounded-full"
+                style={{ width: `${Math.min((cv as number) * 100, 100)}%` }}
+              />
+            </div>
+            <span className="font-mono text-white text-[10px]">
+              {((cv as number) * 100).toFixed(0)}%
+            </span>
+          </div>
+        )}
+        {tv != null && (
+          <div>
+            <span className="text-gray-500">Technical:</span>
+            <span className="font-mono text-white ml-1">{JSON.stringify(tv)}</span>
+          </div>
+        )}
+        {fuv != null && (
+          <div>
+            <span className="text-gray-500">Fundamental:</span>
+            <span className="font-mono text-white ml-1">{JSON.stringify(fuv)}</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MlPredictionsCard({ signal }: { signal: Record<string, unknown> }) {
+  const ml = signal.ml;
+  if (!ml || typeof ml !== "object") return null;
+
+  return (
+    <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
+      <h2 className="text-sm font-light text-white mb-3">ML Прогнозы</h2>
+      <div className="space-y-2 text-xs">
+        {Object.entries(ml as Record<string, unknown>).map(([model, pred]) => (
+          <div key={model} className="bg-white/[0.03] rounded-lg p-2.5 border border-white/5">
+            <span className="text-gray-500">{model}:</span>
+            <span className="font-mono text-white ml-1">{String(pred)}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function InstrumentDetailPage({ params }: { params: Promise<{ ticker: string }> }) {
   const { ticker } = use(params);
 
@@ -73,75 +139,11 @@ export default function InstrumentDetailPage({ params }: { params: Promise<{ tic
 
         <aside className="space-y-5">
           <ErrorBoundary>
-            {signal && (
-              <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
-                <h2 className="text-sm font-light text-white mb-3">Сигнал</h2>
-                {(() => {
-                  const s = signal as Record<string, unknown>;
-                  const fv = s.fused;
-                  const cv = s.confidence;
-                  const tv = s.technical;
-                  const fuv = s.fundamental;
-                  return (
-                    <div className="space-y-2 text-xs">
-                      {fv != null && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-500">Fused:</span>
-                          <span className="font-mono text-white">{String(fv)}</span>
-                        </div>
-                      )}
-                      {cv != null && (
-                        <div>
-                          <span className="text-gray-500">Уверенность:</span>
-                          <div className="mt-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-amber-400 rounded-full"
-                              style={{ width: `${Math.min((cv as number) * 100, 100)}%` }}
-                            />
-                          </div>
-                          <span className="font-mono text-white text-[10px]">
-                            {((cv as number) * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                      )}
-                      {tv != null && (
-                        <div>
-                          <span className="text-gray-500">Technical:</span>
-                          <span className="font-mono text-white ml-1">{JSON.stringify(tv)}</span>
-                        </div>
-                      )}
-                      {fuv != null && (
-                        <div>
-                          <span className="text-gray-500">Fundamental:</span>
-                          <span className="font-mono text-white ml-1">{JSON.stringify(fuv)}</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </section>
-            )}
+            {signal && <SignalCard signal={signal as Record<string, unknown>} />}
           </ErrorBoundary>
 
           <ErrorBoundary>
-            {signal && (() => {
-              const s = signal as Record<string, unknown>;
-              const ml = s.ml;
-              if (!ml || typeof ml !== "object") return null;
-              return (
-                <section className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 backdrop-blur-sm">
-                  <h2 className="text-sm font-light text-white mb-3">ML Прогнозы</h2>
-                  <div className="space-y-2 text-xs">
-                    {Object.entries(ml as Record<string, unknown>).map(([model, pred]) => (
-                      <div key={model} className="bg-white/[0.03] rounded-lg p-2.5 border border-white/5">
-                        <span className="text-gray-500">{model}:</span>
-                        <span className="font-mono text-white ml-1">{String(pred)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              );
-            })()}
+            {signal && <MlPredictionsCard signal={signal as Record<string, unknown>} />}
           </ErrorBoundary>
         </aside>
       </div>
