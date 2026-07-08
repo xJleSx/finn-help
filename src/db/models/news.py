@@ -1,17 +1,14 @@
 from sqlalchemy import (
+    JSON,
     Boolean,
     Column,
     DateTime,
     Float,
     ForeignKey,
     Integer,
-    JSON,
     String,
     Text,
     func,
-)
-from sqlalchemy import (
-    Index,
 )
 from sqlalchemy.orm import relationship
 

@@ -31,6 +31,7 @@ class AlertPushService:
             try:
                 handler(alert)
             except Exception:
+                logger.exception("Unhandled exception")
                 logger.exception("AlertPushService: handler for %s failed", client_id)
 
     def broadcast(self, alerts: list[dict[str, Any]]) -> None:

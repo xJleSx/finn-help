@@ -29,6 +29,7 @@ def run_daily_update(self) -> dict[str, Any]:
         try:
             self.retry(exc=e)
         except Exception:
+            logger.exception("Unhandled exception")
             return {"status": "error", "error": str(e)}
 
 
@@ -53,6 +54,7 @@ def run_weekly_update(self) -> dict[str, Any]:
         try:
             self.retry(exc=e)
         except Exception:
+            logger.exception("Unhandled exception")
             return {"status": "error", "error": str(e)}
 
 

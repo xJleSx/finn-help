@@ -65,6 +65,7 @@ def train_model(self, instrument_id: int, ticker: str) -> dict[str, Any]:
         try:
             self.retry(exc=e)
         except Exception:
+            logger.exception("Unhandled exception")
             return {"ticker": ticker, "status": "error", "error": str(e)}
     finally:
         db.close()

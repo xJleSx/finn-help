@@ -49,6 +49,7 @@ class StatsModelsTrendPredictor(BaseRegressor):
             try:
                 return self._predict_with_model(df, days_ahead)
             except Exception:
+                logger.exception("Unhandled exception")
                 logger.warning("Loaded trend model failed, retraining", exc_info=True)
 
         logger.info("Training trend model for %s on the fly (%d rows)", self._ticker or "default", len(df))
@@ -162,6 +163,7 @@ class StatsModelsTrendPredictor(BaseRegressor):
                     total_magnitude = float(delta_series.abs().sum())
                     return {"changed": total_magnitude > 0.02, "magnitude": round(total_magnitude, 4)}
         except Exception:
+            logger.exception("Unhandled exception")
             pass
         return {"changed": False, "magnitude": 0.0}
 
@@ -180,6 +182,7 @@ class StatsModelsTrendPredictor(BaseRegressor):
             r2 = max(0.0, min(1.0, 1.0 - ss_res / ss_tot))
             return round(r2, 3)
         except Exception:
+            logger.exception("Unhandled exception")
             return 0.0
 
     def _forecast_uncertainty(self, forecast: pd.DataFrame, current_price: float) -> float:
@@ -194,6 +197,7 @@ class StatsModelsTrendPredictor(BaseRegressor):
             avg_width = float(widths.mean())
             return round(min(avg_width, 1.0), 3)
         except Exception:
+            logger.exception("Unhandled exception")
             return 0.5
 
     def _predict_with_model(self, df: pd.DataFrame, days_ahead: int = 10) -> dict[str, Any]:

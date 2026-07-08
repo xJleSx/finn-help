@@ -155,9 +155,7 @@ def kendall_correlation(df: pd.DataFrame) -> pd.DataFrame:
     return df.corr(method="kendall")
 
 
-def rolling_correlation(
-    df: pd.DataFrame, window: int = 60, method: str = "pearson"
-) -> dict[str, pd.Series]:
+def rolling_correlation(df: pd.DataFrame, window: int = 60, method: str = "pearson") -> dict[str, pd.Series]:
     rolling_corr = df.rolling(window=window).corr(method=method)  # type: ignore[call-arg]
     pairs: dict[str, pd.Series] = {}
     for i, col1 in enumerate(df.columns):
@@ -201,15 +199,13 @@ def tail_dependence(
     return 0.0
 
 
-def hierarchical_clustering(
-    corr_matrix: pd.DataFrame, method: str = "single"
-) -> dict[str, Any]:
+def hierarchical_clustering(corr_matrix: pd.DataFrame, method: str = "single") -> dict[str, Any]:
     dist = 1.0 - corr_matrix.abs()
     condensed = squareform(dist.values)
-    Z = linkage(condensed, method=method)
-    labels = fcluster(Z, t=0.5 * Z[:, 2].max(), criterion="distance")
+    z = linkage(condensed, method=method)
+    labels = fcluster(z, t=0.5 * z[:, 2].max(), criterion="distance")
     return {
-        "linkage_matrix": Z,
+        "linkage_matrix": z,
         "labels": pd.Series(labels, index=corr_matrix.index, name="cluster"),
     }
 

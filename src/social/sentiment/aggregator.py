@@ -25,6 +25,7 @@ def _calc_divergence(scores: list[float]) -> float:
     try:
         sd = stdev(scores)
     except Exception:
+        logger.exception("Unhandled exception")
         return 0.0
     return min(sd * 1.5, 1.0)
 

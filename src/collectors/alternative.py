@@ -10,7 +10,6 @@ from xml.etree import ElementTree
 import httpx
 
 from src.collectors.base import BaseCollector
-
 from src.config import settings
 from src.core.executor import get_executor
 from src.db.models import AltDataPoint
@@ -131,6 +130,7 @@ class RosstatSource(AltDataSource):
             resp.raise_for_status()
             data = resp.json()
         except Exception:
+            logger.exception("Unhandled exception")
             return None
 
         return _parse_rosstat_value(data, key)

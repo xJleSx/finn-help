@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -17,12 +17,7 @@ def get_instrument_by_id(db: Session, instrument_id: int) -> Optional[Instrument
 
 def get_latest_price(db: Session, instrument_id: int) -> Optional[Price]:
     """Get the most recent price for an instrument."""
-    return (
-        db.query(Price)
-        .filter_by(instrument_id=instrument_id)
-        .order_by(Price.date.desc())
-        .first()
-    )
+    return db.query(Price).filter_by(instrument_id=instrument_id).order_by(Price.date.desc()).first()
 
 
 def get_price_history(
@@ -31,10 +26,4 @@ def get_price_history(
     limit: int = 21,
 ) -> list[Price]:
     """Get recent price history (newest first)."""
-    return (
-        db.query(Price)
-        .filter_by(instrument_id=instrument_id)
-        .order_by(Price.date.desc())
-        .limit(limit)
-        .all()
-    )
+    return db.query(Price).filter_by(instrument_id=instrument_id).order_by(Price.date.desc()).limit(limit).all()

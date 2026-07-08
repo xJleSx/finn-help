@@ -63,6 +63,7 @@ async def get_async_session() -> AsyncIterator[AsyncSession]:
             yield session
             await session.commit()
         except Exception:
+            logger.exception("Unhandled exception")
             await session.rollback()
             raise
         finally:
@@ -116,6 +117,7 @@ async def get_read_replica_session() -> AsyncIterator[AsyncSession]:
             yield session
             await session.commit()
         except Exception:
+            logger.exception("Unhandled exception")
             await session.rollback()
             raise
         finally:
@@ -165,6 +167,7 @@ def session_scope() -> Any:
     try:
         yield session
     except Exception:
+        logger.exception("Unhandled exception")
         session.rollback()
         raise
     finally:

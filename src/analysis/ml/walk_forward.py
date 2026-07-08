@@ -185,13 +185,9 @@ def compute_profit_factor_threshold(
         avg_win = 1.0
         avg_loss = 1.0
         if tp > 0:
-            avg_win = float(
-                (y_true[y_pred == 1]).sum() / tp
-            )
+            avg_win = float((y_true[y_pred == 1]).sum() / tp)
         if fp > 0:
-            avg_loss = float(
-                (1 - y_true[y_pred == 1]).sum() / fp
-            )
+            avg_loss = float((1 - y_true[y_pred == 1]).sum() / fp)
         pf = (tp * avg_win) / (fp * avg_loss) if (fp * avg_loss) > 0 else 0.0
         profit_factors[i] = pf
 
@@ -201,13 +197,9 @@ def compute_profit_factor_threshold(
     return best_threshold, best_pf, thresholds, profit_factors
 
 
-def multiclass_labels(
-    returns: pd.Series, thresholds: tuple[float, float] = (-0.01, 0.01)
-) -> pd.Series:
+def multiclass_labels(returns: pd.Series, thresholds: tuple[float, float] = (-0.01, 0.01)) -> pd.Series:
     lower, upper = thresholds
-    return returns.apply(
-        lambda x: 0 if x < lower else (2 if x > upper else 1)
-    ).astype(int)
+    return returns.apply(lambda x: 0 if x < lower else (2 if x > upper else 1)).astype(int)
 
 
 def multiclass_classification_report(
@@ -226,11 +218,7 @@ def multiclass_classification_report(
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = (
-            2 * precision * recall / (precision + recall)
-            if (precision + recall) > 0
-            else 0.0
-        )
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
         rows.append(
             {
                 "class": name,
@@ -251,14 +239,9 @@ def deflated_sharpe_ratio(
     skewness: float = 0.0,
     kurtosis: float = 3.0,
 ) -> float:
-    sr_std = np.sqrt(
-        (1 - skewness * observed_sr + (kurtosis - 1) / 4 * observed_sr**2)
-        / (backtest_length - 1)
-    )
+    sr_std = np.sqrt((1 - skewness * observed_sr + (kurtosis - 1) / 4 * observed_sr**2) / (backtest_length - 1))
     euler_mascheroni = 0.5772156649
-    expected_max_sr = norm.ppf(1 - 1 / num_trials) * (
-        1 - euler_mascheroni
-    ) + euler_mascheroni * norm.ppf(1 - 1 / (num_trials * np.e))
+    expected_max_sr = norm.ppf(1 - 1 / num_trials) * (1 - euler_mascheroni) + euler_mascheroni * norm.ppf(1 - 1 / (num_trials * np.e))
     dsr = float(norm.cdf((observed_sr - expected_max_sr) / sr_std))
     return dsr
 
@@ -272,6 +255,5 @@ def probability_of_backtest_overfitting(
     n_paths, n_folds = paths.shape
     rank = np.argsort(paths, axis=0).argsort(axis=0).astype(float)
     rank = rank / (n_paths - 1)
-    logit = np.log(rank / (1 - rank + 1e-10))
     rank_above_median = (rank > 0.5).mean()
     return float(rank_above_median)

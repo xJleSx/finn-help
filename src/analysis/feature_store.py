@@ -97,6 +97,7 @@ def _get_redis() -> Any:
             _redis_instance = redis_mod.Redis(connection_pool=_redis_pool)
             _redis_instance.ping()
         except Exception:
+            logger.exception("Unhandled exception")
             _redis_instance = False
     return _redis_instance if _redis_instance else None
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.analysis.service import AnalysisService
 from src.core.auth_service import AuthService
 from src.core.container import container, wire
 from src.interfaces.api.auth import get_db, get_read_db
-from src.analysis.service import AnalysisService
 from src.market.service import MarketService
 from src.notifications.service import NotificationService
 from src.portfolio.service import PortfolioService

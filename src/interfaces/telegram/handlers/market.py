@@ -5,7 +5,6 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.collectors.cbr import CBRCollector
-from src.config import personal
 from src.db.connection import get_session
 from src.db.models import News
 from src.interfaces.telegram_guard import guard
@@ -41,6 +40,7 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         finally:
             db.close()
     except Exception:
+        logger.exception("Unhandled exception")
         logger.warning("News command error", exc_info=True)
         await update.effective_message.reply_text("❌ Не удалось загрузить новости.")
 
@@ -87,6 +87,7 @@ async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 lines.append(f"  {r['code']}: {r['value']:.2f} \u20bd")
         await update.effective_message.reply_text("\n".join(lines))
     except Exception:
+        logger.exception("Unhandled exception")
         logger.warning("Rates error", exc_info=True)
         await update.effective_message.reply_text("\u274c Не удалось получить курсы. Попробуйте позже.")
 
@@ -252,6 +253,7 @@ async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "/price toggle <id> — вкл/выкл"
         )
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("price_cmd_failed", user_id=uid)
         await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
     finally:

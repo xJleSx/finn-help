@@ -1,5 +1,4 @@
 # ruff: noqa: E501
-import json
 
 QUESTION_SYSTEM_PROMPT = """Ты — финансовый ассистент FinAdvisor. Отвечаешь на вопросы пользователей о российском фондовом рынке (MOEX).
 

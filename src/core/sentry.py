@@ -40,6 +40,7 @@ def sentry_set_user_context(user_id: int, username: str = "", portfolio_id: int 
         if extra:
             sentry_sdk.set_context("finadvisor", extra)
     except Exception:
+        logger.exception("Unhandled exception")
         pass
 
 
@@ -49,4 +50,5 @@ def sentry_set_extra(key: str, value: object) -> None:
 
         sentry_sdk.set_extra(key, value)
     except Exception:
+        logger.exception("Unhandled exception")
         pass

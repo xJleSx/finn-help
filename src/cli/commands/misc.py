@@ -3,8 +3,9 @@ import logging
 
 import typer
 
-from . import app, paper_app, console
 from src.db.connection import init_db
+
+from . import app, console, paper_app
 
 logger = logging.getLogger(__name__)
 

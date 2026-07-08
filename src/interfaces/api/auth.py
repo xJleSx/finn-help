@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Optional
@@ -9,6 +10,7 @@ from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.cache import get_redis
 from src.config import settings
 from src.db.connection import get_async_session
 from src.db.models import User
@@ -16,15 +18,23 @@ from src.db.models import User
 logger = logging.getLogger(__name__)
 
 if not settings.jwt_secret:
-    logger.warning("JWT_SECRET is not configured. Using auto-generated secret — all existing tokens will be invalidated on restart.")
-SECRET_KEY = settings.jwt_secret or "insecure-fallback-not-for-production"
-REFRESH_SECRET_KEY = settings.jwt_secret + "_refresh" if settings.jwt_secret else "insecure-refresh-fallback"
+    raise RuntimeError(
+        "JWT_SECRET is not configured. Set JWT_SECRET in .env or environment variables. "
+        "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+    )
+
+SECRET_KEY = settings.jwt_secret
+REFRESH_SECRET_KEY = settings.jwt_secret + "_refresh"
 ALGORITHM = "HS256"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
-# In-memory blacklist for refresh tokens (use Redis in production)
-_refresh_blacklist: set[str] = set()
+_REFRESH_BLACKLIST_PREFIX = "finn:refresh_blacklist:"
+_refresh_blacklist_fallback: set[str] = set()
+
+
+def _blacklist_key(token: str) -> str:
+    return _REFRESH_BLACKLIST_PREFIX + hashlib.sha256(token.encode()).hexdigest()
 
 
 def hash_password(password: str) -> str:
@@ -72,11 +82,26 @@ def decode_refresh_token(token: str) -> dict[str, Any]:
 
 
 def blacklist_refresh_token(token: str) -> None:
-    _refresh_blacklist.add(token)
+    r = get_redis()
+    if r is not None:
+        try:
+            r.setex(_blacklist_key(token), 86400 * 31, "1")
+            return
+        except Exception:
+            logger.exception("Unhandled exception")
+            logger.warning("Redis set failed for refresh token blacklist, using in-memory fallback")
+    _refresh_blacklist_fallback.add(token)
 
 
 def is_refresh_token_blacklisted(token: str) -> bool:
-    return token in _refresh_blacklist
+    r = get_redis()
+    if r is not None:
+        try:
+            return bool(r.get(_blacklist_key(token)))
+        except Exception:
+            logger.exception("Unhandled exception")
+            logger.warning("Redis get failed for refresh token blacklist, using in-memory fallback")
+    return token in _refresh_blacklist_fallback
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

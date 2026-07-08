@@ -6,7 +6,6 @@ from typing import Any
 import structlog
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 
-from src.constants import ACTION_EMOJI
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
 from src.db.models import Portfolio as PortModel
@@ -260,6 +259,7 @@ def _find_tickers(text: str) -> list[str]:
         finally:
             db.close()
     except Exception:
+        logger.exception("Unhandled exception")
         db_tickers = set()
     words = re.findall(r"[A-Za-z0-9]{2,}", text.upper())
     found = [w for w in words if w in db_tickers or w in RUSSIAN_NAMES.values()]

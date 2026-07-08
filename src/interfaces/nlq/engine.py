@@ -23,6 +23,13 @@ from src.db.models import (
     Price,
 )
 from src.db.models import Signal as SignalModel
+from src.interfaces.nlq.constants import (
+    _ABBREVIATIONS,
+    _ENGLISH_TO_RUSSIAN,
+    _INTENT_MAP,
+    _KNOWN_SECTORS,
+    _TIMEFRAME_WORDS,
+)
 from src.interfaces.response_formatter import (
     build_bond_analysis,
     build_enriched_context_block,
@@ -33,13 +40,6 @@ from src.interfaces.response_formatter import (
     load_fundamental_metric,
 )
 from src.llm.router import llm as default_llm
-from src.interfaces.nlq.constants import (
-    _ABBREVIATIONS,
-    _ENGLISH_TO_RUSSIAN,
-    _INTENT_MAP,
-    _KNOWN_SECTORS,
-    _TIMEFRAME_WORDS,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,7 @@ class NLQueryEngine:
                         known.add(val.upper())
                 entities["tickers"] = [t for t in ticker_candidates if t in known]
             except Exception:
+                logger.exception("Unhandled exception")
                 entities["tickers"] = ticker_candidates
         else:
             entities["tickers"] = ticker_candidates

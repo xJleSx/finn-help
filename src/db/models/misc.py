@@ -1,18 +1,18 @@
 from sqlalchemy import (
+    JSON,
     Column,
     Date,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
     func,
 )
 from sqlalchemy import (
-    Index,
     text as sa_text,
 )
 

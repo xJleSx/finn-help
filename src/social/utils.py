@@ -61,6 +61,7 @@ def _load_tickers() -> set[str]:
         db.close()
         _KNOWN_TICKERS = {r[0].upper() for r in rows if r[0]}
     except Exception:
+        logger.exception("Unhandled exception")
         _KNOWN_TICKERS = {"SBER", "GAZP", "LKOH", "YNDX", "TATN", "VTBR", "ROSN", "NVTK", "MOEX"}
     return _KNOWN_TICKERS
 

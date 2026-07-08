@@ -3,9 +3,9 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.db.connection import get_session
+from src.interfaces.telegram.messages import _handle_text
 from src.interfaces.telegram_guard import guard
 from src.interfaces.telegram_helpers import html_escape
-from src.interfaces.telegram.messages import _handle_text
 from src.notifications.service import NotificationService
 
 logger = structlog.get_logger(__name__)
@@ -65,7 +65,7 @@ async def channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     try:
         from src.notifications.channels import ALL_CHANNELS, load_preferences, set_preference
 
-        CHANNEL_NAMES = {"telegram": "Telegram", "email": "Email", "web": "Web Push"}
+        channel_names = {"telegram": "Telegram", "email": "Email", "web": "Web Push"}
 
         if not args or args[0] == "status":
             prefs = load_preferences(db, uid)
@@ -74,7 +74,7 @@ async def channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 p = prefs.get(ch, {})
                 status = "✅" if p.get("enabled", True) else "❌"
                 sev = p.get("min_severity", "LOW")
-                lines.append(f"{status} <b>{CHANNEL_NAMES.get(ch, ch)}</b> — min {sev}")
+                lines.append(f"{status} <b>{channel_names.get(ch, ch)}</b> — min {sev}")
             await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
 
         elif args[0] == "set":
@@ -88,7 +88,7 @@ async def channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             enabled = args[2].lower() == "on"
             set_preference(db, uid, channel=ch, enabled=enabled)
             status = "включён" if enabled else "отключён"
-            await update.effective_message.reply_text(f"✅ {CHANNEL_NAMES.get(ch, ch)} {status}")
+            await update.effective_message.reply_text(f"✅ {channel_names.get(ch, ch)} {status}")
 
         elif args[0] == "severity":
             if len(args) < 3:
@@ -104,13 +104,14 @@ async def channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 return
             set_preference(db, uid, channel=ch, min_severity=level)
             await update.effective_message.reply_text(
-                f"✅ {CHANNEL_NAMES.get(ch, ch)}: мин. уровень <b>{level}</b>",
+                f"✅ {channel_names.get(ch, ch)}: мин. уровень <b>{level}</b>",
                 parse_mode="HTML",
             )
 
         else:
             await update.effective_message.reply_text("Команды: /channel status, /channel set <канал> <on|off>, /channel severity <канал> <уровень>")
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("channel_cmd_failed", user_id=uid)
         await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
     finally:
@@ -138,6 +139,7 @@ async def mute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             await update.effective_message.reply_text(f"ℹ️ <b>{html_escape(ticker)}</b> уже заглушён", parse_mode="HTML")
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("mute_failed", user_id=uid, ticker=ticker)
         await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
     finally:
@@ -165,6 +167,7 @@ async def unmute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         else:
             await update.effective_message.reply_text(f"ℹ️ <b>{html_escape(ticker)}</b> не был заглушён", parse_mode="HTML")
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("unmute_failed", user_id=uid, ticker=ticker)
         await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
     finally:
@@ -188,6 +191,7 @@ async def muted_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             await update.effective_message.reply_text("Нет заглушённых тикеров")
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("muted_failed", user_id=uid)
         await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
     finally:
@@ -218,6 +222,7 @@ async def quiet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             else:
                 await update.effective_message.reply_text("🌙 Тихие часы не настроены")
         except Exception:
+            logger.exception("Unhandled exception")
             logger.exception("quiet_status_failed", user_id=uid)
             await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
         finally:
@@ -233,6 +238,7 @@ async def quiet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             prefs_mgr.set_preferences(uid, db_session=db, quiet_hours_start=None, quiet_hours_end=None)
             await update.effective_message.reply_text("🌙 Тихие часы отключены")
         except Exception:
+            logger.exception("Unhandled exception")
             logger.exception("quiet_off_failed", user_id=uid)
             await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
         finally:
@@ -253,6 +259,7 @@ async def quiet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 parse_mode="HTML",
             )
         except Exception:
+            logger.exception("Unhandled exception")
             logger.exception("quiet_set_failed", user_id=uid)
             await update.effective_message.reply_text("❌ Ошибка. Попробуйте позже.")
         finally:

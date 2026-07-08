@@ -304,6 +304,7 @@ async def compute_geo_risk(db: Session, news_list: list[dict[str, Any]]) -> None
     try:
         rates = await cbr.get_rates()
     except Exception:
+        logger.exception("Unhandled exception")
         logger.warning("Failed to fetch CBR rates", exc_info=True)
         rates = []
     usd_rate = next((r for r in rates if r["code"] == "USD"), None)

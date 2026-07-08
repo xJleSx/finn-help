@@ -13,6 +13,7 @@ from src.config import settings
 from src.db.connection import get_session
 from src.db.models import Instrument
 from src.db.models import Portfolio as PortModel
+from src.interfaces.telegram.messages import _reply_with_allocation
 from src.interfaces.telegram_guard import _check_cooldown, guard
 from src.interfaces.telegram_helpers import (
     _chunk_text,
@@ -20,7 +21,6 @@ from src.interfaces.telegram_helpers import (
     get_portfolio_positions,
     html_escape,
 )
-from src.interfaces.telegram.messages import _reply_with_allocation
 from src.portfolio.allocator import allocator
 from src.reports import generate_portfolio_csv
 
@@ -239,6 +239,7 @@ async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             db.commit()
             await update.effective_message.reply_text(f"✅ {ticker}: полностью удалён из портфеля")
     except Exception:
+        logger.exception("Unhandled exception")
         db.rollback()
         logger.warning("Remove position error", exc_info=True)
         await update.effective_message.reply_text("❌ Не удалось удалить позицию. Попробуйте позже.")
@@ -286,5 +287,6 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             caption="📊 Отчёт за 120 дней",
         )
     except Exception:
+        logger.exception("Unhandled exception")
         logger.warning("Report error", exc_info=True)
         await msg.edit_text("❌ Ошибка формирования отчёта.")

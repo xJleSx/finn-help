@@ -16,7 +16,27 @@ from telegram.ext import (
 )
 
 from src.config import settings
+from src.interfaces.telegram.callbacks import button_callback, reply_keyboard_handler
+from src.interfaces.telegram.conversations import (
+    ALLOC_AMOUNT,
+    ALLOC_EXCLUDE,
+    ALLOC_PROFILE,
+    PRICE,
+    QUANTITY,
+    TICKER,
+    add_cancel,
+    add_price,
+    add_quantity,
+    add_start,
+    add_ticker,
+    alloc_amount,
+    alloc_cancel,
+    alloc_exclude,
+    alloc_profile,
+    alloc_start,
+)
 from src.interfaces.telegram.handlers import (
+    allocate,
     analyze,
     ask,
     backtest,
@@ -54,25 +74,6 @@ from src.interfaces.telegram.handlers import (
     unsubscribe_author,
     weekly,
     whatif,
-)
-from src.interfaces.telegram.callbacks import button_callback, reply_keyboard_handler
-from src.interfaces.telegram.conversations import (
-    ALLOC_AMOUNT,
-    ALLOC_EXCLUDE,
-    ALLOC_PROFILE,
-    PRICE,
-    QUANTITY,
-    TICKER,
-    add_cancel,
-    add_price,
-    add_quantity,
-    add_start,
-    add_ticker,
-    alloc_amount,
-    alloc_cancel,
-    alloc_exclude,
-    alloc_profile,
-    alloc_start,
 )
 
 logger = structlog.get_logger(__name__)
@@ -121,11 +122,13 @@ async def _set_commands(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
     try:
         await app.bot.set_my_commands(commands)
     except Exception:
+        logger.exception("Unhandled exception")
         logger.warning("Failed to set bot commands", exc_info=True)
 
 
 def _stop_scheduler() -> None:
     from src.scheduler.service import stop as _sched_stop
+
     _sched_stop()
 
 
@@ -150,6 +153,7 @@ async def run_bot() -> None:
     app = builder.build()
 
     from src.interfaces.telegram_broadcaster import set_app
+
     set_app(app)
 
     await _set_commands(app)
@@ -267,6 +271,7 @@ async def run_bot() -> None:
     await app.start()
 
     from src.scheduler.service import start_background as _start_scheduler
+
     _scheduler_task = await _start_scheduler()
 
     try:

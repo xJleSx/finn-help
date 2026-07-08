@@ -4,23 +4,50 @@ from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BULLISH_KEYWORDS = [
-    "breakout", "bullish", "buy", "accumulate", "long", "green", "pump",
-    "moon", "upside", "growth", "rally", "surge", "positive", "strong",
-    "overbought", " momentum ",
+    "breakout",
+    "bullish",
+    "buy",
+    "accumulate",
+    "long",
+    "green",
+    "pump",
+    "moon",
+    "upside",
+    "growth",
+    "rally",
+    "surge",
+    "positive",
+    "strong",
+    "overbought",
+    " momentum ",
 ]
 
 DEFAULT_BEARISH_KEYWORDS = [
-    "breakdown", "bearish", "sell", "dump", "short", "red", "crash",
-    "panic", "downside", "decline", "plunge", "drop", "negative", "weak",
-    "oversold", "capitulation",
+    "breakdown",
+    "bearish",
+    "sell",
+    "dump",
+    "short",
+    "red",
+    "crash",
+    "panic",
+    "downside",
+    "decline",
+    "plunge",
+    "drop",
+    "negative",
+    "weak",
+    "oversold",
+    "capitulation",
 ]
 
 
-def funding_rate_sentiment(
-    funding_rates: pd.Series, threshold: float = 0.001
-) -> pd.Series:
+def funding_rate_sentiment(funding_rates: pd.Series, threshold: float = 0.001) -> pd.Series:
     abs_rates = funding_rates.abs()
     extreme = abs_rates > threshold
     direction = np.sign(funding_rates)
@@ -29,9 +56,7 @@ def funding_rate_sentiment(
     return scores.clip(-1.0, 1.0)
 
 
-def long_short_ratio_sentiment(
-    ratio: float, neutral: float = 1.0, threshold: float = 2.0
-) -> float:
+def long_short_ratio_sentiment(ratio: float, neutral: float = 1.0, threshold: float = 2.0) -> float:
     if ratio <= 0:
         return 0.0
     if ratio >= threshold:
@@ -41,16 +66,12 @@ def long_short_ratio_sentiment(
     return float((ratio - neutral) / (threshold - neutral))
 
 
-def exchange_flow_sentiment(
-    net_inflow: pd.Series, threshold: float = 1.0
-) -> pd.Series:
+def exchange_flow_sentiment(net_inflow: pd.Series, threshold: float = 1.0) -> pd.Series:
     raw = -net_inflow / threshold
     return raw.clip(-1.0, 1.0)
 
 
-def contrarian_signal(
-    sentiment_score: float, extreme_threshold: float = 0.8
-) -> str:
+def contrarian_signal(sentiment_score: float, extreme_threshold: float = 0.8) -> str:
     if sentiment_score < -extreme_threshold:
         return "contrarian_buy"
     if sentiment_score > extreme_threshold:
@@ -83,9 +104,7 @@ class CompositeSentimentSource:
     def __init__(self) -> None:
         self._sources: list[tuple[str, Callable[[], float], float]] = []
 
-    def add_source(
-        self, name: str, signal_fn: Callable[[], float], weight: float = 1.0
-    ) -> None:
+    def add_source(self, name: str, signal_fn: Callable[[], float], weight: float = 1.0) -> None:
         self._sources.append((name, signal_fn, weight))
 
     def compute(self) -> dict[str, Any]:
@@ -100,6 +119,7 @@ class CompositeSentimentSource:
             try:
                 val = fn()
             except Exception:
+                logger.exception("Unhandled exception")
                 val = 0.0
             signals[name] = val
             weighted_sum += val * weight
@@ -113,9 +133,7 @@ class CompositeSentimentSource:
             "signals": signals,
         }
 
-    def contrarian(
-        self, extreme_threshold: float = 0.8
-    ) -> dict[str, Any]:
+    def contrarian(self, extreme_threshold: float = 0.8) -> dict[str, Any]:
         result = self.compute()
         score = result["composite_score"]
         result["contrarian"] = contrarian_signal(score, extreme_threshold)

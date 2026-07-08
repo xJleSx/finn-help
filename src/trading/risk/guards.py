@@ -44,6 +44,7 @@ def wire_circuit_breakers_to_kill_switch() -> None:
             cb = get_circuit_breaker(cb_name)
             cb.on_state_change(_cb_state_change_handler)
         except Exception:
+            logger.exception("Unhandled exception")
             logger.warning("Could not wire circuit breaker %s to kill switch", cb_name)
 
 
@@ -381,12 +382,14 @@ try:
         _max_drawdown_pct * 100 if _max_drawdown_pct else 0,
     )
 except Exception:
+    logger.exception("Unhandled exception")
     logger.warning("Could not load risk params from config, using defaults")
 
 
 # ═══════════════════════════════════════════════════════════════
 # Weekly Loss Tracker
 # ═══════════════════════════════════════════════════════════════
+
 
 class WeeklyLossTracker:
     def __init__(self, initial_capital: float = 100000.0):
@@ -417,6 +420,7 @@ class WeeklyLossTracker:
 
     def consecutive_loss_days(self) -> int:
         from collections import defaultdict
+
         daily_pnl: dict[datetime.date, float] = defaultdict(float)
         for pnl, ts in self._trades:
             daily_pnl[ts] += pnl
@@ -494,6 +498,7 @@ class DrawdownStageManager:
 # Exposure limit function
 # ═══════════════════════════════════════════════════════════════
 
+
 def compute_exposure_limit(drawdown_pct: float, base_exposure: float = 0.8) -> float:
     dd = abs(drawdown_pct)
     if dd > 0.15:
@@ -508,6 +513,7 @@ def compute_exposure_limit(drawdown_pct: float, base_exposure: float = 0.8) -> f
 # ═══════════════════════════════════════════════════════════════
 # Consecutive loss / win tracking
 # ═══════════════════════════════════════════════════════════════
+
 
 def track_consecutive_losses(trade_results: list[float]) -> tuple[int, int]:
     consecutive_losses = 0
@@ -602,6 +608,7 @@ class CircuitBreaker:
 # ═══════════════════════════════════════════════════════════════
 # Correlation risk adjustment
 # ═══════════════════════════════════════════════════════════════
+
 
 def compute_correlation_risk_adjustment(
     position_sizes: dict[str, float],

@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Column,
@@ -6,15 +7,12 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
     func,
-)
-from sqlalchemy import (
-    Index,
 )
 from sqlalchemy.orm import relationship
 

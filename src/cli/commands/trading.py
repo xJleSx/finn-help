@@ -1,12 +1,12 @@
 import logging
-from typing import Optional
 
 import typer
 from rich.table import Table
 
-from . import app, paper_app, console
 from src.db.connection import get_session
 from src.db.models import Instrument, Portfolio
+
+from . import app, console, paper_app
 
 logger = logging.getLogger(__name__)
 

@@ -36,28 +36,28 @@ container = Container()
 def wire(settings_override: Any = None) -> None:
     """Register all singleton services into the container."""
 
-    from src.config import settings as _settings
-    from src.analysis.service import analysis_service
-    from src.analysis.sector import sector_analyzer
-    from src.analysis.ml_coordinator import ml_coordinator
-    from src.analysis.events import event_features
-    from src.analysis.loader import data_loader
+    from src.alerts.push import AlertPushService
     from src.analysis.context import ticker_context_builder
     from src.analysis.correlation import correlation
+    from src.analysis.events import event_features
+    from src.analysis.loader import data_loader
+    from src.analysis.ml_coordinator import ml_coordinator
     from src.analysis.rebalancing import rebalancing_engine
+    from src.analysis.sector import sector_analyzer
+    from src.analysis.service import analysis_service
+    from src.config import settings as _settings
+    from src.interfaces.nlq import nlq
+    from src.llm.rate_limiter import _retry_handler as groq_retry_handler
     from src.llm.router import llm as llm_router
     from src.notifications.service import NotificationService
     from src.portfolio.allocator import allocator
-    from src.user_profile import profile_manager
-    from src.alerts.push import AlertPushService
-    from src.social.registry import registry as social_registry
-    from src.social.sentiment.aggregator import aggregator as social_aggregator
-    from src.social.sentiment.analyzer import analyzer as social_analyzer
     from src.scheduler.collectors import divergence as sched_divergence
     from src.scheduler.collectors import geo_risk as sched_geo_risk
     from src.scheduler.tasks import fusion as sched_fusion
-    from src.interfaces.nlq import nlq
-    from src.llm.rate_limiter import _retry_handler as groq_retry_handler
+    from src.social.registry import registry as social_registry
+    from src.social.sentiment.aggregator import aggregator as social_aggregator
+    from src.social.sentiment.analyzer import analyzer as social_analyzer
+    from src.user_profile import profile_manager
 
     settings = settings_override or _settings
 

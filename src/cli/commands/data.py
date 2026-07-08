@@ -7,12 +7,13 @@ import typer
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from . import app, console
 from src.collectors.cbr import CBRCollector
 from src.collectors.financials import FinancialReportCollector
 from src.collectors.moex import MOEXCollector
 from src.db.connection import get_session
 from src.db.models import BondOffering, Dividend, FinancialReport, Instrument, Price
+
+from . import app, console
 
 logger = logging.getLogger(__name__)
 

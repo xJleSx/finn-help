@@ -88,7 +88,8 @@ def _save_daily_counters() -> None:
         else:
             db.add(UserSetting(key=_KEY_RESET_DAY, value=str(_last_reset_day or "")))
         db.commit()
-    except Exception:
+    except Exception as exc:
+        logger.error("Failed to save daily counters: %s", exc)
         db.rollback()
     finally:
         db.close()
@@ -500,6 +501,7 @@ async def _rebalance_portfolio() -> None:
                 result.append((alert.ticker, alert.deviation_pct, alert.target_pct))
             return result
         except Exception:
+            logger.exception("Unhandled exception")
             return []
         finally:
             db.close()
@@ -534,23 +536,23 @@ async def run_execution_loop(interval: int = 300) -> None:
 
         setup_signal_handlers()
         register_shutdown_hook(stop)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to setup signal handlers/shutdown hook: %s", exc)
 
     try:
         from src.db.connection import init_db
 
         init_db()
-    except Exception as e:
-        logger.warning("init_db failed: %s", e)
+    except Exception as exc:
+        logger.warning("init_db failed: %s", exc)
 
     try:
         from src.trading.risk.guards import wire_circuit_breakers_to_kill_switch
 
         wire_circuit_breakers_to_kill_switch()
         logger.info("Circuit breakers wired to kill switch")
-    except Exception as e:
-        logger.warning("Failed to wire circuit breakers to kill switch: %s", e)
+    except Exception as exc:
+        logger.warning("Failed to wire circuit breakers to kill switch: %s", exc)
 
     await asyncio.to_thread(_load_daily_counters)
     _load_risk_params()

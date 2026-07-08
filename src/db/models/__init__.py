@@ -1,73 +1,73 @@
 from src.db.models.base import Base
 from src.db.models.instrument import (
-    Instrument,
-    Price,
-    Dividend,
-    Indicator,
-    Prediction,
-    Signal,
-    FundamentalMetric,
-    FinancialReport,
+    BondOffering,
     CompanyProfile,
     CorporateEvent,
-    BondOffering,
+    Dividend,
+    FinancialReport,
+    FundamentalMetric,
+    Indicator,
+    Instrument,
     MetricSnapshot,
+    Prediction,
+    Price,
+    Signal,
 )
-from src.db.models.portfolio import (
-    Portfolio,
-    Transaction,
-    Order,
-    OrderFill,
-    ShortPosition,
-    MarginAccount,
-    TradeLog,
-    ComplianceEvent,
-    TaxReportRecord,
-)
-from src.db.models.user import (
-    User,
-    UserSetting,
-    Favorite,
-    Subscription,
-    AuthorSubscription,
-    Notification,
-    ChannelPreference,
-    MutedAlert,
-    SmartAlertRule,
-    AlertLog,
-    NotificationReceipt,
+from src.db.models.misc import (
+    AltDataPoint,
+    DailyReport,
+    FeatureCache,
+    MacroIndicator,
+    MarketEvent,
+    ModelFeedback,
+    Relation,
 )
 from src.db.models.news import (
     News,
+    NewsCompanyImpact,
     NewsEvent,
     NewsInstrument,
     NewsSectorImpact,
-    NewsCompanyImpact,
-)
-from src.db.models.risk import (
-    GeoRiskScore,
-    SectorRiskHistory,
-    CompanyRiskHistory,
-    GeopoliticalRiskHistory,
-)
-from src.db.models.social import (
-    SocialPost,
-    AuthorProfile,
-    SentimentSignal,
 )
 from src.db.models.paper import (
     PaperAccount,
     PaperOrder,
     PaperTradeLog,
 )
-from src.db.models.misc import (
-    Relation,
-    MacroIndicator,
-    AltDataPoint,
-    FeatureCache,
-    MarketEvent,
-    ModelFeedback,
-    DailyReport,
+from src.db.models.portfolio import (
+    ComplianceEvent,
+    MarginAccount,
+    Order,
+    OrderFill,
+    Portfolio,
+    ShortPosition,
+    TaxReportRecord,
+    TradeLog,
+    Transaction,
+)
+from src.db.models.risk import (
+    CompanyRiskHistory,
+    GeopoliticalRiskHistory,
+    GeoRiskScore,
+    SectorRiskHistory,
+)
+from src.db.models.social import (
+    AuthorProfile,
+    SentimentSignal,
+    SocialPost,
+)
+from src.db.models.user import (
+    AlertLog,
+    AuthorSubscription,
+    ChannelPreference,
+    Favorite,
+    MutedAlert,
+    Notification,
+    NotificationReceipt,
+    SmartAlertRule,
+    Subscription,
+    User,
+    UserSetting,
 )
 
 __all__ = [

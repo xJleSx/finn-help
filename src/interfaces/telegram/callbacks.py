@@ -2,14 +2,6 @@ import structlog
 from telegram import Message, Update
 from telegram.ext import ContextTypes
 
-from src.interfaces.telegram_guard import _check_access
-from src.interfaces.telegram_helpers import (
-    TOTAL_PAGES,
-    build_main_reply_keyboard,
-    build_reply_keyboard,
-    format_start_html,
-)
-from src.interfaces.telegram.messages import _reply_with_analysis, _save_position
 from src.interfaces.telegram.handlers import (
     add_start,
     allocate,
@@ -35,6 +27,14 @@ from src.interfaces.telegram.handlers import (
     subscribe,
     top,
     whatif,
+)
+from src.interfaces.telegram.messages import _reply_with_analysis, _save_position
+from src.interfaces.telegram_guard import _check_access
+from src.interfaces.telegram_helpers import (
+    TOTAL_PAGES,
+    build_main_reply_keyboard,
+    build_reply_keyboard,
+    format_start_html,
 )
 
 logger = structlog.get_logger(__name__)

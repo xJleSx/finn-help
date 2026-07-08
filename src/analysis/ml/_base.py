@@ -73,6 +73,7 @@ def log_feature_importance(model: Any, feature_names: list[str]) -> list[dict[st
         indices = np.argsort(scores)[-10:][::-1]
         return [{"feature": feature_names[i], "importance": round(float(scores[i]), 4)} for i in indices]
     except Exception:
+        logger.exception("Unhandled exception")
         return []
 
 
@@ -154,6 +155,7 @@ class BaseMLClassifier(PersistMixin, ABC):
                         model.fit(x_train, y_train)
                         self._model = model
             except Exception:
+                logger.exception("Unhandled exception")
                 logger.debug("HPO in train() failed, using default params", exc_info=True)
         self.save(metrics=save_metrics, params=save_params if save_params else None)
         return True
@@ -238,6 +240,7 @@ class BaseMLClassifier(PersistMixin, ABC):
             try:
                 model.fit(x_train, y_train)
             except Exception:
+                logger.exception("Unhandled exception")
                 return 0.0
             preds = model.predict(x_val)
             acc = float(np.mean(preds == y_val))
@@ -276,6 +279,7 @@ class BaseMLClassifier(PersistMixin, ABC):
             feature_names = self._feature_names()
             return {feature_names[i]: round(float(mean_abs[i]), 4) for i in range(min(len(mean_abs), len(feature_names)))}
         except Exception:
+            logger.exception("Unhandled exception")
             return {}
 
     def score(self, df: pd.DataFrame) -> float:
@@ -295,6 +299,7 @@ class BaseMLClassifier(PersistMixin, ABC):
         try:
             preds = self._model.predict(x_test)
         except Exception:
+            logger.exception("Unhandled exception")
             base = aligned[mask][BASE_FEATURE_COLS]
             preds = self._model.predict(base)
         y_test = y[mask].astype(int)
@@ -332,6 +337,7 @@ class BaseMLClassifier(PersistMixin, ABC):
                 p = float(bm.predict_proba(features.iloc[-1:])[0, 1])
                 preds.append(p)
             except Exception:
+                logger.exception("Unhandled exception")
                 continue
         if len(preds) < 3:
             return proba, 0.0
@@ -345,6 +351,7 @@ class BaseMLClassifier(PersistMixin, ABC):
         try:
             return float(pred_model.predict_proba(latest)[0, 1])
         except Exception:
+            logger.exception("Unhandled exception")
             base = features[BASE_FEATURE_COLS].iloc[-1:]
             return float(pred_model.predict_proba(base)[0, 1])
 
@@ -412,6 +419,7 @@ class BaseMLClassifier(PersistMixin, ABC):
                         bm.fit(bx, by)
                         self._bootstrap_models.append(bm)
                     except Exception:
+                        logger.exception("Unhandled exception")
                         continue
 
             if val_slice.start < val_slice.stop and len(x_val) > 0:

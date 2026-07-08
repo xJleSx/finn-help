@@ -219,10 +219,12 @@ class EnsemblePredictor:
             try:
                 getattr(self, name).load()
             except Exception:
+                logger.exception("Unhandled exception")
                 success = False
         try:
             self.load_meta()
         except Exception:
+            logger.exception("Unhandled exception")
             success = False
         return success
 

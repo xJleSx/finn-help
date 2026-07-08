@@ -55,9 +55,7 @@ def volume_ratio(volume: pd.Series, window: int = 20) -> pd.Series:
     return volume / volume.rolling(window=window).mean()
 
 
-def volume_ma_ratio(
-    volume: pd.Series, short_window: int = 5, long_window: int = 20
-) -> pd.Series:
+def volume_ma_ratio(volume: pd.Series, short_window: int = 5, long_window: int = 20) -> pd.Series:
     short_ma = volume.rolling(window=short_window).mean()
     long_ma = volume.rolling(window=long_window).mean()
     return short_ma / long_ma.replace(0, np.nan)
@@ -77,9 +75,7 @@ def obv_slope(close: pd.Series, volume: pd.Series, window: int = 10) -> pd.Serie
     return obv.rolling(window=window).apply(_slope, raw=False)
 
 
-def vwap_deviation(
-    high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series
-) -> pd.Series:
+def vwap_deviation(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series) -> pd.Series:
     typical = (high + low + close) / 3
     vwap = (typical * volume).cumsum() / volume.cumsum().replace(0, np.nan)
     return (close - vwap) / vwap.replace(0, np.nan)
@@ -94,9 +90,7 @@ def dollar_volume(close: pd.Series, volume: pd.Series) -> pd.Series:
 # ──────────────────────────────────────────────
 
 
-def _bollinger_bands(
-    close: pd.Series, window: int = 20, std_dev: float = 2.0
-) -> tuple[pd.Series, pd.Series, pd.Series]:
+def _bollinger_bands(close: pd.Series, window: int = 20, std_dev: float = 2.0) -> tuple[pd.Series, pd.Series, pd.Series]:
     mid = close.rolling(window=window).mean()
     std = close.rolling(window=window).std()
     upper = mid + std_dev * std
@@ -104,17 +98,13 @@ def _bollinger_bands(
     return upper, mid, lower
 
 
-def bb_position(
-    close: pd.Series, window: int = 20, std_dev: float = 2.0
-) -> pd.Series:
+def bb_position(close: pd.Series, window: int = 20, std_dev: float = 2.0) -> pd.Series:
     upper, _, lower = _bollinger_bands(close, window, std_dev)
     denom = upper - lower
     return (close - lower) / denom.replace(0, np.nan)
 
 
-def bb_width(
-    close: pd.Series, window: int = 20, std_dev: float = 2.0
-) -> pd.Series:
+def bb_width(close: pd.Series, window: int = 20, std_dev: float = 2.0) -> pd.Series:
     upper, mid, lower = _bollinger_bands(close, window, std_dev)
     return (upper - lower) / mid.replace(0, np.nan)
 
@@ -124,9 +114,7 @@ def bb_width(
 # ──────────────────────────────────────────────
 
 
-def adf_test(
-    series: pd.Series, maxlag: int | None = None, autolag: bool = True
-) -> tuple[float, float, bool]:
+def adf_test(series: pd.Series, maxlag: int | None = None, autolag: bool = True) -> tuple[float, float, bool]:
     series = series.dropna().values.astype(float)
     n = len(series)
     if n < 10:
@@ -144,10 +132,10 @@ def adf_test(
         best_aic = np.inf
         best_lag = 0
         for k in range(maxlag + 1):
-            X = _build_adf_design(y_lag, dy, k)
+            x = _build_adf_design(y_lag, dy, k)
             try:
-                beta, res, rank, sv = np.linalg.lstsq(X, dy, rcond=None)
-                resid = dy - X @ beta
+                beta, res, rank, sv = np.linalg.lstsq(x, dy, rcond=None)
+                resid = dy - x @ beta
                 sigma2 = resid @ resid / n_obs
                 aic = n_obs * np.log(sigma2) + 2 * (k + 2)
                 if aic < best_aic:
@@ -159,19 +147,19 @@ def adf_test(
     else:
         lag = maxlag
 
-    X = _build_adf_design(y_lag, dy, lag)
+    x = _build_adf_design(y_lag, dy, lag)
     try:
-        beta, res, rank, sv = np.linalg.lstsq(X, dy, rcond=None)
+        beta, res, rank, sv = np.linalg.lstsq(x, dy, rcond=None)
     except np.linalg.LinAlgError:
         return (np.nan, np.nan, False)
 
-    resid = dy - X @ beta
-    n_params = X.shape[1]
+    resid = dy - x @ beta
+    n_params = x.shape[1]
     dof = n_obs - n_params
     if dof < 1:
         return (np.nan, np.nan, False)
     mse = resid @ resid / dof
-    se = np.sqrt(mse * np.linalg.inv(X.T @ X).diagonal())
+    se = np.sqrt(mse * np.linalg.inv(x.T @ x).diagonal())
     t_stat = beta[0] / se[0] if se[0] > 0 else np.nan
 
     p_value = _adf_pvalue(t_stat, n_obs)
@@ -183,10 +171,10 @@ def _build_adf_design(y_lag: np.ndarray, dy: np.ndarray, lag: int) -> np.ndarray
     cols = [y_lag]
     if lag > 0:
         for k in range(lag):
-            cols.append(np.concatenate([np.zeros(k + 1), dy[:n - k - 1]]))
-    X = np.column_stack(cols)
-    X = np.column_stack([np.ones(X.shape[0]), X])
-    return X[lag:]
+            cols.append(np.concatenate([np.zeros(k + 1), dy[: n - k - 1]]))
+    x = np.column_stack(cols)
+    x = np.column_stack([np.ones(x.shape[0]), x])
+    return x[lag:]
 
 
 def _adf_pvalue(t_stat: float, n: int) -> float:
@@ -196,17 +184,8 @@ def _adf_pvalue(t_stat: float, n: int) -> float:
         return 0.001
     if t_stat >= tau[-1]:
         return 0.50
-    if n < 25:
-        n_idx = 0
-    elif n < 50:
-        n_idx = 1
-    elif n < 100:
-        n_idx = 2
-    elif n < 250:
-        n_idx = 3
-    else:
-        n_idx = 4
-    tau_n = tau
+    tau_n = tau[:4] if n < 250 else tau
+
     return float(np.interp(t_stat, tau_n[::-1], probs[::-1]))
 
 
@@ -229,9 +208,7 @@ def rolling_minmax(series: pd.Series, window: int = 60) -> pd.Series:
 
 
 def rolling_rank(series: pd.Series, window: int = 60) -> pd.Series:
-    return series.rolling(window=window).apply(
-        lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False
-    )
+    return series.rolling(window=window).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False)
 
 
 # ──────────────────────────────────────────────
@@ -265,16 +242,12 @@ def _forward_return(close: pd.Series, forward_period: int = 1) -> pd.Series:
     return close.shift(-forward_period) / close - 1
 
 
-def binary_labels(
-    close: pd.Series, forward_period: int = 1, threshold: float = 0.01
-) -> pd.Series:
+def binary_labels(close: pd.Series, forward_period: int = 1, threshold: float = 0.01) -> pd.Series:
     fwd_ret = _forward_return(close, forward_period)
     return (fwd_ret > threshold).astype(int)
 
 
-def multiclass_labels(
-    close: pd.Series, forward_period: int = 1, threshold: float = 0.01
-) -> pd.Series:
+def multiclass_labels(close: pd.Series, forward_period: int = 1, threshold: float = 0.01) -> pd.Series:
     fwd_ret = _forward_return(close, forward_period)
     labels = pd.Series(1, index=close.index)
     labels[fwd_ret < -threshold] = 0
@@ -283,9 +256,7 @@ def multiclass_labels(
     return labels
 
 
-def regression_target(
-    close: pd.Series, forward_period: int = 1
-) -> pd.Series:
+def regression_target(close: pd.Series, forward_period: int = 1) -> pd.Series:
     return _forward_return(close, forward_period)
 
 

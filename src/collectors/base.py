@@ -113,7 +113,9 @@ class BaseCollector(ABC):
                     )
                     raise
 
-    async def _fetch_json_or_list(self, url: str, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None) -> dict[str, Any] | list[Any]:
+    async def _fetch_json_or_list(
+        self, url: str, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None
+    ) -> dict[str, Any] | list[Any]:
         async def _do_fetch() -> dict[str, Any] | list[Any]:
             client = await self._get_client()
             resp = await client.get(url, params=params, headers=headers)

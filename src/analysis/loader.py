@@ -61,6 +61,7 @@ class DataLoader:
             all_social = aggregator.get_all_ticker_sentiments(all_tickers)
             social_with_data = [s for s in all_social.values() if s["count"] > 0]
         except Exception:
+            logger.exception("Unhandled exception")
             social_with_data = []
 
         if not social_with_data:
@@ -103,6 +104,7 @@ class DataLoader:
         try:
             social_entry = aggregator.get_ticker_sentiment(ticker)
         except Exception:
+            logger.exception("Unhandled exception")
             social_entry = {"score": 0.0, "divergence": 0.0, "source": "social", "count": 0}
 
         if social_entry["count"] > 0 and news_sentiment["count"] > 0:

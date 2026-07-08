@@ -57,8 +57,10 @@ HTTP_LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency"
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
     from src.core.container import wire
+
     wire()
     from src.core.tracing import setup_tracing
+
     setup_tracing("finn-help")
     from src.db.connection import close_db, init_db
 
@@ -87,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         await loop.run_in_executor(get_executor(), close_redis)
     except Exception:
+        logger.exception("Unhandled exception")
         pass
     await loop.run_in_executor(get_executor(), close_db)
     shutdown_executor()
@@ -107,6 +110,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         if hasattr(request, "user") and request.user:
             sentry_sdk.set_user({"id": str(request.user.id), "username": request.user.username})
     except Exception:
+        logger.exception("Unhandled exception")
         pass
     logger.exception("unhandled_exception", method=request.method, path=request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
@@ -216,6 +220,7 @@ async def refresh_token(
     except HTTPException:
         raise
     except Exception:
+        logger.exception("Unhandled exception")
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
 
@@ -249,6 +254,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
             if snap.get("state") == "open":
                 checks[f"circuit_breaker_{name}"] = f"OPEN ({snap.get('failure_count', 0)} failures)"
     except Exception:
+        logger.exception("Unhandled exception")
         components["circuit_breakers"] = None
 
     try:
@@ -256,6 +262,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         val = result.scalar()
         components["instruments"] = int(val) if val is not None else 0
     except Exception:
+        logger.exception("Unhandled exception")
         components["instruments"] = None
 
     try:
@@ -263,6 +270,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
 
         components["scheduler_running"] = _running
     except Exception:
+        logger.exception("Unhandled exception")
         components["scheduler_running"] = None
 
     try:
@@ -273,6 +281,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         else:
             components["last_signal_at"] = None
     except Exception:
+        logger.exception("Unhandled exception")
         components["last_signal_at"] = None
 
     try:
@@ -289,6 +298,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
             except TypeError:
                 pass
     except Exception:
+        logger.exception("Unhandled exception")
         components["last_price_date"] = None
 
     try:
@@ -303,6 +313,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
                     models_summary[name] = str(latest)
             components["models"] = models_summary
     except Exception:
+        logger.exception("Unhandled exception")
         components["models"] = None
 
     # Enrichment coverage
@@ -335,6 +346,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         alert_cnt = await db.execute(select(sqlfunc.count(AlertLog.id)).where(AlertLog.created_at >= cutoff))
         components["alerts_7d"] = int(alert_cnt.scalar() or 0)
     except Exception:
+        logger.exception("Unhandled exception")
         components["alerts_7d"] = None
 
     # Run registered module health checks
@@ -343,6 +355,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
             try:
                 components[name] = await check_fn()
             except Exception:
+                logger.exception("Unhandled exception")
                 components[name] = "error"
 
     status = "degraded" if checks and healthy else "unhealthy" if not healthy else "ok"

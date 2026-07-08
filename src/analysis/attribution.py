@@ -90,6 +90,7 @@ class NewsAttribution:
                 for i in indices
             ]
         except Exception:
+            logger.exception("Unhandled exception")
             return []
 
     def summary_stats(
@@ -123,6 +124,7 @@ class NewsAttribution:
                     for i, name in enumerate(ALL_FEATURE_COLS):
                         all_importances.setdefault(name, []).append(float(abs(vals[i])))
                 except Exception:
+                    logger.exception("Unhandled exception")
                     continue
 
         result: dict[str, float] = {}
@@ -142,5 +144,6 @@ class NewsAttribution:
                 scores = xgb_model.feature_importances_
                 return {ALL_FEATURE_COLS[i]: round(float(abs(scores[i])), 6) for i in range(len(ALL_FEATURE_COLS))}
             except Exception:
+                logger.exception("Unhandled exception")
                 continue
         return {}

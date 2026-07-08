@@ -137,6 +137,7 @@ async def take_snapshot(period: str) -> None:
         db.commit()
         logger.info("Snapshot %s saved for %d instruments", period, len(instruments))
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("Snapshot %s failed", period)
     finally:
         db.close()
@@ -250,6 +251,7 @@ async def generate_daily_report() -> DailyReport | None:
         logger.info("Daily report saved for %s", today)
         return report
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("Failed to generate daily report")
         return None
     finally:
@@ -312,6 +314,7 @@ async def generate_weekly_report_text() -> str:
         lines.append("💡 Для детального анализа используйте /analyze TICKER")
         return "\n".join(lines)
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("Failed to generate weekly report")
         return "Не удалось сформировать недельную сводку."
     finally:

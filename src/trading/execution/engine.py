@@ -40,8 +40,8 @@ async def _notify_trade(record: "OrderRecord", reason: str = "") -> None:
             reason=reason,
             order_id=record.order_id or "",
         )
-    except Exception:
-        logger.exception("Failed to schedule trade broadcast")
+    except Exception as exc:
+        logger.exception("Failed to schedule trade broadcast: %s", exc)
 
 
 class TradeMode(Enum):
@@ -86,8 +86,57 @@ class OrderRecord:
 
 
 _execution_log: "deque[OrderRecord]" = deque(maxlen=1000)
+_log_loaded: bool = False
 _mode_lock = asyncio.Lock()
 _mode = TradeMode.DRY_RUN
+
+
+def reload_execution_log() -> None:
+    """Load pending orders from DB into in-memory log after restart."""
+    global _log_loaded
+    if _log_loaded:
+        return
+    from src.db.connection import get_session as _get_db
+    from src.db.models import Order as _OrdModel
+
+    db = _get_db()
+    try:
+        pending = (
+            db.query(_OrdModel)
+            .filter(_OrdModel.status.in_(["pending", "pending_approval", "submitted", "partial"]))
+            .order_by(_OrdModel.created_at.desc())
+            .limit(1000)
+            .all()
+        )
+        for o in pending:
+            rec = OrderRecord(
+                ticker=o.ticker,
+                direction=o.direction,
+                quantity=o.quantity,
+                price=o.price or 0.0,
+                mode=TradeMode(o.mode) if hasattr(TradeMode, o.mode.upper()) else TradeMode.MANUAL,
+                reason=o.reason or "",
+                order_type=o.order_type or "market",
+                time_in_force=o.time_in_force or "day",
+                is_short=o.is_short or False,
+            )
+            rec.created_at = o.created_at
+            rec.order_id = o.order_id_ext
+            rec.status = o.status
+            rec.db_id = o.id
+            rec.filled_quantity = o.filled_quantity or 0
+            rec.remaining_quantity = o.remaining_quantity or o.quantity
+            rec.executed_price = o.executed_price
+            rec.commission = o.commission or 0.0
+            _execution_log.append(rec)
+        _log_loaded = True
+        if pending:
+            logger.info("Loaded %d pending orders from DB into execution log", len(pending))
+    except Exception:
+        logger.exception("Unhandled exception")
+        logger.exception("Failed to load pending orders from DB")
+    finally:
+        db.close()
 
 
 async def set_mode(mode: TradeMode) -> None:
@@ -102,6 +151,7 @@ def get_mode() -> TradeMode:
 
 
 def get_log(limit: int = 20) -> list[dict[str, object]]:
+    reload_execution_log()
     entries = list(_execution_log)[-limit:]
     return [
         {
@@ -376,9 +426,9 @@ async def execute_order(
                     finally:
                         _upd.close()
 
-        except Exception as e:
+        except Exception as exc:
             record.status = "failed"
-            logger.error("Order failed: %s %d %s: %s", direction, quantity, ticker, e, exc_info=True)
+            logger.error("Order failed: %s %d %s: %s", direction, quantity, ticker, exc, exc_info=True)
 
         _execution_log.append(record)
         record.db_id = save_order(record)
@@ -402,6 +452,7 @@ async def approve_order(ticker: str, direction: str, quantity: int) -> Optional[
     if not settings.enable_trading:
         logger.warning("Cannot approve order — trading disabled (ENABLE_TRADING=true)")
         return None
+    reload_execution_log()
     async with _mode_lock:
         for r in reversed(_execution_log):
             if r.ticker == ticker and r.direction == direction and r.quantity == quantity and r.status == "pending_approval":
@@ -421,6 +472,7 @@ async def approve_order(ticker: str, direction: str, quantity: int) -> Optional[
 
 
 async def cancel_pending(ticker: str) -> bool:
+    reload_execution_log()
     async with _mode_lock:
         for r in _execution_log:
             if r.ticker == ticker and r.status == "pending_approval":

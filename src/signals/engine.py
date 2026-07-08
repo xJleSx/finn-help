@@ -6,7 +6,6 @@ import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.analysis.metrics import compute_max_drawdown
-
 from src.constants import (
     BASE_POSITION_PCT,
     FUND_RISK_HIGH,
@@ -44,7 +43,6 @@ def _sortino_ratio(returns: np.ndarray, rf: float = 0.0) -> float:
         return 0.0
     excess = np.mean(returns) - rf / 252
     return float(excess / np.std(downside) * np.sqrt(252))
-
 
 
 def _calmar_ratio(returns: np.ndarray, prices: np.ndarray) -> float:
@@ -188,22 +186,24 @@ class SignalFusionEngine:
             _apply("ofz_10y", ofz, "ОФЗ")
 
             if m2 is not None:
-                cfg = mt.get("m2")
-                if m2 > cfg["high"]:  # type: ignore[index]
-                    macro_adjustment += cfg["high_adj"]  # type: ignore[index]
-                    macro_reasons.append("M2 расширяется")
-                elif m2 < cfg["low"]:  # type: ignore[index]
-                    macro_adjustment += cfg["low_adj"]  # type: ignore[index]
-                    macro_reasons.append("M2 сужается")
+                cfg_m2 = mt.get("m2")
+                if cfg_m2 is not None:
+                    if m2 > cfg_m2["high"]:
+                        macro_adjustment += cfg_m2["high_adj"]
+                        macro_reasons.append("M2 расширяется")
+                    elif m2 < cfg_m2["low"]:
+                        macro_adjustment += cfg_m2["low_adj"]
+                        macro_reasons.append("M2 сужается")
 
             if imoex is not None:
-                cfg = mt.get("imoex")
-                if imoex > cfg["high"]:  # type: ignore[index]
-                    macro_adjustment += cfg["high_adj"]  # type: ignore[index]
-                    macro_reasons.append("IMOEX сильно")
-                elif imoex < cfg["low"]:  # type: ignore[index]
-                    macro_adjustment += cfg["low_adj"]  # type: ignore[index]
-                    macro_reasons.append("IMOEX слабый")
+                cfg_imoex = mt.get("imoex")
+                if cfg_imoex is not None:
+                    if imoex > cfg_imoex["high"]:
+                        macro_adjustment += cfg_imoex["high_adj"]
+                        macro_reasons.append("IMOEX сильно")
+                    elif imoex < cfg_imoex["low"]:
+                        macro_adjustment += cfg_imoex["low_adj"]
+                        macro_reasons.append("IMOEX слабый")
 
             if macro_reasons:
                 reasons.append(f"Макро: {', '.join(macro_reasons)}")
@@ -383,6 +383,8 @@ class SignalFusionEngine:
     def _downgrade_buy(self, action: str) -> str:
         if action == "BUY":
             return "CAUTIOUS_BUY"
+        if action == "CAUTIOUS_BUY":
+            return "HOLD"
         return action
 
     def _calc_max_position(self, action: str, geo_risk: float, fund_risk: float, user_id: Optional[str] = None) -> int:
@@ -408,8 +410,6 @@ class SignalFusionEngine:
 
     def save_signal_sync(self, db: Any, instrument_id: int, fused: dict[str, Any]) -> SignalModel:
         """Sync version for CLI / scheduler."""
-        from src.db.models import Signal as SignalModel
-
         fused_clean = self._to_native(fused)
         signal = SignalModel(
             instrument_id=instrument_id,

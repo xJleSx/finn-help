@@ -1,4 +1,4 @@
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import structlog
 from telegram import Update
@@ -46,6 +46,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         ns.subscribe(uid, cid, ntype)
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("subscribe_failed", user_id=uid, notify_type=ntype)
         await update.effective_message.reply_text("❌ Ошибка при подписке. Попробуйте позже.")
         return
@@ -69,6 +70,7 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     try:
         ns.unsubscribe(uid, ntype)
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("unsubscribe_failed", user_id=uid, notify_type=ntype)
         await update.effective_message.reply_text("❌ Ошибка при отписке. Попробуйте позже.")
         return
@@ -94,6 +96,7 @@ async def subscribe_author(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         ns.subscribe_author(uid, cid, author_nick)
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("subscribe_author_failed", user_id=uid, author=author_nick)
         await update.effective_message.reply_text("❌ Ошибка при подписке на автора. Попробуйте позже.")
         return
@@ -114,6 +117,7 @@ async def unsubscribe_author(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         ns.unsubscribe_author(uid, author_nick)
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("unsubscribe_author_failed", user_id=uid, author=author_nick)
         await update.effective_message.reply_text("❌ Ошибка при отписке от автора. Попробуйте позже.")
         return
@@ -294,6 +298,7 @@ async def favorite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "• /favorite list — показать избранное"
             )
     except Exception:
+        logger.exception("Unhandled exception")
         db.rollback()
         logger.exception("favorite_command_error")
         await update.effective_message.reply_text("❌ Ошибка при работе с избранным")

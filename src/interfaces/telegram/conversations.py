@@ -2,8 +2,8 @@ import structlog
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from src.interfaces.telegram_guard import _check_access, _check_cooldown
 from src.interfaces.telegram.messages import _reply_with_allocation, _save_position
+from src.interfaces.telegram_guard import _check_access, _check_cooldown
 from src.portfolio.allocator import allocator
 
 logger = structlog.get_logger(__name__)

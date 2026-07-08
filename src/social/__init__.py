@@ -1,1 +1,1 @@
-from src.social.registry import registry
+from src.social.registry import registry as registry

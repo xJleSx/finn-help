@@ -1,23 +1,15 @@
-import asyncio
-import io
-import logging
 import time
-from collections import OrderedDict
-from typing import Any, Optional, cast
+from typing import Any
 
 import structlog
 from telegram import Update
-from telegram.ext import ContextTypes
 
-from src.analysis.service import analysis_service
 from src.cli import run_analysis
-from src.collectors.cbr import CBRCollector
-from src.config import personal
 from src.constants import CACHE_TTL, MAX_CACHE_SIZE
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
 from src.db.models import Portfolio as PortModel
-from src.interfaces.telegram_guard import _check_cooldown, analysis_cache, guard
+from src.interfaces.telegram_guard import analysis_cache
 from src.interfaces.telegram_helpers import (
     ACTION_EMOJI,
     _chunk_text,
@@ -29,7 +21,6 @@ from src.interfaces.telegram_helpers import (
     html_escape,
 )
 from src.portfolio.allocator import allocator
-from src.reports import generate_portfolio_csv
 
 logger = structlog.get_logger(__name__)
 
@@ -108,6 +99,7 @@ def _build_stock_context(ticker: str) -> str:
         finally:
             db.close()
     except Exception:
+        logger.exception("Unhandled exception")
         return ""
 
 
@@ -231,6 +223,7 @@ async def _reply_with_analysis(update: Update, ticker: str) -> None:
             if len(analysis_cache) > MAX_CACHE_SIZE:
                 analysis_cache.popitem(last=False)
         except Exception:
+            logger.exception("Unhandled exception")
             logger.exception("Analysis error for %s", ticker)
             await msg.edit_text("\u274c Не удалось проанализировать. Убедитесь, что запущен `finn update`.")
             return
@@ -353,6 +346,7 @@ async def _reply_with_allocation(update: Update, capital: float, exclude: set[st
         for chunk in alloc_chunks:
             await update.effective_message.reply_text(chunk, parse_mode="HTML")
     except Exception:
+        logger.exception("Unhandled exception")
         logger.warning("Recommendation error", exc_info=True)
         await msg.edit_text("\u274c Не удалось рассчитать рекомендации. Убедитесь, что запущен `finn update`.")
 
@@ -379,6 +373,7 @@ async def _ask_llm_general(update: Update, text: str, ticker_context: str = "") 
         for chunk in chunks[1:]:
             await update.effective_message.reply_text(html_escape(chunk), parse_mode="HTML")
     except Exception:
+        logger.exception("Unhandled exception")
         logger.warning("LLM error", exc_info=True)
         await msg.edit_text(
             "Не смог ответить на вопрос. Попробуйте:\n• /analyze SBER — анализ конкретной акции\n• /allocate 50000 — куда вложить деньги"
@@ -434,6 +429,7 @@ async def _save_position(update: Update, ticker: str, qty: float, avg_price: flo
             db.commit()
             await update.effective_message.reply_text(f"✅ {ticker}: {qty} шт. добавлено в портфель")
     except Exception:
+        logger.exception("Unhandled exception")
         db.rollback()
         logger.warning("Save position error", exc_info=True)
         await update.effective_message.reply_text("❌ Не удалось добавить позицию. Попробуйте позже.")

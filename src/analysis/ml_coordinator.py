@@ -113,7 +113,9 @@ class MLCoordinator:
             self._ensemble_cache[ticker] = EnsemblePredictor(ticker=ticker)
         return self._ensemble_cache[ticker]
 
-    def _prepare_events(self, ind_df: pd.DataFrame, events: list[MarketEvent] | None, event_builder: EventFeatureBuilder | None) -> tuple[pd.DataFrame, Any]:
+    def _prepare_events(
+        self, ind_df: pd.DataFrame, events: list[MarketEvent] | None, event_builder: EventFeatureBuilder | None
+    ) -> tuple[pd.DataFrame, Any]:
         if not events:
             return ind_df, None
         builder = event_builder or event_features
@@ -166,6 +168,7 @@ class MLCoordinator:
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="success").inc()
             return self._build_result(pr, ensemble_res)
         except Exception:
+            logger.exception("Unhandled exception")
             logger.warning("ML prediction failed", exc_info=True)
             ml_error_count.labels(model_type="ensemble", ticker=ticker or "unknown").inc()
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="error").inc()
@@ -224,6 +227,7 @@ class MLCoordinator:
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="success").inc()
             return self._build_result(pr, ensemble_res)
         except Exception:
+            logger.exception("Unhandled exception")
             logger.warning("Sync ML prediction failed", exc_info=True)
             ml_error_count.labels(model_type="ensemble", ticker=ticker or "unknown").inc()
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="error").inc()
@@ -291,12 +295,14 @@ class MLCoordinator:
             all_results[sym] = all(ensemble_ok.values()) and prophet_ok
 
             MLflowTracker.log_model_params(
-                "ensemble", sym,
+                "ensemble",
+                sym,
                 {"n_estimators": 100, "max_depth": 6},
                 {"accuracy": float(ensemble_ok.get("accuracy", 0)) if isinstance(ensemble_ok, dict) else 0.0},
             )
             MLflowTracker.log_model_params(
-                "prophet", sym,
+                "prophet",
+                sym,
                 {"seasonality_mode": "multiplicative"},
                 {"rmse": 0.0},
             )

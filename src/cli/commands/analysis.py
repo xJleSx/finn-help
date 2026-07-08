@@ -4,10 +4,9 @@ from typing import Any, Optional
 
 import pandas as pd
 import typer
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress
 from rich.table import Table
 
-from . import app, paper_app, console
 from src.analysis.personal_backtest import run_personal_backtest
 from src.analysis.service import analysis_service
 from src.collectors.cbr import CBRCollector
@@ -16,6 +15,8 @@ from src.config import personal
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
 from src.llm.router import llm
+
+from . import app, console, paper_app
 
 logger = logging.getLogger(__name__)
 

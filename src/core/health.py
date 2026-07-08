@@ -68,8 +68,9 @@ async def check_tbank_health() -> dict[str, Any]:
 
         if not settings.tinkoff_token:
             return {"status": "not_configured"}
-        from src.trading.brokers.tbank import TBankClient
         import asyncio
+
+        from src.trading.brokers.tbank import TBankClient
 
         client = TBankClient(token=settings.tinkoff_token, sandbox=settings.tinkoff_sandbox)
         accounts = await asyncio.to_thread(client.get_accounts)

@@ -23,18 +23,14 @@ from src.core.resilience import (
     get_circuit_breaker,
 )
 from src.trading.brokers.base import (
-    BrokerAccount,
     BrokerOrderResult,
 )
 from src.trading.brokers.registry import register_broker
-from src.trading.types import OrderType, TimeInForce
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://be.broker.ru"
-TOKEN_URL = (
-    f"{BASE_URL}/trade-api-keycloak/realms/tradeapi/protocol/openid-connect/token"
-)
+TOKEN_URL = f"{BASE_URL}/trade-api-keycloak/realms/tradeapi/protocol/openid-connect/token"
 PORTFOLIO_URL = f"{BASE_URL}/trade-api-bff-portfolio/api/v1/portfolio"
 OPERATIONS_BFF = f"{BASE_URL}/trade-api-bff-operations"
 ORDER_PLACE_URL = f"{OPERATIONS_BFF}/api/v1/orders"
@@ -184,13 +180,15 @@ class BcsClient:
                     account_ids.add(str(acc))
             accounts = []
             for aid in account_ids:
-                accounts.append({
-                    "id": aid,
-                    "type": "broker",
-                    "name": f"BCS {aid}",
-                    "status": "open",
-                    "opened_date": None,
-                })
+                accounts.append(
+                    {
+                        "id": aid,
+                        "type": "broker",
+                        "name": f"BCS {aid}",
+                        "status": "open",
+                        "opened_date": None,
+                    }
+                )
             if account_ids:
                 return accounts
         return [{"id": "default", "type": "broker", "name": "BCS Account", "status": "open", "opened_date": None}]
@@ -215,15 +213,17 @@ class BcsClient:
             if key in seen:
                 continue
             seen.add(key)
-            positions.append({
-                "figi": ticker,
-                "ticker": ticker,
-                "instrument_type": inst_type,
-                "quantity": float(r.get("quantity", 0) or 0),
-                "average_price": self._float(r.get("avgPrice")),
-                "current_price": self._float(r.get("lastPrice") or r.get("price")),
-                "expected_yield": self._float(r.get("expectedYield") or r.get("unrealizedProfit")),
-            })
+            positions.append(
+                {
+                    "figi": ticker,
+                    "ticker": ticker,
+                    "instrument_type": inst_type,
+                    "quantity": float(r.get("quantity", 0) or 0),
+                    "average_price": self._float(r.get("avgPrice")),
+                    "current_price": self._float(r.get("lastPrice") or r.get("price")),
+                    "expected_yield": self._float(r.get("expectedYield") or r.get("unrealizedProfit")),
+                }
+            )
         return positions
 
     async def get_account_balance(self, account_id: str) -> float:
@@ -338,6 +338,7 @@ class BcsClient:
             )
             return resp is not None
         except Exception:
+            logger.exception("Unhandled exception")
             return False
 
     async def get_orderbook(self, figi: str, depth: int = 10) -> Optional[dict[str, object]]:

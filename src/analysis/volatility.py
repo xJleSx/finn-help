@@ -44,7 +44,7 @@ def parkinson_volatility(
     highs = np.asarray(highs, dtype=float)
     lows = np.asarray(lows, dtype=float)
     ratio = np.log(highs / lows)
-    squared = ratio ** 2
+    squared = ratio**2
     divisor = 4.0 * np.log(2.0)
     out = np.full_like(highs, np.nan)
     if len(highs) < period:
@@ -184,7 +184,7 @@ def ewma_volatility(
         EWMA volatility series of the same length (first value = NaN).
     """
     r = np.asarray(returns, dtype=float)
-    squared = r ** 2
+    squared = r**2
     out = np.full_like(r, np.nan)
     if len(r) < 2:
         return out
@@ -209,18 +209,18 @@ def garch_volatility(
         (omega, alpha, beta, long_run_var, forecast_vol).
     """
     r = np.asarray(returns, dtype=float)
-    T = len(r)
+    n = len(r)
     init_var = float(np.var(r, ddof=0))
 
     def _neg_log_likelihood(params: np.ndarray) -> float:
         omega, alpha, beta = params
         if omega <= 0 or alpha <= 0 or beta <= 0 or alpha + beta >= 1:
             return 1e10
-        sigma2 = np.full(T, init_var)
-        for t in range(1, T):
+        sigma2 = np.full(n, init_var)
+        for t in range(1, n):
             sigma2[t] = omega + alpha * r[t - 1] ** 2 + beta * sigma2[t - 1]
         ll = 0.0
-        for t in range(T):
+        for t in range(n):
             if sigma2[t] <= 0:
                 return 1e10
             ll += -0.5 * (np.log(2 * np.pi) + np.log(sigma2[t]) + r[t] ** 2 / sigma2[t])

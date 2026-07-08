@@ -3,10 +3,10 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
-    Index,
     func,
 )
 from sqlalchemy.orm import relationship

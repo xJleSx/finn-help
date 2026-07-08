@@ -78,6 +78,7 @@ def detect_drift(
                             }
                         )
                 except Exception:
+                    logger.exception("Unhandled exception")
                     continue
     finally:
         db.close()

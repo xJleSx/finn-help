@@ -152,9 +152,9 @@ def compute_anti_martingale_size(
     if base_size <= 0:
         return 0.0
     if consecutive_wins > 0:
-        factor = min(multiplier ** consecutive_wins, max_multiplier)
+        factor = min(multiplier**consecutive_wins, max_multiplier)
     else:
-        factor = max(multiplier ** consecutive_wins, 1.0 / max_multiplier)
+        factor = max(multiplier**consecutive_wins, 1.0 / max_multiplier)
     return base_size * factor
 
 

@@ -38,6 +38,7 @@ class SmartAlertEngine:
                     rule.last_triggered = datetime.now(timezone.utc)
                     db.commit()
             except Exception:
+                logger.exception("Unhandled exception")
                 logger.exception("smart_rule_eval_failed rule_id=%s", rule.id)
                 db.rollback()
         return triggered

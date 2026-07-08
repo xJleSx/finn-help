@@ -10,6 +10,9 @@ from sqlalchemy import Date, cast
 from sqlalchemy import func as sa_func
 
 from src.db.models import AlertLog
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AlertHistory:
@@ -43,6 +46,7 @@ class AlertHistory:
                 self._db.add(log)
                 self._db.commit()
             except Exception:
+                logger.exception("Unhandled exception")
                 self._db.rollback()
                 self._memory.append(entry)
         elif self._json_path:

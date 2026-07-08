@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+def _mock_result(values, use_scalars=True):
+    """Return a mock execute-result whose (scalars().)all() yields *values*."""
+    r = MagicMock()
+    if use_scalars:
+        r.scalars.return_value.all.return_value = values
+    else:
+        r.all.return_value = values
+    return r
 
 
 @pytest.fixture(autouse=True)
@@ -16,6 +29,8 @@ def reset_globals():
     loop._last_reset_day = None
     loop._max_trades_per_day = 5
     loop._running = False
+    loop._EXECUTION_LOCK_HELD = False
+    loop._acquire_execution_lock = MagicMock(return_value=True)
 
 
 class TestSetters:
@@ -399,54 +414,73 @@ class TestCheckStopLosses:
     async def test_no_open_orders(self):
         import src.trading.execution.loop as loop
 
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.all.return_value = []
+        mock_db = AsyncMock()
+        mock_db.execute.return_value = _mock_result([])
 
-        with patch("src.trading.execution.loop.get_session", return_value=mock_db):
+        mock_session = AsyncMock()
+        mock_session.__aenter__.return_value = mock_db
+
+        with patch("src.db.connection.AsyncSessionLocal", return_value=mock_session):
             await loop._check_stop_losses()
 
     @pytest.mark.asyncio
     async def test_order_no_instrument_skips(self):
         import src.trading.execution.loop as loop
 
-        mock_db = MagicMock()
+        mock_db = AsyncMock()
         order = MagicMock(ticker="SBER")
-        mock_db.query.return_value.filter.return_value.all.side_effect = [[order], []]
+        mock_db.execute.side_effect = [
+            _mock_result([order]),
+            _mock_result([]),
+        ]
 
-        with patch("src.trading.execution.loop.get_session", return_value=mock_db):
+        mock_session = AsyncMock()
+        mock_session.__aenter__.return_value = mock_db
+
+        with patch("src.db.connection.AsyncSessionLocal", return_value=mock_session):
             await loop._check_stop_losses()
 
     @pytest.mark.asyncio
     async def test_order_no_price_skips(self):
         import src.trading.execution.loop as loop
 
-        mock_db = MagicMock()
+        mock_db = AsyncMock()
         order = MagicMock(ticker="SBER")
         inst = MagicMock(id=1)
-        mock_db.query.return_value.filter.return_value.all.side_effect = [[order], [inst]]
+        mock_db.execute.side_effect = [
+            _mock_result([order]),
+            _mock_result([inst]),
+            _mock_result([]),  # prices → empty → no price found → continue
+        ]
 
-        with patch("src.trading.execution.loop.get_session", return_value=mock_db):
+        mock_session = AsyncMock()
+        mock_session.__aenter__.return_value = mock_db
+
+        with patch("src.db.connection.AsyncSessionLocal", return_value=mock_session):
             await loop._check_stop_losses()
 
     @pytest.mark.asyncio
     async def test_executes_trigger(self):
         import src.trading.execution.loop as loop
 
-        mock_db = MagicMock()
+        mock_db = AsyncMock()
         order = MagicMock(ticker="SBER")
         inst = MagicMock(id=1, ticker="SBER")
         price_row = MagicMock(instrument_id=1, close=250.0)
-        mock_db.query.return_value.filter.return_value.all.side_effect = [
-            [order],
-            [inst],
+        mock_db.execute.side_effect = [
+            _mock_result([order]),
+            _mock_result([inst]),
+            _mock_result([price_row]),
         ]
-        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [price_row]
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__.return_value = mock_db
 
         tracker = MagicMock()
         tracker.execute_triggers = AsyncMock()
 
         with (
-            patch("src.trading.execution.loop.get_session", return_value=mock_db),
+            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.position_tracker", tracker),
         ):
             await loop._check_stop_losses()
@@ -458,11 +492,16 @@ class TestCheckDailyPnl:
     async def test_no_positions(self):
         import src.trading.execution.loop as loop
 
-        mock_db = MagicMock()
-        mock_db.query.return_value.all.return_value = []
+        mock_db = AsyncMock()
+        mock_db.execute.side_effect = [
+            _mock_result([]),         # select(PortModel) → scalars
+        ]
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__.return_value = mock_db
 
         with (
-            patch("src.trading.execution.loop.get_session", return_value=mock_db),
+            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.async_update_day_value") as mock_update_val,
             patch("src.trading.execution.loop.async_update_drawdown") as mock_update_dd,
             patch("src.trading.execution.loop.get_day_pnl", return_value=(0.0, 0.0)),
@@ -477,20 +516,23 @@ class TestCheckDailyPnl:
     async def test_with_positions(self):
         import src.trading.execution.loop as loop
 
-        mock_db = MagicMock()
+        mock_db = AsyncMock()
         pos1 = MagicMock(instrument_id=10, quantity=5, avg_price=200.0)
         pos2 = MagicMock(instrument_id=20, quantity=3, avg_price=100.0)
-        mock_db.query.return_value.all.return_value = [pos1, pos2]
 
         price_row1 = MagicMock(instrument_id=10, close=250.0)
         price_row2 = MagicMock(instrument_id=20, close=None)
-        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            price_row1,
-            price_row2,
+
+        mock_db.execute.side_effect = [
+            _mock_result([pos1, pos2]),           # select(PortModel) → scalars
+            _mock_result([price_row1, price_row2], use_scalars=False),  # select(PriceModel) → .all()
         ]
 
+        mock_session = AsyncMock()
+        mock_session.__aenter__.return_value = mock_db
+
         with (
-            patch("src.trading.execution.loop.get_session", return_value=mock_db),
+            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.async_update_day_value") as mock_update_val,
             patch("src.trading.execution.loop.async_update_drawdown") as mock_update_dd,
             patch("src.trading.execution.loop.get_day_pnl", return_value=(150.0, 0.05)),
@@ -506,12 +548,17 @@ class TestCheckDailyPnl:
     async def test_position_with_no_instrument_id_skips(self):
         import src.trading.execution.loop as loop
 
-        mock_db = MagicMock()
+        mock_db = AsyncMock()
         pos = MagicMock(instrument_id=None, quantity=5, avg_price=200.0)
-        mock_db.query.return_value.all.return_value = [pos]
+        mock_db.execute.side_effect = [
+            _mock_result([pos]),  # select(PortModel) → scalars
+        ]
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__.return_value = mock_db
 
         with (
-            patch("src.trading.execution.loop.get_session", return_value=mock_db),
+            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.async_update_day_value") as mock_update_val,
             patch("src.trading.execution.loop.async_update_drawdown") as mock_update_dd,
             patch("src.trading.execution.loop.get_day_pnl", return_value=(0.0, 0.0)),
@@ -722,16 +769,29 @@ class TestProcessSignals:
     async def test_buy_action_executes(self):
         import src.trading.execution.loop as loop
 
-        mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="BUY", confidence=0.8)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
+        price_row = MagicMock(instrument_id=sig.instrument_id, close=250.0)
+
+        mock_db = AsyncMock()
+        news_row = MagicMock(sentiment_weighted=0.5, sentiment_score=0.3)
+        mock_db.execute.side_effect = [
+            _mock_result([sig]),                              # 1: signals
+            _mock_result([]),                                 # 2: portfolio
+            _mock_result([price_row], use_scalars=False),     # 3: signal prices
+            _mock_result([inst]),                             # 4: instruments
+            _mock_result([price_row], use_scalars=False),     # 5: per-ticker price/vol
+            _mock_result([news_row], use_scalars=False),      # 6: news data
+        ]
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__.return_value = mock_db
 
         mock_result = MagicMock()
         mock_result.status = "filled"
 
         with (
-            patch("src.trading.execution.loop.get_session", return_value=mock_db),
+            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.market_hours_check", return_value=True),
             patch("src.trading.execution.loop.can_trade", return_value=(True, "ok")),
             patch("src.trading.execution.loop._check_var", return_value=(True, "ok")),
@@ -749,16 +809,29 @@ class TestProcessSignals:
     async def test_cautious_buy_executes_as_buy(self):
         import src.trading.execution.loop as loop
 
-        mock_db = MagicMock()
         inst = MagicMock(ticker="SBER")
         sig = MagicMock(instrument=inst, action="CAUTIOUS_BUY", confidence=0.6)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
+        price_row = MagicMock(instrument_id=sig.instrument_id, close=250.0)
+        news_row = MagicMock(sentiment_weighted=0.5, sentiment_score=0.3)
+
+        mock_db = AsyncMock()
+        mock_db.execute.side_effect = [
+            _mock_result([sig]),
+            _mock_result([]),
+            _mock_result([price_row], use_scalars=False),
+            _mock_result([inst]),
+            _mock_result([price_row], use_scalars=False),
+            _mock_result([news_row], use_scalars=False),
+        ]
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__.return_value = mock_db
 
         mock_result = MagicMock()
         mock_result.status = "filled"
 
         with (
-            patch("src.trading.execution.loop.get_session", return_value=mock_db),
+            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.market_hours_check", return_value=True),
             patch("src.trading.execution.loop.can_trade", return_value=(True, "ok")),
             patch("src.trading.execution.loop._check_var", return_value=(True, "ok")),
@@ -775,16 +848,29 @@ class TestProcessSignals:
     async def test_sell_action_executes(self):
         import src.trading.execution.loop as loop
 
-        mock_db = MagicMock()
         inst = MagicMock(ticker="GAZP")
         sig = MagicMock(instrument=inst, action="SELL", confidence=0.7)
-        mock_db.query.return_value.options.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
+        price_row = MagicMock(instrument_id=sig.instrument_id, close=300.0)
+        news_row = MagicMock(sentiment_weighted=-0.2, sentiment_score=0.1)
+
+        mock_db = AsyncMock()
+        mock_db.execute.side_effect = [
+            _mock_result([sig]),
+            _mock_result([]),
+            _mock_result([price_row], use_scalars=False),
+            _mock_result([inst]),
+            _mock_result([price_row], use_scalars=False),
+            _mock_result([news_row], use_scalars=False),
+        ]
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__.return_value = mock_db
 
         mock_result = MagicMock()
         mock_result.status = "filled"
 
         with (
-            patch("src.trading.execution.loop.get_session", return_value=mock_db),
+            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.market_hours_check", return_value=True),
             patch("src.trading.execution.loop.can_trade", return_value=(True, "ok")),
             patch("src.trading.execution.loop._check_var", return_value=(True, "ok")),

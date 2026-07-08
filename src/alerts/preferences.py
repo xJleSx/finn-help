@@ -48,6 +48,7 @@ class UserAlertPreferences:
                     if row.ticker not in prefs["muted_tickers"]:
                         prefs["muted_tickers"].append(row.ticker)
             except Exception:
+                logger.exception("Unhandled exception")
                 logger.warning("Failed to load alert prefs for user %d", user_id)
 
         self._db_preferences[user_id] = prefs

@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from typing import Any
 
 import structlog
@@ -11,13 +12,13 @@ from src.analysis.whatif import whatif_macro, whatif_scenario
 from src.db.connection import get_session
 from src.db.models import GeoRiskScore, Instrument
 from src.db.models import Signal as SignalModel
+from src.interfaces.telegram.messages import _reply_with_analysis
 from src.interfaces.telegram_guard import _check_cooldown, guard
 from src.interfaces.telegram_helpers import (
     _chunk_text,
     build_top_keyboard,
     html_escape,
 )
-from src.interfaces.telegram.messages import _reply_with_analysis
 from src.portfolio.allocator import allocator
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +37,7 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             try:
                 await update.effective_message.reply_text(text, parse_mode="HTML")
             except Exception:
+                logger.exception("Unhandled exception")
                 await update.effective_message.reply_text(text)
         else:
             await update.effective_message.reply_text("Ежедневный отчёт ещё не сформирован. Он появляется после 23:50 МСК.")
@@ -53,6 +55,7 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         for chunk in _chunk_text(text, 4096):
             await update.effective_message.reply_text(chunk, parse_mode="HTML")
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("Weekly report failed")
         await update.effective_message.reply_text("Не удалось сформировать недельную сводку.")
 
@@ -191,6 +194,7 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         await update.effective_message.reply_text(text, reply_markup=build_top_keyboard(), parse_mode="HTML")
     except Exception:
+        logger.exception("Unhandled exception")
         logger.warning("Top command error", exc_info=True)
         await update.effective_message.reply_text("\u274c Не удалось загрузить топ. Убедитесь, что запущен `finn update`.")
 

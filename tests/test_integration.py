@@ -128,7 +128,7 @@ class TestAllocatorIntegration:
 
         inst = _seed_instrument(db_session, "SBER", "stock", "Банки")
         _seed_prices(db_session, inst.id)
-        db_session.add(PortModel(instrument_id=inst.id, quantity=10, avg_price=100.0))
+        db_session.add(PortModel(user_id=1, instrument_id=inst.id, quantity=10, avg_price=100.0))
         db_session.commit()
 
         allocator = PortfolioAllocator()

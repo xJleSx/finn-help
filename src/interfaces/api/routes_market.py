@@ -121,6 +121,7 @@ async def event_stream() -> EventSourceResponse:
                 data = await loop.run_in_executor(get_executor(), _query_stats)
                 yield {"data": json.dumps(data)}
             except Exception:
+                logger.exception("Unhandled exception")
                 logger.exception("sse_event_error")
             await asyncio.sleep(60)
 

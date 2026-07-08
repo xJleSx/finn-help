@@ -1,20 +1,17 @@
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Column,
     DateTime,
     Float,
+    Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
     func,
 )
-from sqlalchemy import (
-    Index,
-)
-from sqlalchemy.orm import relationship
 
 from .base import Base
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 import pandas as pd
 
@@ -107,11 +105,8 @@ def compute_max_drawdown_details(equity_curve: pd.Series | np.ndarray) -> dict[s
     dd = (eq - peak) / peak
     trough_idx = np.argmin(dd)
     if dd[trough_idx] == 0:
-        return {
-            "start_idx": 0, "end_idx": 0, "recovery_idx": 0,
-            "depth": 0.0, "duration": 0
-        }
-    peak_idx = int(np.argmax(eq[:trough_idx + 1]))
+        return {"start_idx": 0, "end_idx": 0, "recovery_idx": 0, "depth": 0.0, "duration": 0}
+    peak_idx = int(np.argmax(eq[: trough_idx + 1]))
     peak_val = eq[peak_idx]
     recovery_idx = trough_idx
     for i in range(trough_idx + 1, len(eq)):
@@ -123,16 +118,14 @@ def compute_max_drawdown_details(equity_curve: pd.Series | np.ndarray) -> dict[s
         "end_idx": int(trough_idx),
         "recovery_idx": int(recovery_idx),
         "depth": float(dd[trough_idx]),
-        "duration": int(recovery_idx - peak_idx)
+        "duration": int(recovery_idx - peak_idx),
     }
 
 
 def monthly_returns_table(returns: pd.Series) -> pd.DataFrame:
     if not isinstance(returns, pd.Series):
         raise TypeError("monthly_returns_table requires a pandas Series with DatetimeIndex")
-    monthly = returns.groupby([returns.index.year, returns.index.month]).apply(
-        lambda x: (1 + x).prod() - 1
-    )
+    monthly = returns.groupby([returns.index.year, returns.index.month]).apply(lambda x: (1 + x).prod() - 1)
     table = monthly.unstack(level=1)
     table.columns = [f"{m:02d}" for m in table.columns]
     table.index.name = "Year"
@@ -155,13 +148,15 @@ def yearly_returns_table(returns: pd.Series, periods_per_year: int = 252) -> pd.
         peak = np.maximum.accumulate(eq)
         dd = (eq - peak) / peak
         max_dd = float(np.min(dd))
-        return pd.Series({
-            "Return": ret,
-            "CAGR": cagr,
-            "Volatility": vol,
-            "Sharpe": sharpe,
-            "Max DD": max_dd,
-        })
+        return pd.Series(
+            {
+                "Return": ret,
+                "CAGR": cagr,
+                "Volatility": vol,
+                "Sharpe": sharpe,
+                "Max DD": max_dd,
+            }
+        )
 
     table = years.apply(yearly_stats)
     table.index.name = "Year"

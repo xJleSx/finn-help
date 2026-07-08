@@ -79,6 +79,7 @@ class CircuitBreaker:
             try:
                 self._on_state_change(self.config.name, old_state, new_state)
             except Exception:
+                logger.exception("Unhandled exception")
                 logger.exception("circuit_breaker.on_state_change failed name=%s", self.config.name)
 
     async def call(

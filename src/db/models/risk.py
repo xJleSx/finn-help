@@ -1,19 +1,16 @@
 from sqlalchemy import (
+    JSON,
     Column,
     Date,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
-    JSON,
     String,
     UniqueConstraint,
     func,
 )
-from sqlalchemy import (
-    Index,
-)
-from sqlalchemy.orm import relationship
 
 from .base import Base
 

@@ -22,8 +22,8 @@ from src.constants import (
 )
 from src.db.connection import get_session, session_scope
 from src.db.models import CorporateEvent, Dividend, FundamentalMetric, Instrument, Price
-from src.portfolio.risk import item_risk, item_risk_async
 from src.portfolio.allocator.profiles import PROFILES
+from src.portfolio.risk import item_risk, item_risk_async
 
 logger = logging.getLogger(__name__)
 
@@ -683,6 +683,7 @@ class PortfolioAllocator:
                 return 1.0
             return 0.5
         except Exception:
+            logger.exception("Unhandled exception")
             logger.warning("Failed to get liquidity score", exc_info=True)
             return 0.0
 
@@ -753,6 +754,7 @@ class PortfolioAllocator:
                 return True
             return False
         except Exception:
+            logger.exception("Unhandled exception")
             return False
 
     async def _downtrend_excluded_async(self, ticker: str, db: AsyncSession) -> bool:
@@ -778,6 +780,7 @@ class PortfolioAllocator:
                 return True
             return False
         except Exception:
+            logger.exception("Unhandled exception")
             return False
 
     async def _momentum_score_async(self, inst: dict[str, Any], db: AsyncSession) -> dict[str, Any]:
@@ -865,6 +868,7 @@ class PortfolioAllocator:
                 return 1.0
             return 0.5
         except Exception:
+            logger.exception("Unhandled exception")
             logger.warning("Failed to get liquidity score", exc_info=True)
             return 0.0
 

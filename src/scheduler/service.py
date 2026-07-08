@@ -82,6 +82,7 @@ def _retry_failed_receipts() -> None:
                 logger.exception("receipt_retry_failed", receipt_id=receipt.id)
                 mgr.mark_failed(receipt.id, str(exc)[:500], schedule_retry=True)
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("retry_failed_receipts_crashed")
     finally:
         db.close()
@@ -103,6 +104,7 @@ def _check_smart_rules() -> None:
                 history.log_alert(alert)
             logger.info("Smart rules triggered %d alerts", len(triggered))
     except Exception:
+        logger.exception("Unhandled exception")
         logger.exception("smart_rules_check_failed")
     finally:
         db.close()
@@ -146,6 +148,7 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
         setup_signal_handlers()
         register_shutdown_hook(stop)
     except Exception:
+        logger.exception("Unhandled exception")
         pass
 
     async def _check_shutdown() -> None:
