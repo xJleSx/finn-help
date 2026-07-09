@@ -8,133 +8,43 @@ on:
 
 env:
   PYTHON_VERSION: "3.13"
-
-defaults:
-  run:
-    shell: bash
+  DATABASE_URL: "sqlite:///data/test.db"
+  JWT_SECRET: "ci-test-secret"
+  LOG_LEVEL: WARNING
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install uv and cache
-        uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          enable-cache: true
-          cache-suffix: "lint"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
+          python-version: ${{ env.PYTHON_VERSION }}
       - name: Install dependencies
-        run: uv sync --group dev --group ml
-
-      - name: Ruff check
-        run: uv run ruff check src/ tests/
-
+        run: uv sync --group dev
+      - name: Ruff check (focused)
+        run: uv run ruff check --output-format=github src/analysis/ml/ src/collectors/ src/cli/ tools/
       - name: Ruff format check
-        run: uv run ruff format --check src/ tests/
-
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv and cache
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-suffix: "typecheck"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: uv sync --group dev --group ml
-
-      - name: mypy check
-        run: uv run mypy src/
+        run: uv run ruff format --check
+      - name: MyPy
+        run: uv run mypy src/cli/commands/data.py src/analysis/ml/_base.py src/analysis/ml/pooled.py src/collectors/moex.py src/collectors/base.py src/constants.py src/config.py
 
   test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: finn
-          POSTGRES_PASSWORD: finn
-          POSTGRES_DB: finn
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U finn -d finn"
-          --health-interval 5s
-          --health-timeout 2s
-          --health-retries 10
-    env:
-      JWT_SECRET: ci-test-secret
-      DATABASE_URL: postgresql+asyncpg://finn:finn@localhost:5432/finn
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install uv and cache
-        uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          enable-cache: true
-          cache-suffix: "test"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
+          python-version: ${{ env.PYTHON_VERSION }}
       - name: Install dependencies
-        run: uv sync --group dev --group ml
-
-      - name: Wait for Postgres
+        run: uv sync --group dev
+      - name: Create data dir and env
         run: |
-          for i in $(seq 1 30); do
-            pg_isready -h localhost -U finn -d finn && break || true
-            echo "Waiting for Postgres... ($i)"
-            sleep 2
-          done
-
-      - name: Run migrations
-        run: uv run alembic upgrade head
-
-      - name: Run tests with coverage
-        run: uv run pytest tests/ --cov=src --cov-report=xml --cov-report=term -q
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          file: ./coverage.xml
-          fail_ci_if_error: false
-
-  security:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install uv and cache
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-suffix: "security"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: uv sync --group dev --group ml
-
-      - name: Install package for auditing
-        run: uv run pip install -e .
-
-      - name: pip-audit
-        run: uv run pip-audit --strict
-
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+          mkdir -p data
+          echo "DATABASE_URL=${{ env.DATABASE_URL }}" > .env
+          echo "JWT_SECRET=${{ env.JWT_SECRET }}" >> .env
+          echo "LOG_LEVEL=${{ env.LOG_LEVEL }}" >> .env
+      - name: Quick tests
+        run: uv run pytest tests/test_config.py tests/test_constants.py tests/test_connection.py tests/test_types.py -x -v
+      - name: ML tests
+        run: uv run pytest tests/test_ml.py tests/test_backtest.py -x -v

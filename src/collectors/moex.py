@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from src.collectors.base import BaseCollector
 from src.config import settings
+from src.constants import DEFAULT_HISTORY_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class MOEXCollector(BaseCollector):
         board: str = "shares",
     ) -> list[dict[str, Any]]:
         if from_date is None:
-            from_date = (date.today() - timedelta(days=365)).isoformat()
+            from_date = (date.today() - timedelta(days=DEFAULT_HISTORY_DAYS)).isoformat()
         if to_date is None:
             to_date = date.today().isoformat()
 
@@ -75,11 +76,33 @@ class MOEXCollector(BaseCollector):
         if not path:
             path = BOARD_MAP["shares"]
 
-        data = await self._fetch_json(
-            path.format(ticker=ticker),
-            {"from": from_date, "till": to_date, "iss.meta": "off"},
-        )
-        return self._parse_table(data, "history")
+        all_rows: list[dict[str, Any]] = []
+        start = 0
+        while True:
+            params: dict[str, Any] = {
+                "from": from_date,
+                "till": to_date,
+                "iss.meta": "off",
+                "start": str(start),
+            }
+            data = await self._fetch_json(path.format(ticker=ticker), params)
+            rows = self._parse_table(data, "history")
+            if not rows:
+                break
+            all_rows.extend(rows)
+
+            cursor = data.get("history.cursor")
+            if isinstance(cursor, dict):
+                cursor_rows = cursor.get("data", [])
+                if cursor_rows:
+                    total = int(cursor_rows[0][1]) if len(cursor_rows[0]) > 1 else 0
+                    if start + len(rows) >= total:
+                        break
+                    start += len(rows)
+                    continue
+            break
+
+        return all_rows
 
     async def _get_bond_history(self, ticker: str, from_date: str, to_date: str) -> tuple[list[dict[str, Any]], str | None]:
         for board_id in BOND_BOARDS:

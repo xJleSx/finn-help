@@ -1,11 +1,10 @@
 import asyncio
 import logging
-from datetime import date
-
-from sqlalchemy import func
+from datetime import date, timedelta
 
 from src.alerts.generators import generate_all_alerts, store_alerts
 from src.analysis.rebalancing import RebalancingEngine
+from src.analysis.service import analysis_service
 from src.core.executor import get_executor
 from src.db.connection import get_session
 from src.db.models import Signal as SignalModel
@@ -37,7 +36,11 @@ fusion = SignalFusionEngine()
 
 
 def _delete_today_signals(db):
-    db.query(SignalModel).filter(func.date(SignalModel.date) == date.today()).delete()
+    today = date.today()
+    db.query(SignalModel).filter(
+        SignalModel.date >= today,
+        SignalModel.date < today + timedelta(days=1),
+    ).delete()
 
 
 async def daily_update() -> None:
@@ -97,6 +100,11 @@ async def weekly_update() -> None:
         await collect_bond_offerings(db)
         await loop.run_in_executor(get_executor(), collect_company_profiles, db)
         await collect_corporate_events(db)
+
+        await loop.run_in_executor(
+            get_executor(),
+            lambda: analysis_service.train_models(db),
+        )
 
         rebalancer = RebalancingEngine()
         plan = await loop.run_in_executor(get_executor(), lambda: rebalancer.analyze_portfolio(db, user_id=0))

@@ -43,6 +43,9 @@ logs/
 # Temp files
 tmp/
 
+# CatBoost auto-generated temp dir
+catboost_info/
+
 # AI skill tools (reference, not part of project)
 .opencode/skills-tools/
 

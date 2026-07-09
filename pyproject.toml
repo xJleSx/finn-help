@@ -44,6 +44,7 @@ dependencies = [
     "sentry-sdk>=2.0",
     "mlflow>=2.15.0",
     "celery>=5.5.0",
+    "lxml>=6.1.1",
 ]
 
 [project.optional-dependencies]
@@ -211,8 +212,19 @@ ignore_errors = true
 line-length = 150
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W"]
+select = ["E", "F", "I", "N", "W", "R", "SIM", "S"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "SIM", "R", "PLC0415"]
+"src/interfaces/telegram/*" = ["S"]
+"tools/*" = ["PLC0415", "R", "E402"]
+"src/**/__init__.py" = ["PLC0415"]
+"src/notifications/*" = ["S311", "S701"]
+"src/cache.py" = ["S324"]
+"src/collectors/alternative.py" = ["S314"]
+"src/collectors/cbr.py" = ["S314", "S101"]
+"alembic/*" = ["S608"]
 
 [tool.ruff.format]
 line-ending = "auto"

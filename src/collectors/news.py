@@ -85,8 +85,7 @@ class NewsCollector(BaseCollector):
                 # Also link to any other tickers mentioned
                 search_text = f"{n.title or ''} {n.summary or ''}".upper()
                 for t, iid in ticker_map.items():
-                    if len(t) >= 2 and t in search_text and iid != inst.id:
-                        if not db.query(NewsInstrument).filter_by(news_id=n.id, instrument_id=iid).first():
+                    if len(t) >= 2 and t in search_text and iid != inst.id and not db.query(NewsInstrument).filter_by(news_id=n.id, instrument_id=iid).first():
                             db.add(NewsInstrument(news_id=n.id, instrument_id=iid))
                 saved += 1
         if saved:

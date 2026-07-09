@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Optional
@@ -11,6 +12,7 @@ from src.analysis.ml.walk_forward import (
     baseline_accuracy,
     build_labels,
     compute_classification_metrics,
+    compute_threshold,
     temporal_split,
 )
 from src.config import settings
@@ -20,6 +22,7 @@ from src.model_registry import save_model
 logger = logging.getLogger(__name__)
 
 EVENT_FEATURE_COLS = ["event_count_30d", "event_severity_30d", "sanctions_30d", "days_since_major_event"]
+MACRO_FEATURE_COLS = ["brent", "key_rate", "usd_rate", "imoex", "cpi", "ofz_10y"]
 BASE_FEATURE_COLS = [
     "close",
     "rsi",
@@ -31,6 +34,10 @@ BASE_FEATURE_COLS = [
     "sma20_sma50",
     "rsi_norm",
     "macd_signal_binary",
+    "atr_pct",
+    "volume_ratio",
+    "bb_width",
+    "hist_vol_20",
 ]
 
 
@@ -45,10 +52,100 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     result["sma20_sma50"] = result["sma_20"] / result["sma_50"].replace(0, np.nan)
     result["rsi_norm"] = result["rsi"] / 100
     result["macd_signal_binary"] = (result["macd_hist"] > 0).astype(int)
+
+    atr = df.get("atr")
+    if atr is not None:
+        denom = result["close"].values
+        result["atr_pct"] = np.divide(atr.values, denom, out=np.full_like(atr.values, np.nan), where=denom > 0)
+    else:
+        result["atr_pct"] = 0.0
+
+    vol = df.get("volume")
+    vol_sma = df.get("volume_sma_20")
+    if vol is not None and vol_sma is not None:
+        vol_sma_safe = vol_sma.values.copy()
+        vol_sma_safe[vol_sma_safe == 0] = np.nan
+        result["volume_ratio"] = vol.values / vol_sma_safe
+    else:
+        result["volume_ratio"] = 1.0
+
+    bb_up = df.get("bb_upper")
+    bb_low = df.get("bb_lower")
+    bb_mid = df.get("bb_mid")
+    if bb_up is not None and bb_low is not None and bb_mid is not None:
+        bb_mid_safe = bb_mid.values.copy()
+        bb_mid_safe[bb_mid_safe == 0] = np.nan
+        result["bb_width"] = (bb_up.values - bb_low.values) / bb_mid_safe
+    else:
+        result["bb_width"] = 0.0
+
+    close_arr = df["close"].values
+    returns = pd.Series(close_arr).pct_change()
+    hist_vol = returns.rolling(20).std()
+    result["hist_vol_20"] = hist_vol.values
+
     for c in EVENT_FEATURE_COLS:
         result[c] = df[c].values if c in df.columns else 0
-    result = result.dropna()
-    return result
+    for c in MACRO_FEATURE_COLS:
+        result[c] = df[c].values if c in df.columns else 0
+        chg = f"{c}_chg"
+        result[chg] = df[chg].values if chg in df.columns else 0
+    if "ticker_id" in df.columns:
+        result["ticker_id"] = df["ticker_id"].values
+    return result.dropna()
+
+
+def enrich_macro(df: pd.DataFrame) -> pd.DataFrame:
+    """Add macro indicators as columns (key_rate, brent, usd_rate, imoex, cpi, ofz_10y, m2).
+
+    Queries MacroIndicator from DB for the date range of df and merges
+    as forward-filled columns plus daily changes.
+    """
+    if df.empty or "date" not in df.columns:
+        return df
+
+    from datetime import date as dt_date
+
+    from src.db.connection import get_session
+    from src.db.models.misc import MacroIndicator
+
+    dates = pd.to_datetime(df["date"])
+    d_min = dates.min().date()
+    d_max = dates.max().date()
+
+    db = get_session()
+    try:
+        rows = (
+            db.query(MacroIndicator)
+            .filter(MacroIndicator.date.between(d_min, d_max))
+            .order_by(MacroIndicator.date)
+            .all()
+        )
+        if not rows:
+            return df
+
+        macro_dict: dict[dt_date, dict[str, float]] = {}
+        for r in rows:
+            macro_dict.setdefault(r.date, {})[r.indicator_type] = r.value
+
+        macro_df = pd.DataFrame.from_dict(macro_dict, orient="index")
+        macro_df.index.name = "date"
+        macro_df = macro_df.reset_index()
+        macro_df["date"] = pd.to_datetime(macro_df["date"])
+
+        result = df.copy()
+        result["date"] = pd.to_datetime(result["date"])
+        result = result.merge(macro_df, on="date", how="left")
+
+        macro_cols = [c for c in macro_df.columns if c != "date"]
+        for col in macro_cols:
+            result[col] = result[col].ffill().fillna(0)
+            chg = f"{col}_chg"
+            result[chg] = result[col].pct_change().fillna(0)
+
+        return result
+    finally:
+        db.close()
 
 
 def log_shap(model: Any, x_train: np.ndarray, x_val: np.ndarray, model_name: str, feature_names: list[str]) -> None:
@@ -121,6 +218,8 @@ class BaseMLClassifier(PersistMixin, ABC):
     def _create_model(self) -> Any: ...
 
     def train(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> bool:
+        if "date" in df.columns:
+            df = enrich_macro(df)
         features = prepare_features(df)
         if features.empty or len(features) < settings.ml_min_train_rows:
             return False
@@ -164,16 +263,16 @@ class BaseMLClassifier(PersistMixin, ABC):
         if df.empty or len(df) < settings.ml_min_predict_rows:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
 
+        if "date" in df.columns:
+            df = enrich_macro(df)
         features = prepare_features(df)
         if features.empty or len(features) < settings.ml_min_train_rows:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
 
         model = self._model
         if model is None:
-            try:
+            with contextlib.suppress(ValueError, FileNotFoundError):
                 model = self.load()
-            except (ValueError, FileNotFoundError):
-                pass
 
         if model is None:
             result = self._train_on_the_fly(df, features, anomaly_mask=anomaly_mask)
@@ -363,7 +462,7 @@ class BaseMLClassifier(PersistMixin, ABC):
     ) -> tuple[Any, dict[str, Any] | None] | None:
         try:
             lookahead = settings.ml_lookahead
-            threshold = settings.ml_threshold
+            threshold = compute_threshold(df["close"], lookahead=lookahead, fallback=settings.ml_threshold)
             y, mask = build_labels(df["close"], lookahead=lookahead, threshold=threshold)
             n = min(len(features), len(y))
             aligned = features.iloc[:n].copy()
@@ -452,7 +551,8 @@ class BaseMLClassifier(PersistMixin, ABC):
             return None
 
     def _feature_names(self) -> list[str]:
-        return BASE_FEATURE_COLS + EVENT_FEATURE_COLS
+        macro_names = [name for c in MACRO_FEATURE_COLS for name in (c, f"{c}_chg")]
+        return BASE_FEATURE_COLS + EVENT_FEATURE_COLS + macro_names
 
 
 class BaseRegressor(PersistMixin, ABC):
