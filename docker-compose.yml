@@ -52,7 +52,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-finn}@pgbouncer:5432/finn
+      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:?DB_PASSWORD is required}@pgbouncer:5432/finn
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
@@ -71,7 +71,7 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
       timeout: 5s
-      start_period: 10s
+      start_period: 30s
       retries: 3
 
   # Celery worker/beat — зарезервировано для фоновых ML-задач.

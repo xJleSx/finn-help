@@ -16,8 +16,9 @@ fi
 
 # Validate required secrets in production
 if [ "$FINN_ENV" = "production" ]; then
-  if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" = "finn" ]; then
-    echo "ERROR: DB_PASSWORD must be set to a strong value in production"
+  db_password=$(python -c "from urllib.parse import urlparse; p=urlparse('$DATABASE_URL'); print(p.password or '')" 2>/dev/null || echo "")
+  if [ -z "$db_password" ] || [ "$db_password" = "finn" ]; then
+    echo "ERROR: DB_PASSWORD must be set to a strong value in production (set in DATABASE_URL)"
     exit 1
   fi
   if [ -z "$JWT_SECRET" ]; then
