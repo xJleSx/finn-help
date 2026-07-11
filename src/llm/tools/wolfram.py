@@ -60,20 +60,19 @@ class WolframAlphaClient:
             return ""
 
         async def _do_query() -> str:
-            async with self._lock:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.get(
-                        WOLFRAM_LLM_URL,
-                        params={"input": input_text, "appid": self._app_id, "maxchars": 500},
-                    )
-                    if resp.status_code == 501:
-                        logger.debug("WolframAlpha 501 for: %s", input_text)
-                        return ""
-                    resp.raise_for_status()
-                    text = resp.text.strip()
-                    if text and not text.startswith("Wolfram|Alpha did not understand"):
-                        return text
+            async with self._lock, httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    WOLFRAM_LLM_URL,
+                    params={"input": input_text, "appid": self._app_id, "maxchars": 500},
+                )
+                if resp.status_code == 501:
+                    logger.debug("WolframAlpha 501 for: %s", input_text)
                     return ""
+                resp.raise_for_status()
+                text = resp.text.strip()
+                if text and not text.startswith("Wolfram|Alpha did not understand"):
+                    return text
+                return ""
 
         try:
             return await self._circuit_breaker.call(_do_query)

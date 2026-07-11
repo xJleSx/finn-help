@@ -402,9 +402,9 @@ class SignalFusionEngine:
     def _to_native(self, obj: Any) -> Any:
         if isinstance(obj, dict):
             return {k: self._to_native(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
+        if isinstance(obj, list):
             return [self._to_native(v) for v in obj]
-        elif hasattr(obj, "item"):
+        if hasattr(obj, "item"):
             return obj.item()
         return obj
 

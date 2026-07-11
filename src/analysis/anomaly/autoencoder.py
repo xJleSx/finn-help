@@ -56,8 +56,7 @@ class AutoencoderAnomalyDetector:
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 encoded = self.encoder(x)
-                decoded = self.decoder(encoded)
-                return decoded
+                return self.decoder(encoded)
 
         if not ticker:
             return {"trained": False, "reason": "no ticker"}

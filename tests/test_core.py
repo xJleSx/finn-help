@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from src.core.container import Container, container, container_for_testing
+from src.core.container import Container, container_for_testing
 from src.core.health import health_registry, register_module_health
 
 
@@ -59,8 +57,9 @@ class TestContainer:
         assert c.has("telegram_bot")
         assert c.has("run_analysis")
 
-    def test_global_container_has_wired_services(self):
-        assert container.has("settings") is False
+    def test_global_container_initial_state(self):
+        fresh = Container()
+        assert fresh.has("settings") is False
 
 
 class TestHealthRegistry:

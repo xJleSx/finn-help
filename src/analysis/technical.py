@@ -21,9 +21,8 @@ class TechnicalAnalyzer:
         df = self.macd(df)
         df = self.bollinger_bands(df, 20)
         df = self.volume_sma(df, 20)
-        df = self.atr(df, 14)
+        return self.atr(df, 14)
 
-        return df
 
     def sma(self, df: pd.DataFrame, period: int) -> pd.DataFrame:
         col = f"sma_{period}"

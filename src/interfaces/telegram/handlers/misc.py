@@ -38,10 +38,7 @@ async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     dividend_subs = len(ns.get_subscribers("dividend"))
 
     uptime = ""
-    if app and app.updater and app.updater.running:
-        uptime = "✅ Бот работает"
-    else:
-        uptime = "⚠️ Бот не на связи"
+    uptime = "✅ Бот работает" if app and app.updater and app.updater.running else "⚠️ Бот не на связи"
 
     text = (
         f"<b>📡 Статус бота</b>\n\n"

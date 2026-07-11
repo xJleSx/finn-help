@@ -332,6 +332,5 @@ class ImpactMatrix:
         source_count = len(sources)
 
         # Diversity score increases with number of sources (max 10 sources = 1.0)
-        diversity = min(1.0, source_count / 10.0)
+        return min(1.0, source_count / 10.0)
 
-        return diversity

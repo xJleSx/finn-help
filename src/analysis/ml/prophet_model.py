@@ -1,15 +1,40 @@
 from __future__ import annotations
 
-import logging
 import warnings
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
+import structlog
 
 from src.analysis.ml._base import BaseRegressor
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
+
+
+class HoltWintersModel:
+    def __init__(self, fitted: Any, trend_df: pd.DataFrame) -> None:
+        self._fitted = fitted
+        self._trend_df = trend_df
+
+    def make_future_dataframe(self, periods: int) -> pd.DataFrame:
+        last = self._trend_df["ds"].max()
+        dates = pd.date_range(last + pd.Timedelta(days=1), periods=periods)
+        return pd.DataFrame({"ds": dates})
+
+    def predict(self, future_df: pd.DataFrame) -> pd.DataFrame:
+        all_dates = pd.concat([self._trend_df["ds"], future_df["ds"]], ignore_index=True)
+        forecast = self._fitted.forecast(len(all_dates))
+        pred = forecast.values
+        return pd.DataFrame(
+            {
+                "ds": all_dates,
+                "trend": pred,
+                "yhat": pred,
+                "yhat_lower": pred * 0.9,
+                "yhat_upper": pred * 1.1,
+            }
+        )
 
 
 class StatsModelsTrendPredictor(BaseRegressor):
@@ -39,7 +64,7 @@ class StatsModelsTrendPredictor(BaseRegressor):
         if self._model is None:
             try:
                 self.load()
-            except (ValueError, FileNotFoundError, ModuleNotFoundError, ImportError):
+            except (ValueError, FileNotFoundError, ModuleNotFoundError, ImportError, NotImplementedError):
                 logger.warning(
                     "Trend model for %s not found, auto-training (run train() first for performance)",
                     self._ticker or "default",
@@ -98,7 +123,7 @@ class StatsModelsTrendPredictor(BaseRegressor):
             self._fitted_values = fitted.fittedvalues.values
             residuals = trend_df["y"].values[: len(self._fitted_values)] - self._fitted_values
             self._residual_std = float(np.std(residuals)) if len(residuals) > 0 else 0.0
-            return fitted
+            return HoltWintersModel(fitted, trend_df)
         except Exception as e:
             logger.warning("ExponentialSmoothing failed for %s: %s, falling back to linear", self._ticker or "", e)
             return self._linear_fallback(trend_df)
@@ -119,14 +144,15 @@ class StatsModelsTrendPredictor(BaseRegressor):
 
             def make_future_dataframe(self, periods: int) -> pd.DataFrame:
                 last = self._trend_df["ds"].max()
-                return pd.DataFrame({"ds": pd.date_range(last + pd.Timedelta(days=1), periods=periods)})
+                dates = pd.date_range(last + pd.Timedelta(days=1), periods=periods)
+                return pd.DataFrame({"ds": dates}).astype({"ds": "datetime64[ns]"})
 
             def predict(self, future_df: pd.DataFrame) -> pd.DataFrame:
                 all_dates = pd.concat([self._trend_df["ds"], future_df["ds"]], ignore_index=True)
                 x = np.arange(len(all_dates))
                 log_pred = self._coeffs[0] * x + self._coeffs[1]
                 pred = np.exp(log_pred)
-                result = pd.DataFrame(
+                return pd.DataFrame(
                     {
                         "ds": all_dates,
                         "trend": pred,
@@ -135,7 +161,6 @@ class StatsModelsTrendPredictor(BaseRegressor):
                         "yhat_upper": pred * 1.1,
                     }
                 )
-                return result
 
         return LinearTrendModel(coeffs, trend_df)
 

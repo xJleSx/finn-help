@@ -111,9 +111,7 @@ class SmartAlertEngine:
         if interval == "hourly":
             if now.hour != rule.last_triggered.hour:
                 return True
-            if (now - rule.last_triggered).total_seconds() >= 3600:
-                return True
-            return False
+            return (now - rule.last_triggered).total_seconds() >= 3600
 
         return False
 

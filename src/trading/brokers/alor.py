@@ -154,8 +154,7 @@ class AlorClient(BaseBrokerClient):
             return False
 
     async def get_orderbook(self, figi: str, depth: int = 10) -> Optional[dict[str, Any]]:
-        data = await self._request("GET", f"/md/v2/orderbook/{figi}?depth={depth}")
-        return data
+        return await self._request("GET", f"/md/v2/orderbook/{figi}?depth={depth}")
 
     async def get_instruments(self, instrument_type: str = "share") -> list[dict[str, Any]]:
         data = await self._request("GET", f"/md/v2/securities?type={instrument_type}&limit=100")

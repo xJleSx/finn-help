@@ -25,8 +25,7 @@ def atr_percentile(
 ) -> pd.Series:
     tr = _true_range(high, low, close)
     atr = tr.ewm(span=atr_period, adjust=False).mean()
-    percentile = atr.rolling(lookback, min_periods=lookback).rank(pct=True) * 100
-    return percentile
+    return atr.rolling(lookback, min_periods=lookback).rank(pct=True) * 100
 
 
 def compute_adx(
@@ -59,8 +58,7 @@ def compute_adx(
     di_sum = plus_di + minus_di
     di_sum = di_sum.replace(0, np.nan)
     dx = 100 * (plus_di - minus_di).abs() / di_sum
-    adx = dx.ewm(span=period, adjust=False).mean()
-    return adx
+    return dx.ewm(span=period, adjust=False).mean()
 
 
 def trend_direction(close: pd.Series, period: int = 20) -> int:
@@ -88,8 +86,7 @@ def bb_width_percentile(
     sma = close.rolling(period).mean()
     std = close.rolling(period).std(ddof=0)
     width = (2 * std_dev * std) / sma.replace(0, np.nan)
-    percentile = width.rolling(lookback, min_periods=lookback).rank(pct=True) * 100
-    return percentile
+    return width.rolling(lookback, min_periods=lookback).rank(pct=True) * 100
 
 
 def hurst_exponent(series: pd.Series, max_lag: int = 50) -> float:

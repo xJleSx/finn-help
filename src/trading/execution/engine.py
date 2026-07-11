@@ -456,7 +456,7 @@ async def approve_order(ticker: str, direction: str, quantity: int) -> Optional[
     async with _mode_lock:
         for r in reversed(_execution_log):
             if r.ticker == ticker and r.direction == direction and r.quantity == quantity and r.status == "pending_approval":
-                result = await execute_order(
+                return await execute_order(
                     ticker=r.ticker,
                     direction=r.direction,
                     quantity=r.quantity,
@@ -467,7 +467,6 @@ async def approve_order(ticker: str, direction: str, quantity: int) -> Optional[
                     time_in_force=r.time_in_force,
                     is_short=r.is_short,
                 )
-                return result
     return None
 
 

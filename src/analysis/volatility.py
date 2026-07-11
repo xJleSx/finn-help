@@ -376,10 +376,9 @@ class VolatilityForecaster:
         """
         if method == "ewma":
             return VolatilityForecaster.ewma_forecast(returns, steps=steps)
-        elif method == "garch":
+        if method == "garch":
             return VolatilityForecaster.garch_forecast(returns, steps=steps)
-        else:
-            raise ValueError(f"Unknown method '{method}'; use 'ewma' or 'garch'.")
+        raise ValueError(f"Unknown method '{method}'; use 'ewma' or 'garch'.")
 
 
 class _VolatilityThresholds(TypedDict):
@@ -441,7 +440,7 @@ class VolatilityRegimeDetector:
                 "geo_mult": 1.5,
                 "ml_mult": 0.6,
             }
-        elif regime == "LOW":
+        if regime == "LOW":
             return {
                 "technical_mult": 1.2,
                 "fundamental_mult": 0.8,

@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import enum
-import logging
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Optional, ParamSpec, TypeVar
 
-logger = logging.getLogger(__name__)
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 P = ParamSpec("P")
 RT = TypeVar("RT")
@@ -113,9 +114,7 @@ class CircuitBreaker:
                 self._failure_count += 1
                 self._consecutive_successes = 0
                 self._last_failure_time = time.monotonic()
-                if self._state is CircuitState.HALF_OPEN:
-                    self._transition(CircuitState.OPEN)
-                elif self._failure_count >= self.config.failure_threshold:
+                if self._state is CircuitState.HALF_OPEN or self._failure_count >= self.config.failure_threshold:
                     self._transition(CircuitState.OPEN)
             raise e
 

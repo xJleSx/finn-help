@@ -163,10 +163,7 @@ def compute_sizing_ladder(
     prices: float | list[float] | np.ndarray,
     risk_params: dict[str, Any],
 ) -> dict[str, float | int | str]:
-    if isinstance(prices, (list, np.ndarray)):
-        price = float(prices[-1]) if len(prices) > 0 else 0.0
-    else:
-        price = float(prices)
+    price = (float(prices[-1]) if len(prices) > 0 else 0.0) if isinstance(prices, (list, np.ndarray)) else float(prices)
 
     if price <= 0 or account_value <= 0:
         return {"shares": 0, "amount": 0.0, "method": "ladder"}
@@ -235,10 +232,7 @@ def compute_correlation_adjusted_size(
                 if corr > max_correlation:
                     excess += corr - max_correlation
                     count += 1
-        if count > 0:
-            penalty = 1.0 / (1.0 + excess / count)
-        else:
-            penalty = 1.0
+        penalty = 1.0 / (1.0 + excess / count) if count > 0 else 1.0
         adjusted[ticker] = position_sizes[ticker] * penalty
 
     return adjusted

@@ -96,10 +96,7 @@ class CausalImpactAnalyzer:
     """Simple before/after causal impact estimation with synthetic control."""
 
     def estimate_impact(self, ticker: str, event_date: datetime, db_session: Any, window_days: int = 30) -> dict[str, Any]:
-        if isinstance(event_date, datetime):
-            event_date_only = event_date.date()
-        else:
-            event_date_only = event_date
+        event_date_only = event_date.date() if isinstance(event_date, datetime) else event_date
 
         instrument = db_session.query(Instrument).filter(Instrument.ticker == ticker.upper()).first()
         if not instrument:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,7 +11,6 @@ from sqlalchemy import Date, cast
 from sqlalchemy import func as sa_func
 
 from src.db.models import AlertLog
-import logging
 
 logger = logging.getLogger(__name__)
 

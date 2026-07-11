@@ -5,6 +5,7 @@ from typing import Any, Optional
 from urllib.parse import urlencode
 
 import httpx
+import structlog
 from tenacity import (
     AsyncRetrying,
     before_log,
@@ -19,7 +20,7 @@ from src.core.resilience import (
     get_circuit_breaker,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class ResilientClient:
@@ -74,6 +75,7 @@ class ResilientClient:
                         )
                         raise
                     raise
+        return None
 
     async def get_json(self, url: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         if params:

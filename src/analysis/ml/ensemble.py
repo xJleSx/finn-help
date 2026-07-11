@@ -239,8 +239,7 @@ class EnsemblePredictor:
                 dtype=np.float64,
             )
             scaled = self._scaler.transform(meta_features)
-            prob = float(self._meta_model.predict_proba(scaled)[0, 1])
-            return prob
+            return float(self._meta_model.predict_proba(scaled)[0, 1])
         except Exception as e:
             logger.warning("Stacking meta-learner predict failed: %s", e)
             return None
@@ -304,10 +303,7 @@ class EnsemblePredictor:
                 continue
             try:
                 model_obj.fit(x_train, y_train)
-                if hasattr(model_obj._model, "predict_proba"):
-                    val_probs = model_obj._model.predict_proba(x_val)[:, 1]
-                else:
-                    val_probs = np.full(len(x_val), 0.5)
+                val_probs = model_obj._model.predict_proba(x_val)[:, 1] if hasattr(model_obj._model, "predict_proba") else np.full(len(x_val), 0.5)
                 oof_probs.append(val_probs)
                 active_models += 1
             except Exception as e:

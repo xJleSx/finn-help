@@ -247,10 +247,7 @@ async def sensitivity_analysis(
             finally:
                 db.close()
 
-            if param == "commission":
-                result = commission_sensitivity(equity)
-            else:
-                result = slippage_sensitivity(equity)
+            result = commission_sensitivity(equity) if param == "commission" else slippage_sensitivity(equity)
             return result.to_dict()
 
         return await loop.run_in_executor(get_executor(), _run)

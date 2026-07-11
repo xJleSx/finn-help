@@ -67,6 +67,7 @@ class FinanceMarkerCollector(BaseCollector):
                         self.MAX_RETRIES,
                     )
                     raise
+        return None
 
     async def get_company_overview(self, exchange: str, code: str) -> dict[str, Any]:
         """Company profile + ratios + summary for a single ticker.

@@ -58,8 +58,7 @@ class VolumeAnomalyDetector:
             return 0.0
         vec = np.array([[features.get(c, 0.0) for c in self._feature_cols]], dtype=np.float32)
         score = self._model.score_samples(vec)[0]
-        anomaly_score = float(np.clip(-score / 10.0, 0.0, 1.0))
-        return anomaly_score
+        return float(np.clip(-score / 10.0, 0.0, 1.0))
 
     def predict_article(self, db: Session, news_article: Any) -> float:
         published = news_article.published_at

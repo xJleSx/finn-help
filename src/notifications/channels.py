@@ -95,9 +95,7 @@ def should_send(channel_prefs: dict[str, Any], msg: PushMessage) -> bool:
     msg_level = _severity_level(msg.priority)
     if msg_level < min_level:
         return False
-    if _in_quiet_hours(channel_prefs) and msg_level < 3:
-        return False
-    return True
+    return not (_in_quiet_hours(channel_prefs) and msg_level < 3)
 
 
 class EmailPushChannel:

@@ -127,10 +127,7 @@ class UserAlertPreferences:
 
         in_quiet_hours = False
         if qh_start and qh_end:
-            if qh_start <= qh_end:
-                in_quiet_hours = qh_start <= now_time <= qh_end
-            else:
-                in_quiet_hours = now_time >= qh_start or now_time <= qh_end
+            in_quiet_hours = qh_start <= now_time <= qh_end if qh_start <= qh_end else now_time >= qh_start or now_time <= qh_end
 
         result = []
         for alert in alerts:
@@ -146,9 +143,8 @@ class UserAlertPreferences:
             if ticker in muted:
                 continue
 
-            if in_quiet_hours:
-                if alert_level < 3:
-                    continue
+            if in_quiet_hours and alert_level < 3:
+                continue
 
             result.append(alert)
 

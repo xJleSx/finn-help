@@ -76,6 +76,7 @@ class BaseCollector(ABC):
                         self.MAX_RETRIES,
                     )
                     raise
+        return None
 
     async def _fetch_text(self, url: str, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None) -> str:
         async def _do_fetch() -> str:
@@ -112,6 +113,7 @@ class BaseCollector(ABC):
                         self.MAX_RETRIES,
                     )
                     raise
+        return None
 
     async def _fetch_json_or_list(
         self, url: str, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None
@@ -150,6 +152,7 @@ class BaseCollector(ABC):
                         self.MAX_RETRIES,
                     )
                     raise
+        return None
 
     async def close(self) -> None:
         if self._client and not self._client.is_closed:

@@ -70,11 +70,11 @@ def guard(with_cooldown: bool = False):
         @wraps(handler)
         async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not await _check_access(update):
-                return
+                return None
             if not update.effective_message:
-                return
+                return None
             if with_cooldown and not await _check_cooldown(update):
-                return
+                return None
             return await handler(update, context)
 
         return wrapper

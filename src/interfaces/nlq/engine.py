@@ -158,10 +158,7 @@ class NLQueryEngine:
                     coro = client.answer_question(prompt, user_id=str(user_id))
                     try:
                         loop = asyncio.get_running_loop()
-                        if loop.is_running():
-                            result = asyncio.run_coroutine_threadsafe(coro, loop).result()
-                        else:
-                            result = asyncio.run(coro)
+                        result = asyncio.run_coroutine_threadsafe(coro, loop).result() if loop.is_running() else asyncio.run(coro)
                     except RuntimeError:
                         result = asyncio.run(coro)
                 elif callable(client):

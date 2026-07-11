@@ -243,9 +243,9 @@ class TestAnalyzeSingle:
         self._setup_db_for_analyze(db)
         inst = MagicMock(id=1)
         with (
-            patch.object(service, "_load_geo", AsyncMock(return_value={"score": 0.0})),
-            patch.object(service, "_load_macro", AsyncMock(return_value={})),
-            patch.object(service, "_load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})),
+            patch.object(service.loader, "load_geo", AsyncMock(return_value={"score": 0.0})),
+            patch.object(service.loader, "load_macro", AsyncMock(return_value={})),
+            patch.object(service.loader, "load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})),
             patch.object(service, "_compute_ml", AsyncMock(return_value=None)),
         ):
             result = await service.analyze_single(db, inst, "TEST", with_ml=False)
@@ -267,9 +267,9 @@ class TestAnalyzeSingle:
             "ensemble": {},
         }
         with (
-            patch.object(service, "_load_geo", AsyncMock(return_value={"score": 0.0})),
-            patch.object(service, "_load_macro", AsyncMock(return_value={})),
-            patch.object(service, "_load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})),
+            patch.object(service.loader, "load_geo", AsyncMock(return_value={"score": 0.0})),
+            patch.object(service.loader, "load_macro", AsyncMock(return_value={})),
+            patch.object(service.loader, "load_sentiment", AsyncMock(return_value={"score": 0.0, "divergence": 0.0, "source": "none"})),
             patch.object(service, "_compute_ml", AsyncMock(return_value=ml_result)),
         ):
             result = await service.analyze_single(db, inst, "TEST", with_ml=True)

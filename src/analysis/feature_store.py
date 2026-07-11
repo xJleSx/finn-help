@@ -121,15 +121,12 @@ def _version_for(feature_type: str) -> int:
 def _is_stale(row: FeatureCache, max_age_days: int, version: int) -> bool:
     if row.version != version:
         return True
-    if row.ttl_hours is not None:
-        if row.created_at:
-            age = (datetime.now(timezone.utc).replace(tzinfo=None) - row.created_at).total_seconds()
-            if age > row.ttl_hours * 3600:
-                return True
+    if row.ttl_hours is not None and row.created_at:
+        age = (datetime.now(timezone.utc).replace(tzinfo=None) - row.created_at).total_seconds()
+        if age > row.ttl_hours * 3600:
+            return True
     age = (date.today() - row.date).days
-    if age > max_age_days:
-        return True
-    return False
+    return age > max_age_days
 
 
 def get_cached(

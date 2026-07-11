@@ -85,6 +85,15 @@ RUSSIAN_NAMES: dict[str, str] = {
 }
 
 
+ACTION_EMOJI: dict[str, str] = {
+    "BUY": "\U0001f7e2",
+    "CAUTIOUS_BUY": "\U0001f7e1",
+    "HOLD": "\U0001f535",
+    "SELL": "\U0001f534",
+    "NEUTRAL": "\u26aa",
+}
+
+
 def html_escape(text: str | None) -> str:
     if text is None:
         return ""
@@ -313,9 +322,7 @@ def _find_excluded_tickers(text: str) -> set[str]:
                 "не интересу",
                 "не нужно",
             ]
-        ):
-            exclude.add(ticker)
-        elif any(re.search(rf"\b{re.escape(t_lower)}\s*{kw}\b", text_lower) for kw in ["нет", "нету", "отсутств", "недоступ", "исключ"]):
+        ) or any(re.search(rf"\b{re.escape(t_lower)}\s*{kw}\b", text_lower) for kw in ["нет", "нету", "отсутств", "недоступ", "исключ"]):
             exclude.add(ticker)
     rev_map = {v.lower(): v for v in RUSSIAN_NAMES.values()}
     for t_lower, ticker in rev_map.items():

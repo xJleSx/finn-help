@@ -170,7 +170,7 @@ class EventDetector:
 
         if positive > negative and positive > neutral:
             return "positive"
-        elif negative > positive and negative > neutral:
+        if negative > positive and negative > neutral:
             return "negative"
         return "neutral"
 

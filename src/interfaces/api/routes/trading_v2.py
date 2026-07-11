@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Optional
 
+import structlog
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ from src.trading.tax.reporter import (
     load_trades_from_db,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/trading/v2", tags=["trading_v2"])
 
@@ -108,30 +108,34 @@ class ComplianceEventResponse(BaseModel):
 
 @router.post("/order", response_model=OrderResponse)
 async def place_order(req: OrderRequest):
-    result = await execute_order(
-        ticker=req.ticker.upper(),
-        direction=req.direction.upper(),
-        quantity=req.quantity,
-        price=req.price,
-        reason=req.reason,
-        order_type=req.order_type.lower(),
-        time_in_force=req.time_in_force.lower(),
-        is_short=req.is_short,
-    )
-    return OrderResponse(
-        status=result.status,
-        order_id=result.order_id,
-        db_id=result.db_id or None,
-        ticker=result.ticker,
-        direction=result.direction,
-        quantity=result.quantity,
-        price=result.price,
-        order_type=result.order_type,
-        time_in_force=result.time_in_force,
-        is_short=result.is_short,
-        filled_quantity=result.filled_quantity,
-        remaining_quantity=result.remaining_quantity,
-    )
+    try:
+        result = await execute_order(
+            ticker=req.ticker.upper(),
+            direction=req.direction.upper(),
+            quantity=req.quantity,
+            price=req.price,
+            reason=req.reason,
+            order_type=req.order_type.lower(),
+            time_in_force=req.time_in_force.lower(),
+            is_short=req.is_short,
+        )
+        return OrderResponse(
+            status=result.status,
+            order_id=result.order_id,
+            db_id=result.db_id or None,
+            ticker=result.ticker,
+            direction=result.direction,
+            quantity=result.quantity,
+            price=result.price,
+            order_type=result.order_type,
+            time_in_force=result.time_in_force,
+            is_short=result.is_short,
+            filled_quantity=result.filled_quantity,
+            remaining_quantity=result.remaining_quantity,
+        )
+    except Exception:
+        logger.exception("trading_v2.order_failed", ticker=req.ticker, direction=req.direction)
+        raise
 
 
 @router.post("/compliance/check", response_model=ComplianceCheckResponse)
@@ -143,20 +147,24 @@ async def run_compliance_check(
     is_short: bool = Query(False),
     portfolio_value: float = Query(1_000_000),
 ):
-    result = await execute_compliance_check(
-        ticker=ticker.upper(),
-        direction=direction.upper(),
-        quantity=quantity,
-        price=price,
-        portfolio_value=portfolio_value,
-        is_short=is_short,
-    )
-    return ComplianceCheckResponse(
-        passed=result["passed"],
-        checks=result["checks"],
-        warnings=result["warnings"],
-        blocks=result["blocks"],
-    )
+    try:
+        result = await execute_compliance_check(
+            ticker=ticker.upper(),
+            direction=direction.upper(),
+            quantity=quantity,
+            price=price,
+            portfolio_value=portfolio_value,
+            is_short=is_short,
+        )
+        return ComplianceCheckResponse(
+            passed=result["passed"],
+            checks=result["checks"],
+            warnings=result["warnings"],
+            blocks=result["blocks"],
+        )
+    except Exception:
+        logger.exception("trading_v2.compliance_check_failed", ticker=ticker, direction=direction)
+        raise
 
 
 @router.get("/margin", response_model=MarginResponse)
@@ -191,6 +199,9 @@ async def get_margin_info(user_id: int = Query(0)):
             used_margin=info.used_margin,
             margin_status=info.margin_status,
         )
+    except Exception:
+        logger.exception("trading_v2.margin_failed", user_id=user_id)
+        raise
     finally:
         db.close()
 
@@ -258,26 +269,30 @@ async def get_tax_report(
     ticker: Optional[str] = Query(None),
     format: Optional[str] = Query(None),
 ):
-    trades = load_trades_from_db(year=year, ticker=ticker)
-    dividends = load_dividends_from_db(year=year, ticker=ticker)
-    report = generate_tax_report(year=year, trades=trades, dividends=dividends)
-    csv_report = None
-    ndfl = None
-    if format == "csv":
-        csv_report = generate_broker_report_csv(report)
-    if format == "ndfl":
-        ndfl = generate_3ndfl_section(report)
-    return TaxReportResponse(
-        year=report.year,
-        total_realised_pnl=report.total_realised_pnl,
-        total_dividends=report.total_dividends,
-        total_tax_due=report.total_tax_due,
-        n_lots=len(report.lots),
-        n_dividends=len(report.dividends),
-        broker_commission_total=report.broker_commission_total,
-        csv_report=csv_report,
-        ndfl_section=ndfl,
-    )
+    try:
+        trades = load_trades_from_db(year=year, ticker=ticker)
+        dividends = load_dividends_from_db(year=year, ticker=ticker)
+        report = generate_tax_report(year=year, trades=trades, dividends=dividends)
+        csv_report = None
+        ndfl = None
+        if format == "csv":
+            csv_report = generate_broker_report_csv(report)
+        if format == "ndfl":
+            ndfl = generate_3ndfl_section(report)
+        return TaxReportResponse(
+            year=report.year,
+            total_realised_pnl=report.total_realised_pnl,
+            total_dividends=report.total_dividends,
+            total_tax_due=report.total_tax_due,
+            n_lots=len(report.lots),
+            n_dividends=len(report.dividends),
+            broker_commission_total=report.broker_commission_total,
+            csv_report=csv_report,
+            ndfl_section=ndfl,
+        )
+    except Exception:
+        logger.exception("trading_v2.tax_report_failed", year=year, ticker=ticker)
+        raise
 
 
 @router.get("/compliance/events", response_model=list[ComplianceEventResponse])

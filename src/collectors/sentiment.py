@@ -383,10 +383,7 @@ def analyze_sentiment(text: str, source_name: str | None = None) -> dict[str, An
     bert_score = _bert_analyze(clean)
     keyword_score = _keyword_analyze(clean)
 
-    if bert_score is not None:
-        combined = round(bert_score * 0.6 + keyword_score * 0.4, 3)
-    else:
-        combined = keyword_score
+    combined = round(bert_score * 0.6 + keyword_score * 0.4, 3) if bert_score is not None else keyword_score
 
     return {
         "score": combined,
@@ -434,7 +431,7 @@ def _keyword_analyze(text: str) -> float:
                     if stem in POSITIVE_LEXICON:
                         pos_count += 1
                         break
-                    elif stem in NEGATIVE_LEXICON:
+                    if stem in NEGATIVE_LEXICON:
                         neg_count += 1
                         break
     total = pos_count + neg_count

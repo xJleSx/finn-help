@@ -181,10 +181,9 @@ async def reply_keyboard_handler(update: Update, context: ContextTypes.DEFAULT_T
         await start(update, context)
     elif text == "\U0001f319 Ночн.режим":
         await profile(update, context)
-    elif text == "\u2753 Помощь":
-        if update.effective_message:
-            await update.effective_message.reply_text(
-                format_start_html(),
-                reply_markup=build_main_reply_keyboard(),
-                parse_mode="HTML",
-            )
+    elif text == "\u2753 Помощь" and update.effective_message:
+        await update.effective_message.reply_text(
+            format_start_html(),
+            reply_markup=build_main_reply_keyboard(),
+            parse_mode="HTML",
+        )

@@ -167,6 +167,7 @@ class BcsClient:
                 except CircuitBreakerOpenError:
                     logger.warning("bcs.circuit_breaker.open.%s", fn_name)
                     raise
+        return None
 
     async def get_accounts(self) -> list[dict[str, object]]:
         url = PORTFOLIO_URL

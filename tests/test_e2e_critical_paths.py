@@ -1,4 +1,3 @@
-from unittest.mock import patch
 
 import pytest
 
@@ -10,7 +9,7 @@ class TestTradingFlow:
         assert engine is not None
 
     def test_risk_tracker(self):
-        from src.trading.risk.guards import WeeklyLossTracker, DrawdownStageManager
+        from src.trading.risk.guards import DrawdownStageManager, WeeklyLossTracker
         tracker = WeeklyLossTracker()
         tracker.record_trade(-500, __import__("datetime").date(2026, 7, 7))
         level = tracker.weekly_loss_level()
@@ -24,8 +23,9 @@ class TestTradingFlow:
         assert stage in ("normal", "caution", "warning", "critical", "emergency")
 
     def test_portfolio_metrics(self):
-        from src.analysis.metrics import compute_sharpe, compute_sortino
         import numpy as np
+
+        from src.analysis.metrics import compute_sharpe, compute_sortino
         r = np.array([0.001, 0.002, -0.001, 0.003, -0.002])
         s = compute_sharpe(r)
         assert isinstance(s, float)
@@ -33,9 +33,10 @@ class TestTradingFlow:
         assert isinstance(so, float)
 
     def test_features_module(self):
-        from src.analysis.features import FeatureBuilder
-        import pandas as pd
         import numpy as np
+        import pandas as pd
+
+        from src.analysis.features import FeatureBuilder
         dates = pd.date_range("2026-01-01", periods=100, freq="D")
         df = pd.DataFrame({
             "open": np.random.randn(100) * 10 + 100,
@@ -59,8 +60,9 @@ class TestTradingFlow:
         assert "mean_reversion" in info
 
     def test_volatility_estimators(self):
-        from src.analysis.volatility import parkinson_volatility
         import numpy as np
+
+        from src.analysis.volatility import parkinson_volatility
         highs = np.array([105, 110, 108, 112, 115])
         lows = np.array([95, 98, 96, 100, 102])
         vol = parkinson_volatility(highs, lows, period=5, annualize=False)

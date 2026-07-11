@@ -1,3 +1,4 @@
+import contextlib
 import logging
 from datetime import date
 from typing import Any, Optional, Self
@@ -81,34 +82,24 @@ class BondOfferingCollector(BaseCollector):
             if name == "MATURITYDATE":
                 result["maturity_date"] = _parse_date(value)
             elif name == "COUPONPERCENT":
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     result["coupon_rate"] = float(value) if value else None
-                except (ValueError, TypeError):
-                    pass
             elif name == "COUPONVALUE":
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     result["coupon_value"] = float(value) if value else None
-                except (ValueError, TypeError):
-                    pass
             elif name == "COUPONPERIOD":
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     result["coupon_period_days"] = int(value) if value else None
-                except (ValueError, TypeError):
-                    pass
             elif name == "COUPONTYPE":
                 result["coupon_type"] = value
             elif name == "CREDITRATING":
                 result["credit_rating"] = value
             elif name == "ISSUESIZE":
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     result["volume"] = float(value) if value else None
-                except (ValueError, TypeError):
-                    pass
             elif name == "FACEVALUE":
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     result["nominal_price"] = float(value) if value else None
-                except (ValueError, TypeError):
-                    pass
             elif name == "ISSUEDATE":
                 result["offering_date"] = _parse_date(value)
             elif name == "AMORTIZATION":
@@ -119,10 +110,8 @@ class BondOfferingCollector(BaseCollector):
                 if value:
                     result["offer_date"] = _parse_date(value)
             elif name == "LISTLEVEL":
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     result["list_level"] = int(value) if value else None
-                except (ValueError, TypeError):
-                    pass
             elif name == "SHORTNAME":
                 result["short_name"] = value
             elif name == "SECNAME":

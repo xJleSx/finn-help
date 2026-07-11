@@ -127,10 +127,7 @@ def compute_take_profits(entry: float, resistance: float | None, atr: float, pro
 
 def compute_trade_stop_loss(entry: float, atr: float, side: Literal["buy", "sell"], profile: Profile = "balanced") -> float:
     cfg = PROFILES[profile]
-    if side == "buy":
-        stop = entry - atr * cfg["stop_atr"]
-    else:
-        stop = entry + atr * cfg["stop_atr"]
+    stop = entry - atr * cfg["stop_atr"] if side == "buy" else entry + atr * cfg["stop_atr"]
     return float(round(max(stop, 0.01), 2))
 
 

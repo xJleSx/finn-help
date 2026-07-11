@@ -48,10 +48,7 @@ class AnomalyDetector:
         scores["topic"] = self.topic.predict_article(news_article) if self.topic.trained else 0.0
         scores["autoencoder"] = self.autoencoder.predict_article(db, news_article) if self.autoencoder.trained else 0.0
         total_weight = sum(weights.get(k, 0.0) for k in scores if scores[k] > 0)
-        if total_weight == 0:
-            weighted = 0.0
-        else:
-            weighted = sum(scores[k] * weights.get(k, 0.0) for k in scores) / total_weight
+        weighted = 0.0 if total_weight == 0 else sum(scores[k] * weights.get(k, 0.0) for k in scores) / total_weight
         is_anomaly = weighted >= 0.5
         return {
             "anomaly_score": round(weighted, 4),

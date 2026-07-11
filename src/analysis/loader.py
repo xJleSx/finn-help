@@ -115,7 +115,7 @@ class DataLoader:
                 "source": "rss+social",
                 "count": news_sentiment["count"] + social_entry["count"],
             }
-        elif social_entry["count"] > 0:
+        if social_entry["count"] > 0:
             return {
                 "score": round(social_entry["score"], 3),
                 "divergence": round(min(social_entry.get("divergence", 0), 1.0), 3),

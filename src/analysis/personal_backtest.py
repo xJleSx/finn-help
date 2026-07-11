@@ -247,10 +247,7 @@ def run_personal_backtest(
             if te >= min_len - 20:
                 break
             # train on first half, test on second half
-            if fold == 0:
-                test_slice = equity[te:]
-            else:
-                test_slice = equity[te:]
+            test_slice = equity[te:] if fold == 0 else equity[te:]
 
             wf_port_ret = (test_slice[-1] / test_slice[0]) - 1 if len(test_slice) > 1 else 0
             wf_bench_slice = bench_equity[te:] if fold == 0 else bench_equity[te:]
@@ -273,7 +270,7 @@ def run_personal_backtest(
                 )
             )
 
-        result = PersonalBacktestResult(
+        return PersonalBacktestResult(
             tickers=valid_tickers,
             start_date=start,
             end_date=end,
@@ -299,6 +296,5 @@ def run_personal_backtest(
             walk_forward=wf_folds,
             benchmark_ticker=benchmark,
         )
-        return result
     finally:
         db.close()

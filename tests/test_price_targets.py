@@ -15,9 +15,9 @@ from src.analysis.ml.price_targets import (
     build_trade_plan,
     compute_entry_zone,
     compute_risk_reward,
-    compute_trade_stop_loss,
     compute_support_resistance,
     compute_take_profits,
+    compute_trade_stop_loss,
     to_dict,
 )
 

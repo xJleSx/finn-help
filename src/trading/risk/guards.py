@@ -462,10 +462,7 @@ class DrawdownStageManager:
         self._current: float | None = None
 
     def update(self, equity_curve: list[float] | pd.Series) -> None:
-        if isinstance(equity_curve, pd.Series):
-            values = equity_curve.tolist()
-        else:
-            values = list(equity_curve)
+        values = equity_curve.tolist() if isinstance(equity_curve, pd.Series) else list(equity_curve)
         if not values:
             return
         self._current = values[-1]

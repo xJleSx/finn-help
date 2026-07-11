@@ -191,7 +191,7 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
         if _is_time(23, 50):
             today_num = date.today().toordinal()
 
-            if _LAST_SNAPSHOT_DAY != today_num:
+            if today_num != _LAST_SNAPSHOT_DAY:
                 _LAST_SNAPSHOT_DAY = today_num
                 try:
                     logger.info("Taking daily snapshot...")
@@ -238,7 +238,7 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
 
             if _is_friday():
                 week_num = date.today().isocalendar()[1]
-                if _LAST_WEEKLY_WEEK != week_num:
+                if week_num != _LAST_WEEKLY_WEEK:
                     _LAST_WEEKLY_WEEK = week_num
                     try:
                         logger.info("Taking weekly snapshot...")
@@ -253,7 +253,7 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
 
             if _is_first_of_month():
                 month_key = date.today().year * 12 + date.today().month
-                if _LAST_MONTHLY_MONTH != month_key:
+                if month_key != _LAST_MONTHLY_MONTH:
                     _LAST_MONTHLY_MONTH = month_key
                     try:
                         logger.info("Taking monthly snapshot...")

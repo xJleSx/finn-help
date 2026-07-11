@@ -39,8 +39,7 @@ class SensitivityResult:
         mask = ~(np.isnan(pct_p) | np.isnan(pct_s) | np.isinf(pct_p) | np.isinf(pct_s))
         if np.sum(mask) < 3:
             return 0.0
-        slope = float(np.polyfit(pct_p[mask], pct_s[mask], 1)[0])
-        return slope
+        return float(np.polyfit(pct_p[mask], pct_s[mask], 1)[0])
 
     def to_dict(self) -> dict[str, Any]:
         return {

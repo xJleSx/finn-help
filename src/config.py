@@ -180,7 +180,7 @@ class Settings(BaseSettings):
     ml_prometheus_enabled: bool = True
     executor_max_workers: int = 4
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

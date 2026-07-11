@@ -48,7 +48,7 @@ def _get_or_create_event(db: Any, cluster: list[Any]) -> Any:
     else:
         dom_sentiment = "neutral"
 
-    event = NewsEvent(
+    return NewsEvent(
         title=rep.title or "Clustered Event",
         summary=rep.summary,
         category=rep.category or "UNCLASSIFIED",
@@ -58,7 +58,6 @@ def _get_or_create_event(db: Any, cluster: list[Any]) -> Any:
         article_count=len(cluster),
         published_at=rep.published_at,
     )
-    return event
 
 
 class NewsClusterer:
@@ -81,7 +80,7 @@ class NewsClusterer:
     def _fallback_embedding(text: str) -> list[float]:
         import hashlib
 
-        h = int(hashlib.md5(text.lower().encode()).hexdigest(), 16)
+        h = int(hashlib.md5(text.lower().encode()).hexdigest(), 16)  # noqa: S324
         np.random.seed(h % (2**32))
         return np.random.randn(768).tolist()
 

@@ -72,9 +72,8 @@ class GeoRiskScorer:
     def _level(self, score: float) -> str:
         if score >= 7:
             return "CRITICAL"
-        elif score >= 5:
+        if score >= 5:
             return "HIGH"
-        elif score >= 3:
+        if score >= 3:
             return "MODERATE"
-        else:
-            return "LOW"
+        return "LOW"

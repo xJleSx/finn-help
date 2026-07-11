@@ -36,8 +36,7 @@ class TokenBucket:
                 return 0.0
 
             deficit = tokens - self._tokens[key]
-            wait = deficit / self.tokens_per_sec if self.tokens_per_sec > 0 else self.period
-            return wait
+            return deficit / self.tokens_per_sec if self.tokens_per_sec > 0 else self.period
 
     async def wait_and_acquire(self, key: int | str, tokens: float = 1.0) -> None:
         wait = await self.acquire(key, tokens)

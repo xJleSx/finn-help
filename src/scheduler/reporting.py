@@ -179,7 +179,7 @@ async def generate_daily_report() -> DailyReport | None:
                 total_hold += 1
 
             score = s.fused_json.get("weighted_score")
-            if score is not None and isinstance(score, (int, float)) and not (score != score):
+            if score is not None and isinstance(score, (int, float)) and score == score:
                 scores.append(float(score))
 
             ticker = s.fused_json.get("ticker", "")
@@ -200,10 +200,7 @@ async def generate_daily_report() -> DailyReport | None:
                 )
 
         market_avg = round(sum(scores) / len(scores), 4) if scores else None
-        if market_avg is not None:
-            trend = "up" if market_avg > 0.02 else ("down" if market_avg < -0.02 else "flat")
-        else:
-            trend = "flat"
+        trend = ("up" if market_avg > 0.02 else "down" if market_avg < -0.02 else "flat") if market_avg is not None else "flat"
 
         text_lines = [f"📅 *Отчёт за {today.isoformat()}*"]
         text_lines.append("")

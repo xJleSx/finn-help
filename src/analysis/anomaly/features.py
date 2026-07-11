@@ -53,8 +53,7 @@ def rolling_volume_features(db: Session, ticker: str, days_back: int | None = No
         df[f"vol_ma_{w}d"] = df["count"].rolling(w, min_periods=1).mean()
         df[f"vol_std_{w}d"] = df["count"].rolling(w, min_periods=1).std().fillna(0)
     df["vol_zscore_7d"] = (df["count"] - df["vol_ma_7d"]) / df["vol_std_7d"].replace(0, 1)
-    df = df.fillna(0)
-    return df
+    return df.fillna(0)
 
 
 def sentiment_features_per_day(db: Session, ticker: str, days_back: int | None = None) -> pd.DataFrame:
@@ -100,8 +99,7 @@ def sentiment_features_per_day(db: Session, ticker: str, days_back: int | None =
         df[f"sent_std_{w}d"] = df["sentiment_mean"].rolling(w, min_periods=1).std().fillna(0)
     df["sent_change_1d"] = df["sentiment_mean"].diff().fillna(0)
     df["sent_change_3d"] = df["sentiment_mean"].diff(3).fillna(0)
-    df = df.fillna(0)
-    return df
+    return df.fillna(0)
 
 
 def source_frequencies(db: Session, category: str | None = None) -> dict[str, dict[str, float]]:
@@ -155,5 +153,4 @@ def topic_frequencies(db: Session) -> dict[str, dict[tuple[str, str], int]]:
 
 def build_anomaly_feature_vector(db: Session, news_article: News) -> np.ndarray:
     impact_features = extract_impact_features(db, news_article)
-    vec = np.array([impact_features.get(c, 0.0) for c in ALL_FEATURE_COLS], dtype=np.float32)
-    return vec
+    return np.array([impact_features.get(c, 0.0) for c in ALL_FEATURE_COLS], dtype=np.float32)

@@ -41,19 +41,13 @@ def compute_calmar(returns: np.ndarray, prices: list[float]) -> float:
 
 
 def compute_cvar(returns: pd.Series | np.ndarray, confidence: float = 0.95) -> float:
-    if isinstance(returns, pd.Series):
-        returns_arr = returns.values
-    else:
-        returns_arr = np.asarray(returns, dtype=float)
+    returns_arr = returns.values if isinstance(returns, pd.Series) else np.asarray(returns, dtype=float)
     var = np.percentile(returns_arr, (1 - confidence) * 100)
     return float(np.mean(returns_arr[returns_arr < var]))
 
 
 def compute_omega_ratio(returns: pd.Series | np.ndarray, target_return: float = 0.0) -> float:
-    if isinstance(returns, pd.Series):
-        returns_arr = returns.values
-    else:
-        returns_arr = np.asarray(returns, dtype=float)
+    returns_arr = returns.values if isinstance(returns, pd.Series) else np.asarray(returns, dtype=float)
     excess = returns_arr - target_return
     gains = excess[excess > 0].sum()
     losses = -excess[excess < 0].sum()
@@ -63,14 +57,8 @@ def compute_omega_ratio(returns: pd.Series | np.ndarray, target_return: float = 
 
 
 def compute_information_ratio(returns: pd.Series | np.ndarray, benchmark_returns: pd.Series | np.ndarray) -> float:
-    if isinstance(returns, pd.Series):
-        returns_arr = returns.values
-    else:
-        returns_arr = np.asarray(returns, dtype=float)
-    if isinstance(benchmark_returns, pd.Series):
-        benchmark_arr = benchmark_returns.values
-    else:
-        benchmark_arr = np.asarray(benchmark_returns, dtype=float)
+    returns_arr = returns.values if isinstance(returns, pd.Series) else np.asarray(returns, dtype=float)
+    benchmark_arr = benchmark_returns.values if isinstance(benchmark_returns, pd.Series) else np.asarray(benchmark_returns, dtype=float)
     excess = returns_arr - benchmark_arr
     tracking_error = np.std(excess, ddof=1)
     if tracking_error == 0:
@@ -79,10 +67,7 @@ def compute_information_ratio(returns: pd.Series | np.ndarray, benchmark_returns
 
 
 def compute_calmar_ratio(returns: pd.Series | np.ndarray, periods_per_year: int = 252) -> float:
-    if isinstance(returns, pd.Series):
-        returns_arr = returns.values
-    else:
-        returns_arr = np.asarray(returns, dtype=float)
+    returns_arr = returns.values if isinstance(returns, pd.Series) else np.asarray(returns, dtype=float)
     total_ret = np.prod(1 + returns_arr) - 1
     n = len(returns_arr)
     cagr = (1 + total_ret) ** (periods_per_year / n) - 1 if n > 0 else 0.0
@@ -96,10 +81,7 @@ def compute_calmar_ratio(returns: pd.Series | np.ndarray, periods_per_year: int 
 
 
 def compute_max_drawdown_details(equity_curve: pd.Series | np.ndarray) -> dict[str, int | float]:
-    if isinstance(equity_curve, pd.Series):
-        eq_arr = equity_curve.values
-    else:
-        eq_arr = np.asarray(equity_curve, dtype=float)
+    eq_arr = equity_curve.values if isinstance(equity_curve, pd.Series) else np.asarray(equity_curve, dtype=float)
     eq = np.asarray(eq_arr, dtype=float)
     peak = np.maximum.accumulate(eq)
     dd = (eq - peak) / peak
@@ -168,14 +150,8 @@ def benchmark_comparison(
     benchmark_returns: pd.Series | np.ndarray,
     periods_per_year: int = 252,
 ) -> dict[str, float]:
-    if isinstance(returns, pd.Series):
-        returns_arr = returns.values
-    else:
-        returns_arr = np.asarray(returns, dtype=float)
-    if isinstance(benchmark_returns, pd.Series):
-        benchmark_arr = benchmark_returns.values
-    else:
-        benchmark_arr = np.asarray(benchmark_returns, dtype=float)
+    returns_arr = returns.values if isinstance(returns, pd.Series) else np.asarray(returns, dtype=float)
+    benchmark_arr = benchmark_returns.values if isinstance(benchmark_returns, pd.Series) else np.asarray(benchmark_returns, dtype=float)
     cov = np.cov(returns_arr, benchmark_arr, ddof=1)
     beta = cov[0, 1] / cov[1, 1] if cov[1, 1] != 0 else 0.0
     alpha = (np.mean(returns_arr) - beta * np.mean(benchmark_arr)) * periods_per_year

@@ -371,10 +371,7 @@ class GeopoliticalRiskEngine:
         ewma_val = self.compute_ewma(scores)
 
         # Volatility of scores
-        if len(scores) > 1:
-            volatility = float(np.std(scores)) if len(scores) > 1 else 0.0
-        else:
-            volatility = 0.0
+        volatility = (float(np.std(scores)) if len(scores) > 1 else 0.0) if len(scores) > 1 else 0.0
 
         scores_float = scores
 

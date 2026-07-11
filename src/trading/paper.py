@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -159,10 +160,8 @@ class PaperTradingEngine:
         old_path = self._state_path
         if os.path.exists(old_path):
             backup = old_path + ".bak"
-            try:
+            with contextlib.suppress(OSError):
                 os.replace(old_path, backup)
-            except OSError:
-                pass
         self._state = PaperState(
             balance=initial_capital,
             initial_capital=initial_capital,

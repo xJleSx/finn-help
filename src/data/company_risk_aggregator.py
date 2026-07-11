@@ -474,10 +474,7 @@ class CompanyRiskAggregator:
         scores = [h.risk_score for h in history]
         current = scores[-1]
         average = sum(scores) / len(scores)
-        if len(scores) > 1:
-            trend = "up" if scores[-1] > scores[0] else "down"
-        else:
-            trend = "flat"
+        trend = ("up" if scores[-1] > scores[0] else "down") if len(scores) > 1 else "flat"
         return {
             "ticker": instrument.ticker,
             "trend": trend,

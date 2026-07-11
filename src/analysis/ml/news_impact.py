@@ -265,10 +265,7 @@ class NewsImpactModel(BaseRegressor):
             with torch.no_grad():
                 lstm_pred = float(lstm_model(torch.from_numpy(vec.reshape(1, 1, -1))).item())
 
-        if lstm_model is not None:
-            final_pred = (xgb_pred + lstm_pred) / 2.0
-        else:
-            final_pred = xgb_pred
+        final_pred = (xgb_pred + lstm_pred) / 2.0 if lstm_model is not None else xgb_pred
 
         confidence = min(1.0, abs(final_pred) * 10.0)
         if lstm_model is not None:

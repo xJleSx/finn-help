@@ -679,7 +679,7 @@ class PortfolioAllocator:
             avg_vol = sum(p.volume or 0 for p in prices) / len(prices)
             if avg_vol > 1_000_000:
                 return 2.0
-            elif avg_vol > 100_000:
+            if avg_vol > 100_000:
                 return 1.0
             return 0.5
         except Exception:
@@ -750,9 +750,7 @@ class PortfolioAllocator:
                 return True
             closes7 = closes[:7]
             change_7d = (closes7[0] / closes7[-1] - 1) * 100 if len(closes7) >= 5 else 0
-            if change_7d < -5.0:
-                return True
-            return False
+            return change_7d < -5.0
         except Exception:
             logger.exception("Unhandled exception")
             return False
@@ -775,10 +773,8 @@ class PortfolioAllocator:
             if change_21d < -8.0:
                 return True
             closes7 = closes[:7]
-            change_7d = (closes7[0] / closes7[-1] - 1) * 100 if len(closes7) >= 5 else 0
-            if change_7d < -5.0:
-                return True
-            return False
+            change_7d = (float(closes7[0]) / float(closes7[-1]) - 1) * 100 if len(closes7) >= 5 else 0
+            return bool(change_7d < -5.0)
         except Exception:
             logger.exception("Unhandled exception")
             return False
@@ -864,7 +860,7 @@ class PortfolioAllocator:
             avg_vol = sum(p.volume or 0 for p in prices) / len(prices)
             if avg_vol > 1_000_000:
                 return 2.0
-            elif avg_vol > 100_000:
+            if avg_vol > 100_000:
                 return 1.0
             return 0.5
         except Exception:

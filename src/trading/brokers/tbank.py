@@ -120,6 +120,7 @@ class TBankClient:
                     if not HAS_SDK:
                         raise RuntimeError("T-Bank SDK not installed")
                     raise
+        return None
 
     async def get_accounts(self) -> list[dict[str, object]]:
         if not self._client:

@@ -214,7 +214,7 @@ class SectorImpactEngine:
         """
         if sentiment == "positive":
             return 0.7
-        elif sentiment == "negative":
+        if sentiment == "negative":
             return 1.3
         return 1.0
 
@@ -379,10 +379,7 @@ class SectorImpactEngine:
         max_risk = max(scores) if scores else 0.0
 
         # Determine trend
-        if len(scores) > 1:
-            trend = "up" if scores[-1] > scores[0] else "down"
-        else:
-            trend = "flat"
+        trend = ("up" if scores[-1] > scores[0] else "down") if len(scores) > 1 else "flat"
 
         return {
             "sector": sector,
@@ -463,5 +460,4 @@ class SectorImpactEngine:
         return sorted(results, key=lambda x: -x["risk_score"])
 
     def cascade_sector_impacts(self, primary_sector: str, db_session: Any) -> dict[str, Any]:
-        cascades = self.sector_mapper.get_cascading_effects([primary_sector])
-        return cascades
+        return self.sector_mapper.get_cascading_effects([primary_sector])

@@ -1,9 +1,9 @@
 import hashlib
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Optional
 
 import bcrypt
+import structlog
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -15,7 +15,7 @@ from src.config import settings
 from src.db.connection import get_async_session
 from src.db.models import User
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 if not settings.jwt_secret:
     raise RuntimeError(
@@ -65,8 +65,7 @@ def create_refresh_token(user_id: int, username: str) -> str:
 
 def decode_token(token: str) -> dict[str, Any]:
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
@@ -128,8 +127,7 @@ async def get_current_user(
         if not user_id:
             return None
         result = await db.execute(select(User).where(User.id == user_id, User.is_active))
-        user = result.scalar_one_or_none()
-        return user
+        return result.scalar_one_or_none()
     except (JWTError, ValueError, TypeError):
         return None
 

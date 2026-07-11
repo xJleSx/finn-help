@@ -52,7 +52,7 @@ class NewsDeduplicator:
 
         text_lower = text.lower()
         # Create a deterministic 768-dimensional embedding
-        hash_val = int(hashlib.md5(text_lower.encode()).hexdigest(), 16)
+        hash_val = int(hashlib.md5(text_lower.encode()).hexdigest(), 16)  # noqa: S324
         np.random.seed(hash_val % (2**32))
         return np.random.randn(768).tolist()
 

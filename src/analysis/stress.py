@@ -208,13 +208,12 @@ def format_var_section(positions: list[dict[str, Any]]) -> str:
     cvar_95 = float(port_returns[port_returns <= np.percentile(port_returns, 5)].mean())
     var_99 = float(np.percentile(port_returns, 1))
 
-    text = (
+    return (
         f"\n*📊 VaR / CVaR (нормальное распределение)*\n"
         f"   VaR(95%): {var_95:.1%} ({total * abs(var_95):,.0f} ₽)\n"
         f"   CVaR(95%): {cvar_95:.1%} ({total * abs(cvar_95):,.0f} ₽)\n"
         f"   VaR(99%): {var_99:.1%} ({total * abs(var_99):,.0f} ₽)\n"
     )
-    return text
 
 
 def format_sector_concentration(positions: list[dict[str, Any]]) -> str:

@@ -1,3 +1,4 @@
+import contextlib
 import io
 from typing import Any, Optional, cast
 
@@ -48,10 +49,8 @@ async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     amount = None
     if context.args:
-        try:
+        with contextlib.suppress(ValueError):
             amount = float(context.args[0].replace(" ", "").replace(",", "."))
-        except ValueError:
-            pass
 
     if amount:
         await update.effective_message.reply_text(f"🔬 Рассчитываю сценарии для {amount:,.0f} ₽...")
@@ -183,10 +182,7 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             emoji = "🟢" if pnl > 0.5 else ("🔴" if pnl < -0.5 else "⚪")
             pnl_display = "" if abs(pnl) < 0.5 else f"{pnl:+,.2f}"
             pnl_pct_display = "" if abs(pnl_pct) < 0.01 else f"{pnl_pct:+.2f}%"
-            if pnl_display and pnl_pct_display:
-                pnl_line = f"   P&L: {pnl_display} ₽ ({pnl_pct_display})"
-            else:
-                pnl_line = "   P&L: ~0 ₽"
+            pnl_line = f"   P&L: {pnl_display} ₽ ({pnl_pct_display})" if pnl_display and pnl_pct_display else "   P&L: ~0 ₽"
 
             lines.append(
                 f"{emoji} <b>{html_escape(r['ticker'])}</b>: {qty:.0f} шт × {cur:.2f} ₽\n   Средняя: {avg:.2f} | Стоимость: {val:,.0f} ₽\n{pnl_line}"
@@ -215,10 +211,8 @@ async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ticker = args[0].upper()
     qty = None
     if len(args) >= 2:
-        try:
+        with contextlib.suppress(ValueError):
             qty = float(args[1].replace(",", "."))
-        except ValueError:
-            pass
 
     db = get_session()
     try:

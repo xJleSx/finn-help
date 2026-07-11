@@ -351,12 +351,11 @@ class DashboardDataProvider:
         """
         if risk_score < 2:
             return "green"
-        elif risk_score < 5:
+        if risk_score < 5:
             return "yellow"
-        elif risk_score < 7:
+        if risk_score < 7:
             return "orange"
-        else:
-            return "red"
+        return "red"
 
     @staticmethod
     def _get_risk_level(risk_score: float) -> str:
@@ -370,9 +369,8 @@ class DashboardDataProvider:
         """
         if risk_score < 3:
             return "low"
-        elif risk_score < 5:
+        if risk_score < 5:
             return "medium"
-        elif risk_score < 7:
+        if risk_score < 7:
             return "high"
-        else:
-            return "critical"
+        return "critical"

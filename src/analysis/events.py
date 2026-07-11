@@ -48,10 +48,7 @@ class EventFeatureBuilder:
             severity = float(window["impact"].mean()) if count > 0 else 0.0
             sanctions = int(window["is_sanctions"].sum()) if count > 0 else 0
             major = ev_df[ev_df["impact"] > 2.0]
-            if not major.empty and major["date"].max() < d:
-                days_since = (d - major["date"].max()).days
-            else:
-                days_since = 999
+            days_since = (d - major["date"].max()).days if not major.empty and major["date"].max() < d else 999
             result_rows.append(
                 {
                     "date": d,

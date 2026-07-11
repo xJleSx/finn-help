@@ -118,7 +118,7 @@ def _find_correlated(db: Any, ticker: str, limit: int = 3) -> list[tuple[str, fl
             continue
         corr = float(np.corrcoef(ret_a, ret_b)[0, 1])
         if abs(corr) > 0.3:
-            results.append((other.ticker, corr))
+            results.append((str(other.ticker), corr))
 
     results.sort(key=lambda x: abs(x[1]), reverse=True)
     return results[:limit]

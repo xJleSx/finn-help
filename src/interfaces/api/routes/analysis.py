@@ -44,8 +44,7 @@ async def run_scenario_analysis(
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(get_executor(), _run_scenario_sync, user.id)
-        return result
+        return await loop.run_in_executor(get_executor(), _run_scenario_sync, user.id)
     except Exception as e:
         logger.exception("scenario_failed", user_id=user.id)
         raise HTTPException(500, f"Scenario analysis failed: {e}")
@@ -80,8 +79,7 @@ async def custom_scenario(
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(get_executor(), _custom_scenario_sync, ticker, shock_pct, user.id)
-        return result
+        return await loop.run_in_executor(get_executor(), _custom_scenario_sync, ticker, shock_pct, user.id)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
@@ -203,8 +201,7 @@ async def get_alert_analytics(
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(get_executor(), _get_alert_analytics_sync, days, user.id)
-        return result
+        return await loop.run_in_executor(get_executor(), _get_alert_analytics_sync, days, user.id)
     except Exception as e:
         logger.exception("alert_analytics_failed")
         raise HTTPException(500, f"Alert analytics failed: {e}")
@@ -241,8 +238,7 @@ async def risk_portfolio_summary(
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(get_executor(), _risk_portfolio_summary_sync, user.id)
-        return result
+        return await loop.run_in_executor(get_executor(), _risk_portfolio_summary_sync, user.id)
     except Exception as e:
         logger.exception("risk_portfolio_summary_failed", user_id=user.id)
         raise HTTPException(500, f"Risk portfolio summary failed: {e}")
@@ -255,8 +251,7 @@ async def risk_ticker_deep_dive(
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(get_executor(), _risk_ticker_deep_dive_sync, ticker, user.id)
-        return result
+        return await loop.run_in_executor(get_executor(), _risk_ticker_deep_dive_sync, ticker, user.id)
     except Exception as e:
         logger.exception("risk_deep_dive_failed", ticker=ticker)
         raise HTTPException(500, f"Risk deep dive failed: {e}")
@@ -290,8 +285,7 @@ async def causal_analysis(
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(get_executor(), _causal_analysis_sync, ticker, target)
-        return result
+        return await loop.run_in_executor(get_executor(), _causal_analysis_sync, ticker, target)
     except Exception as e:
         logger.exception("causal_analysis_failed", ticker=ticker)
         raise HTTPException(500, f"Causal analysis failed: {e}")

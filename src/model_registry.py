@@ -74,7 +74,7 @@ def save_model(
     with open(model_path, "wb") as f:
         cloudpickle.dump(model, f)
 
-    model_hash = hashlib.md5(model_path.read_bytes()).hexdigest()
+    model_hash = hashlib.md5(model_path.read_bytes()).hexdigest()  # noqa: S324
     meta["hash"] = model_hash
 
     registry = _load_registry()
@@ -116,7 +116,7 @@ def load_model(name: str, version: Optional[str] = None) -> Any:
         raise FileNotFoundError(f"Model file not found: {path}")
 
     if "hash" in meta:
-        actual_hash = hashlib.md5(path.read_bytes()).hexdigest()
+        actual_hash = hashlib.md5(path.read_bytes()).hexdigest()  # noqa: S324
         if actual_hash != meta["hash"]:
             raise ValueError(f"Model hash mismatch for '{name}' version {version}: expected {meta['hash']}, got {actual_hash}")
 
@@ -286,14 +286,13 @@ def prune_models(max_versions: int = 5, model_dir: Optional[Path] = None) -> dic
                 known_paths.add(str(Path(v["path"]).resolve()))
 
         for f in scan_dir.iterdir():
-            if f.is_file() and f.suffix in (".pkl", ".pt", ".pth"):
-                if str(f.resolve()) not in known_paths:
-                    try:
-                        f.unlink()
-                        orphan_removed += 1
-                        logger.info("Removed orphaned model file: %s", f)
-                    except OSError as e:
-                        logger.warning("Failed to remove orphaned file %s: %s", f, e)
+            if f.is_file() and f.suffix in (".pkl", ".pt", ".pth") and str(f.resolve()) not in known_paths:
+                try:
+                    f.unlink()
+                    orphan_removed += 1
+                    logger.info("Removed orphaned model file: %s", f)
+                except OSError as e:
+                    logger.warning("Failed to remove orphaned file %s: %s", f, e)
 
     if registry_pruned > 0 or orphan_removed > 0:
         logger.info(

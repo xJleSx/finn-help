@@ -107,11 +107,10 @@ def _init_read_replica() -> bool:
 
 @asynccontextmanager
 async def get_read_replica_session() -> AsyncIterator[AsyncSession]:
-    if _ReadReplicaSessionLocal is None:
-        if not _init_read_replica():
-            async with get_async_session() as s:
-                yield s
-            return
+    if _ReadReplicaSessionLocal is None and not _init_read_replica():
+        async with get_async_session() as s:
+            yield s
+        return
     async with _ReadReplicaSessionLocal() as session:
         try:
             yield session

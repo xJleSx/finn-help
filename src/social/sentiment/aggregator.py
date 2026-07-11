@@ -104,10 +104,7 @@ class SocialAggregator:
             for ticker, scores_list in sorted(by_ticker.items(), key=lambda x: -len(x[1])):
                 w_list = by_ticker_w[ticker]
                 total_w = sum(w_list)
-                if total_w > 0:
-                    avg_s = sum(s * w for s, w in zip(scores_list, w_list)) / total_w
-                else:
-                    avg_s = mean(scores_list) if scores_list else 0.0
+                avg_s = sum(s * w for s, w in zip(scores_list, w_list)) / total_w if total_w > 0 else mean(scores_list) if scores_list else 0.0
                 overview.append(
                     {
                         "ticker": None if ticker == "__market__" else ticker,

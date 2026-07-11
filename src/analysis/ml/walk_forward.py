@@ -82,10 +82,7 @@ def walk_forward_validate(
             if hasattr(model, "_model"):
                 model._model = None
             model.fit(x_train, y_train)
-            if hasattr(model, "_model") and model._model is not None:
-                preds = model._model.predict(x_test)
-            else:
-                preds = model.predict(x_test)
+            preds = model._model.predict(x_test) if hasattr(model, "_model") and model._model is not None else model.predict(x_test)
 
             acc = float(np.mean(preds == y_test))
             accuracies.append(acc)
@@ -172,6 +169,13 @@ def compute_classification_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> di
     }
 
 
+def compute_threshold(close_series: pd.Series, lookahead: int = 5, fallback: float = 0.03) -> float:
+    returns = close_series.pct_change().dropna()
+    if len(returns) < lookahead + 1:
+        return fallback
+    return float(max(fallback, returns.std() * 0.5))
+
+
 def compute_profit_factor_threshold(
     y_true: np.ndarray, y_pred_proba: np.ndarray, n_thresholds: int = 100
 ) -> tuple[float, float, np.ndarray, np.ndarray]:
@@ -242,8 +246,7 @@ def deflated_sharpe_ratio(
     sr_std = np.sqrt((1 - skewness * observed_sr + (kurtosis - 1) / 4 * observed_sr**2) / (backtest_length - 1))
     euler_mascheroni = 0.5772156649
     expected_max_sr = norm.ppf(1 - 1 / num_trials) * (1 - euler_mascheroni) + euler_mascheroni * norm.ppf(1 - 1 / (num_trials * np.e))
-    dsr = float(norm.cdf((observed_sr - expected_max_sr) / sr_std))
-    return dsr
+    return float(norm.cdf((observed_sr - expected_max_sr) / sr_std))
 
 
 def probability_of_backtest_overfitting(
