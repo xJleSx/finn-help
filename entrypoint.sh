@@ -14,6 +14,19 @@ if echo "$DATABASE_URL" | grep -q "postgres"; then
   echo "PostgreSQL is ready"
 fi
 
+# Validate required secrets in production
+if [ "$FINN_ENV" = "production" ]; then
+  if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" = "finn" ]; then
+    echo "ERROR: DB_PASSWORD must be set to a strong value in production"
+    exit 1
+  fi
+  if [ -z "$JWT_SECRET" ]; then
+    echo "ERROR: JWT_SECRET must be set in production"
+    echo "  Generate: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+    exit 1
+  fi
+fi
+
 echo "Running database migrations..."
 alembic upgrade head
 

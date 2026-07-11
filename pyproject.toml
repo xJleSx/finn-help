@@ -88,7 +88,7 @@ asyncio_default_fixture_loop_scope = "function"
 source = ["src"]
 
 [tool.coverage.report]
-fail_under = 60
+fail_under = 65
 exclude_also = [
     "def __repr__",
     "def __str__",

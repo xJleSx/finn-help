@@ -3,10 +3,10 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: finn
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-finn}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       POSTGRES_DB: finn
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - finn_postgres:/var/lib/postgresql/data
     healthcheck:
@@ -19,7 +19,7 @@ services:
     image: edoburu/pgbouncer:latest
     environment:
       DB_USER: finn
-      DB_PASSWORD: ${DB_PASSWORD:-finn}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: finn
@@ -28,7 +28,7 @@ services:
       MAX_DB_CONNECTIONS: ${PGBOUNCER_MAX_CONNECTIONS:-50}
       SERVER_IDLE_TIMEOUT: 600
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     depends_on:
       db:
         condition: service_healthy
@@ -36,7 +36,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - finn_redis:/data
     healthcheck:
@@ -58,7 +58,7 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - LOG_LEVEL=INFO
       - CORS_ORIGINS=http://localhost:3000
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - FINN_ENV=production
       - DB_POOL_SIZE=5
       - DB_MAX_OVERFLOW=10
@@ -74,45 +74,50 @@ services:
       start_period: 10s
       retries: 3
 
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: celery -A src.tasks worker --loglevel=INFO --concurrency=${CELERY_CONCURRENCY:-2}
-    environment:
-      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-finn}@pgbouncer:5432/finn
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      - LOG_LEVEL=INFO
-      - FINN_ENV=production
-    volumes:
-      - finn_data:/app/data
-    depends_on:
-      pgbouncer:
-        condition: service_started
-      redis:
-        condition: service_healthy
-
-  beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: celery -A src.tasks beat --loglevel=INFO --scheduler celery.beat.PersistentScheduler
-    environment:
-      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-finn}@pgbouncer:5432/finn
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      - LOG_LEVEL=INFO
-      - FINN_ENV=production
-    volumes:
-      - finn_data:/app/data
-    depends_on:
-      pgbouncer:
-        condition: service_started
-      redis:
-        condition: service_healthy
+  # Celery worker/beat — зарезервировано для фоновых ML-задач.
+  # Основной планировщик работает внутри процесса API (src/scheduler/service.py).
+  # Раскомментируйте, если нужен Celery для распределённых задач.
+  # worker:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   command: celery -A src.tasks worker --loglevel=INFO --concurrency=${CELERY_CONCURRENCY:-2}
+  #   environment:
+  #     - DATABASE_URL=postgresql://finn:${DB_PASSWORD:?DB_PASSWORD is required}@pgbouncer:5432/finn
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - CELERY_BROKER_URL=redis://redis:6379/1
+  #     - CELERY_RESULT_BACKEND=redis://redis:6379/2
+  #     - LOG_LEVEL=INFO
+  #     - FINN_ENV=production
+  #     - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+  #   volumes:
+  #     - finn_data:/app/data
+  #   depends_on:
+  #     pgbouncer:
+  #       condition: service_started
+  #     redis:
+  #       condition: service_healthy
+  # 
+  # beat:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   command: celery -A src.tasks beat --loglevel=INFO --scheduler celery.beat.PersistentScheduler
+  #   environment:
+  #     - DATABASE_URL=postgresql://finn:${DB_PASSWORD:?DB_PASSWORD is required}@pgbouncer:5432/finn
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - CELERY_BROKER_URL=redis://redis:6379/1
+  #     - CELERY_RESULT_BACKEND=redis://redis:6379/2
+  #     - LOG_LEVEL=INFO
+  #     - FINN_ENV=production
+  #     - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+  #   volumes:
+  #     - finn_data:/app/data
+  #   depends_on:
+  #     pgbouncer:
+  #       condition: service_started
+  #     redis:
+  #       condition: service_healthy
 
   web:
     build:
