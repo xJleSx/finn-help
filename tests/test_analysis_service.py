@@ -361,9 +361,9 @@ class TestAnalyzeAllSync:
     def test_processes_all_instruments(self, service):
         inst1, inst2 = MagicMock(id=1, ticker="SBER"), MagicMock(id=2, ticker="GAZP")
         db = MagicMock()
-        db.query.return_value.filter.return_value.all.return_value = [inst1, inst2]
         db.query.return_value.all.return_value = [inst1, inst2]
-        db.query.return_value.filter.return_value.first.return_value = None
+        db.query.return_value.filter.return_value = MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = []
 
         with (
             patch.object(
@@ -384,11 +384,12 @@ class TestAnalyzeAllSync:
     def test_returns_cached_result(self, service):
         db = MagicMock()
         inst = MagicMock(id=1, ticker="SBER")
-        db.query.return_value.filter.return_value.all.return_value = [inst]
         db.query.return_value.all.return_value = [inst]
         cached = MagicMock()
+        cached.instrument_id = 1
         cached.fused_json = {"action": "BUY", "confidence": 0.8}
-        db.query.return_value.filter.return_value.first.return_value = cached
+        db.query.return_value.filter.return_value = MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = [cached]
         with patch.object(service, "_analyze_single_sync") as mock_single:
             results = service.analyze_all_sync(db)
         assert results == [{"action": "BUY", "confidence": 0.8}]
@@ -397,11 +398,13 @@ class TestAnalyzeAllSync:
     def test_skips_cached_non_dict_json(self, service):
         db = MagicMock()
         inst = MagicMock(id=1, ticker="SBER")
+        inst.instrument_id = 1
         db.query.return_value.all.return_value = [inst]
-        db.query.return_value.filter.return_value.all.return_value = [inst]
-        cached = MagicMock()
-        cached.fused_json = "not a dict"
-        db.query.return_value.filter.return_value.first.return_value = cached
+        signal_mock = MagicMock()
+        signal_mock.instrument_id = 1
+        signal_mock.fused_json = "not a dict"
+        db.query.return_value.filter.return_value = MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = [signal_mock]
         with (
             patch.object(service, "_analyze_single_sync", return_value={"action": "HOLD", "confidence": 0.5, "ticker": "SBER"}),
             patch.object(service.fusion, "save_signal_sync", MagicMock()),
@@ -412,18 +415,27 @@ class TestAnalyzeAllSync:
     def test_skips_instrument_on_value_error(self, service):
         db = MagicMock()
         inst = MagicMock(id=1, ticker="SBER")
-        db.query.return_value.filter.return_value.all.return_value = [inst]
+        inst.instrument_id = 1
         db.query.return_value.all.return_value = [inst]
-        db.query.return_value.filter.return_value.first.return_value = None
+        signal_mock = MagicMock()
+        signal_mock.instrument_id = 1
+        signal_mock.fused_json = None
+        db.query.return_value.filter.return_value = MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = [signal_mock]
         with patch.object(service, "_analyze_single_sync", side_effect=ValueError("no data")):
             results = service.analyze_all_sync(db)
         assert results == []
 
     def test_catches_generic_exception(self, service):
         db = MagicMock()
-        db.query.return_value.filter.return_value.all.return_value = [MagicMock(id=1, ticker="SBER")]
-        db.query.return_value.filter.return_value.first.return_value = None
-        db.query.return_value.order_by.return_value.all.side_effect = Exception("db error")
+        inst = MagicMock(id=1, ticker="SBER")
+        inst.instrument_id = 1
+        db.query.return_value.all.return_value = [inst]
+        signal_mock = MagicMock()
+        signal_mock.instrument_id = 1
+        signal_mock.fused_json = None
+        db.query.return_value.filter.return_value = MagicMock()
+        db.query.return_value.filter.return_value.all.side_effect = Exception("db error")
         with patch.object(service, "_analyze_single_sync") as mock_single:
             results = service.analyze_all_sync(db)
         assert results == []

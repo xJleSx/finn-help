@@ -40,6 +40,10 @@ logs/
 *.pt
 *.pth
 
+# Generated documentation
+docs/FinAdvisor_Technical_Documentation.docx
+docs/~$*.docx
+
 # Temp files
 tmp/
 

@@ -50,6 +50,8 @@ def db_session(in_memory_db):
 
 @pytest.fixture(scope="session")
 def async_in_memory_db():
+    import asyncio
+
     db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     db_path = db_file.name
     db_file.close()
@@ -57,7 +59,6 @@ def async_in_memory_db():
         f"sqlite+aiosqlite:///{db_path}",
         echo=False,
     )
-    import asyncio
 
     async def _init() -> None:
         async with engine.begin() as conn:
