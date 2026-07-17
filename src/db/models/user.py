@@ -26,6 +26,9 @@ class User(Base):
     role = Column(String(20), default="user")
     is_active = Column(Boolean, default=True)
     risk_profile = Column(String(20), default="balanced")
+    totp_secret = Column(String(32), nullable=True)
+    totp_enabled = Column(Boolean, default=False)
+    recovery_codes = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -123,6 +126,42 @@ class MutedAlert(Base):
     created_at = Column(DateTime, default=func.now())
 
     __table_args__ = (UniqueConstraint("user_id", "ticker", "alert_type", name="uq_user_muted_alert"),)
+
+
+class BrokerCredential(Base):
+    __tablename__ = "broker_credentials"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    broker_name = Column(String(20), nullable=False)
+    token_encrypted = Column(Text, nullable=False)
+    token_type = Column(String(20), default="access")
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "broker_name", "token_type", name="uq_user_broker_token"),)
+
+    def set_token(self, plaintext: str) -> None:
+        from src.core.crypto import encrypt
+        self.token_encrypted = encrypt(plaintext)
+
+    def get_token(self) -> str:
+        from src.core.crypto import decrypt
+        return decrypt(self.token_encrypted)
+
+
+class UserProfileModel(Base):
+    __tablename__ = "user_profiles"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    risk_profile = Column(String(20), default="balanced")
+    investment_horizon = Column(String(20), default="medium")
+    capital = Column(Float, default=100_000.0)
+    preferences = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
 class SmartAlertRule(Base):

@@ -452,16 +452,26 @@ class AnalysisService:
         result = db.execute(q)
         instruments = result.scalars().all()
 
+        inst_ids = [inst.id for inst in instruments]
+        all_prices = db.query(Price).filter(Price.instrument_id.in_(inst_ids)).order_by(Price.date).all()
+        price_map: dict[int, list[Any]] = {}
+        for p in all_prices:
+            price_map.setdefault(p.instrument_id, []).append(p)
+        all_indicators = db.query(Indicator).filter(Indicator.instrument_id.in_(inst_ids)).order_by(Indicator.date).all()
+        ind_map: dict[int, list[Any]] = {}
+        for ind in all_indicators:
+            ind_map.setdefault(ind.instrument_id, []).append(ind)
+
         all_results: dict[str, bool] = {}
         for inst in instruments:
             sym = str(inst.ticker or "")
-            prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
+            prices = price_map.get(inst.id, [])
             if len(prices) < 60:
                 logger.info("Skipping %s: only %d prices", sym, len(prices))
                 continue
             df = self._price_df(prices)
 
-            ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
+            ind_rows = ind_map.get(inst.id, [])
             if len(ind_rows) < 2:
                 logger.info("Skipping %s: no indicators", sym)
                 continue

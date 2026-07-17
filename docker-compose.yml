@@ -56,6 +56,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_TASK_ALWAYS_EAGER=false
       - LOG_LEVEL=INFO
       - CORS_ORIGINS=http://localhost:3000
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
@@ -74,50 +75,49 @@ services:
       start_period: 30s
       retries: 3
 
-  # Celery worker/beat — зарезервировано для фоновых ML-задач.
-  # Основной планировщик работает внутри процесса API (src/scheduler/service.py).
-  # Раскомментируйте, если нужен Celery для распределённых задач.
-  # worker:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   command: celery -A src.tasks worker --loglevel=INFO --concurrency=${CELERY_CONCURRENCY:-2}
-  #   environment:
-  #     - DATABASE_URL=postgresql://finn:${DB_PASSWORD:?DB_PASSWORD is required}@pgbouncer:5432/finn
-  #     - REDIS_URL=redis://redis:6379/0
-  #     - CELERY_BROKER_URL=redis://redis:6379/1
-  #     - CELERY_RESULT_BACKEND=redis://redis:6379/2
-  #     - LOG_LEVEL=INFO
-  #     - FINN_ENV=production
-  #     - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
-  #   volumes:
-  #     - finn_data:/app/data
-  #   depends_on:
-  #     pgbouncer:
-  #       condition: service_started
-  #     redis:
-  #       condition: service_healthy
-  # 
-  # beat:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   command: celery -A src.tasks beat --loglevel=INFO --scheduler celery.beat.PersistentScheduler
-  #   environment:
-  #     - DATABASE_URL=postgresql://finn:${DB_PASSWORD:?DB_PASSWORD is required}@pgbouncer:5432/finn
-  #     - REDIS_URL=redis://redis:6379/0
-  #     - CELERY_BROKER_URL=redis://redis:6379/1
-  #     - CELERY_RESULT_BACKEND=redis://redis:6379/2
-  #     - LOG_LEVEL=INFO
-  #     - FINN_ENV=production
-  #     - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
-  #   volumes:
-  #     - finn_data:/app/data
-  #   depends_on:
-  #     pgbouncer:
-  #       condition: service_started
-  #     redis:
-  #       condition: service_healthy
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A src.tasks worker --loglevel=INFO --concurrency=${CELERY_CONCURRENCY:-2}
+    environment:
+      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:?DB_PASSWORD is required}@pgbouncer:5432/finn
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_TASK_ALWAYS_EAGER=false
+      - LOG_LEVEL=INFO
+      - FINN_ENV=production
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+    volumes:
+      - finn_data:/app/data
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A src.tasks beat --loglevel=INFO --scheduler celery.beat.PersistentScheduler
+    environment:
+      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:?DB_PASSWORD is required}@pgbouncer:5432/finn
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_TASK_ALWAYS_EAGER=false
+      - LOG_LEVEL=INFO
+      - FINN_ENV=production
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+    volumes:
+      - finn_data:/app/data
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
   web:
     build:

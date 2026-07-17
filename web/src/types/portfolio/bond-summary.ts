@@ -1,7 +1,1 @@
-export interface BondPortfolioSummary {
-  totalValue: number;
-  totalProfit: number;
-  totalReturn: number;
-  avgYtm: number;
-  avgAiScore: number;
-}
+export * from "@/features/portfolio/types/bond-summary";

@@ -74,10 +74,13 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
 
                 qty = pos.get("quantity", 0)
                 avg_price = pos.get("average_price", 0.0)
-                current_price = pos.get("current_price", 0.0)
+                clean_price = pos.get("current_price", 0.0)
+                is_bond = pos.get("instrument_type", "") == "bond"
+                dirty_price = pos.get("dirty_price", clean_price) if is_bond else clean_price
 
-                # Save current_price from broker to Price table for fresh portfolio display
-                if current_price > 0:
+                # Save price from broker to Price table for fresh portfolio display
+                # For bonds: open=clean_price (P&L), close=dirty_price (current value incl NKD)
+                if clean_price > 0:
                     existing_price = await db.execute(
                         select(PriceModel).where(
                             PriceModel.instrument_id == inst.id,
@@ -86,15 +89,16 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                     )
                     price_row = existing_price.scalar_one_or_none()
                     if price_row:
-                        price_row.close = current_price
+                        price_row.open = clean_price
+                        price_row.close = dirty_price
                     else:
                         db.add(PriceModel(
                             instrument_id=inst.id,
                             date=date_type.today(),
-                            open=current_price,
-                            high=current_price,
-                            low=current_price,
-                            close=current_price,
+                            open=clean_price,
+                            high=max(clean_price, dirty_price),
+                            low=min(clean_price, dirty_price),
+                            close=dirty_price,
                             volume=0,
                         ))
 

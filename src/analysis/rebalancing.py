@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
-from src.db.models import Instrument, Portfolio, Price, Signal
+from src.db.models import BondOffering, Instrument, Portfolio, Price, Signal
 from src.notifications import RebalanceAlert
 
 logger = logging.getLogger(__name__)
@@ -58,14 +59,32 @@ class RebalancingEngine:
         portfolio_items: list[dict[str, Any]] = []
         total_value = 0.0
 
+        inst_ids = list({pos.instrument_id for pos in positions if pos.instrument_id})
+        inst_map: dict[int, Any] = {}
+        if inst_ids:
+            for row in db.query(Instrument).filter(Instrument.id.in_(inst_ids)).all():
+                inst_map[row.id] = row
+
+            price_map: dict[int, Any] = {}
+            for row in (
+                db.query(Price)
+                .distinct(Price.instrument_id)
+                .filter(Price.instrument_id.in_(inst_ids))
+                .order_by(Price.instrument_id, Price.date.desc())
+                .all()
+            ):
+                price_map[row.instrument_id] = row
+
         for pos in positions:
-            instr = db.query(Instrument).filter_by(id=pos.instrument_id).first()
+            if not pos.instrument_id:
+                continue
+            instr = inst_map.get(pos.instrument_id)
             if not instr:
                 continue
-            price = db.query(Price).filter_by(instrument_id=instr.id).order_by(Price.date.desc()).first()
-            if not price or not price.close:
+            price_row = price_map.get(pos.instrument_id)
+            if not price_row or not price_row.close:
                 continue
-            current_price = float(price.close)
+            current_price = float(price_row.close)
             value = current_price * float(pos.quantity)
             total_value += value
             portfolio_items.append(
@@ -151,17 +170,29 @@ class RebalancingEngine:
 
         portfolio_value = sum(a["value"] for a in analysis)
 
-        signals_map: dict[str, dict[str, Any]] = {}
-        for a in analysis:
-            ticker = a["ticker"]
-            instr = db.query(Instrument).filter_by(ticker=ticker).first()
-            if instr:
-                signal = db.query(Signal).filter_by(instrument_id=instr.id).order_by(Signal.date.desc()).first()
-                if signal:
-                    signals_map[ticker] = {
-                        "action": signal.action,
-                        "confidence": signal.confidence or 0.0,
-                    }
+        tickers = list({a["ticker"] for a in analysis})
+        instr_rows = db.query(Instrument).filter(Instrument.ticker.in_(tickers)).all()
+        instr_map: dict[str, Any] = {str(r.ticker): r for r in instr_rows}
+        inst_id_to_ticker: dict[int, str] = {r.id: str(r.ticker) for r in instr_rows if r.ticker}
+        inst_ids = list(inst_id_to_ticker)
+
+        sig_map: dict[str, dict[str, Any]] = {}
+        if inst_ids:
+            seen_inst_ids: set[int] = set()
+            for sig in (
+                db.query(Signal)
+                .filter(Signal.instrument_id.in_(inst_ids))
+                .order_by(Signal.instrument_id, Signal.date.desc())
+                .all()
+            ):
+                if sig.instrument_id not in seen_inst_ids:
+                    seen_inst_ids.add(sig.instrument_id)
+                    t = inst_id_to_ticker.get(sig.instrument_id)
+                    if t:
+                        sig_map[t] = {
+                            "action": sig.action,
+                            "confidence": sig.confidence or 0.0,
+                        }
 
         actions: list[RebalanceAction] = []
         total_turnover = 0.0
@@ -175,7 +206,7 @@ class RebalancingEngine:
             price = item["current_price"]
             quantity = item["quantity"]
 
-            signal_info = signals_map.get(ticker, {})
+            signal_info = sig_map.get(ticker, {})
             signal_action = signal_info.get("action", "HOLD")
             confidence = signal_info.get("confidence", 0.0)
 
@@ -196,7 +227,7 @@ class RebalancingEngine:
                 )
                 continue
 
-            instr = db.query(Instrument).filter_by(ticker=ticker).first()
+            instr = instr_map.get(ticker)
             lot_size = 1
             if instr and instr.lot_size and instr.lot_size > 1:
                 lot_size = instr.lot_size
@@ -394,6 +425,151 @@ class RebalancingEngine:
 
         lines.extend(["", "=" * 60])
         return "\n".join(lines)
+
+
+@dataclass
+class BondLadderRung:
+    ticker: str
+    maturity_date: str
+    duration_years: float | None
+    yield_to_maturity: float | None
+    coupon_rate: float | None
+    credit_rating: str | None
+    allocation_pct: float
+    bucket: str  # short / mid / long
+    reason: str
+
+
+@dataclass
+class BondLadderPlan:
+    rungs: list[BondLadderRung]
+    target_duration: float
+    actual_duration: float
+    duration_gap: float
+    buckets: dict[str, float]
+
+
+def build_bond_ladder(
+    db: Any,
+    target_duration: float = 3.0,
+    max_rungs: int = 10,
+) -> BondLadderPlan:
+    """Build a bond ladder: bucket bonds by maturity into short (<2y), mid (2-5y), long (>5y)."""
+    bonds = (
+        db.query(BondOffering)
+        .join(Instrument, BondOffering.instrument_id == Instrument.id)
+        .filter(Instrument.instrument_type == "bond")
+        .order_by(BondOffering.maturity_date.asc().nullslast())
+        .limit(max_rungs)
+        .all()
+    )
+
+    rungs: list[BondLadderRung] = []
+    bucket_weights: dict[str, float] = {"short": 0.0, "mid": 0.0, "long": 0.0}
+    total_duration = 0.0
+    count = 0
+
+    inst_ids = [b.instrument_id for b in bonds if b.instrument_id]
+    all_instrs = db.query(Instrument).filter(Instrument.id.in_(inst_ids)).all() if inst_ids else []
+    instr_map = {r.id: r for r in all_instrs}
+
+    for b in bonds:
+        if not b.maturity_date:
+            continue
+        years_to_maturity = (b.maturity_date - date.today()).days / 365.25
+        if years_to_maturity < 0:
+            continue
+
+        if years_to_maturity <= 2:
+            bucket = "short"
+        elif years_to_maturity <= 5:
+            bucket = "mid"
+        else:
+            bucket = "long"
+
+        instr = instr_map.get(b.instrument_id)
+        ticker = instr.ticker if instr else "?"
+
+        dur = b.duration_years or years_to_maturity
+        total_duration += dur
+        count += 1
+        bucket_weights[bucket] += 1.0
+
+        rungs.append(
+            BondLadderRung(
+                ticker=ticker,
+                maturity_date=b.maturity_date.isoformat(),
+                duration_years=dur,
+                yield_to_maturity=b.yield_to_maturity,
+                coupon_rate=b.coupon_rate,
+                credit_rating=b.credit_rating,
+                allocation_pct=0.0,
+                bucket=bucket,
+                reason=f"Погашение через {years_to_maturity:.1f} лет",
+            )
+        )
+
+    if count > 0:
+        avg_duration = total_duration / count
+        for r in rungs:
+            r.allocation_pct = round(100.0 / len(rungs), 1)
+        for k in bucket_weights:
+            bucket_weights[k] = round(bucket_weights[k] / count * 100, 1)
+    else:
+        avg_duration = 0.0
+
+    return BondLadderPlan(
+        rungs=rungs,
+        target_duration=target_duration,
+        actual_duration=round(avg_duration, 2),
+        duration_gap=round(target_duration - avg_duration, 2),
+        buckets=bucket_weights,
+    )
+
+
+def duration_match_portfolio(
+    db: Any,
+    portfolio_value: float,
+    target_duration: float = 3.0,
+) -> list[dict[str, Any]]:
+    """Match portfolio bond exposure to a target duration."""
+    bonds = (
+        db.query(BondOffering)
+        .join(Instrument, BondOffering.instrument_id == Instrument.id)
+        .filter(Instrument.instrument_type == "bond")
+        .all()
+    )
+
+    inst_ids = [b.instrument_id for b in bonds if b.instrument_id]
+    all_instrs = db.query(Instrument).filter(Instrument.id.in_(inst_ids)).all() if inst_ids else []
+    instr_map = {r.id: r for r in all_instrs}
+
+    candidates: list[dict[str, Any]] = []
+    for b in bonds:
+        dur = b.duration_years or 0
+        if dur <= 0:
+            continue
+        instr = instr_map.get(b.instrument_id)
+        ticker = instr.ticker if instr else "?"
+
+        deviation = abs(dur - target_duration)
+        score = max(0, 100 - deviation * 20)
+        if b.credit_rating and b.credit_rating.startswith("A"):
+            score += 10
+        if b.yield_to_maturity:
+            score += min(b.yield_to_maturity, 15)
+
+        candidates.append({
+            "ticker": ticker,
+            "duration": round(dur, 2),
+            "deviation": round(deviation, 2),
+            "ytm": b.yield_to_maturity,
+            "rating": b.credit_rating or "NR",
+            "score": round(score, 1),
+        })
+
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    return candidates[:10]
 
 
 rebalancing_engine = RebalancingEngine()

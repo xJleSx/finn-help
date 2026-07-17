@@ -255,13 +255,8 @@ class SectorMapper:
         """
         from src.db.models import Instrument
 
-        instrument_ids = []
-
-        for sector in sectors:
-            instruments = db_session.query(Instrument).filter_by(sector=sector).all()
-            instrument_ids.extend([i.id for i in instruments])
-
-        return list(set(instrument_ids))  # Remove duplicates
+        instruments = db_session.query(Instrument).filter(Instrument.sector.in_(sectors)).all()
+        return list({i.id for i in instruments})
 
     def get_cascading_effects(self, primary_sectors: list[str]) -> dict[str, Any]:
         """Calculate cascading effects through commodity chains.

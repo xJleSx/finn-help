@@ -1,7 +1,7 @@
 "use client";
 
-import BondDashboard from "@/components/market/bonds/BondDashboard";
-import { useBonds } from "@/hooks/bonds/useBond";
+import BondDashboard from "@/features/bonds/components/BondDashboard";
+import { useBonds } from "@/features/bonds/hooks/useBond";
 
 export default function BondsPage() {
   const { data: bonds, isLoading, error } = useBonds();

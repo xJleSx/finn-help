@@ -1,1 +1,1 @@
-export { default as CardErrorBoundary } from "./CardErrorBoundary";
+export { CardErrorBoundary } from "@/features/bonds/components/details/ErrorBoundary";

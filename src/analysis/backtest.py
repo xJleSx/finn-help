@@ -26,6 +26,7 @@ class BacktestConfig:
     commission_fixed: float = COMMISSION_FIXED
     rebalance_threshold: float = REBALANCE_THRESHOLD
     regime_lookback: int = 21
+    benchmark_ticker: str = "IMOEX"
 
 
 @dataclass
@@ -132,7 +133,7 @@ class BacktestResult:
             f"📊 *Результат бэктеста*\n\n"
             f"💰 Капитал: {self.capital:,.0f} ₽\n"
             f"📈 Доходность портфеля: {self.portfolio_return:+.1%}\n"
-            f"📉 Доходность IMOEX: {self.benchmark_return:+.1%}\n"
+            f"📉 Доходность бенчмарка: {self.benchmark_return:+.1%}\n"
             f"🏆 Альфа: {self.alpha:+.1%}\n\n"
             f"⚙ Sharpe: {self.portfolio_sharpe:.2f}\n"
             f"⚙ Sortino: {self.portfolio_sortino:.2f}\n"
@@ -245,10 +246,20 @@ def backtest_allocation(
         picks = allocator.recommend(capital=capital)
         result = BacktestResult(capital=capital, config=config)
 
-        imoex_prices = (
-            db.query(Price).join(Instrument).filter(Instrument.ticker == "IMOEX").order_by(Price.date.desc()).limit(lookback_days + 10).all()
+        has_bonds = any(
+            db.query(Instrument.instrument_type).filter(Instrument.id == p["id"]).scalar() == "bond"
+            for p in picks[:8]
         )
-        imoex_vals = [cast(float, p.close) for p in reversed(imoex_prices) if p.close]
+        bt = "RGBITR" if has_bonds else config.benchmark_ticker
+
+        benchmark_prices = (
+            db.query(Price).join(Instrument).filter(Instrument.ticker == bt).order_by(Price.date.desc()).limit(lookback_days + 10).all()
+        )
+        if not benchmark_prices:
+            benchmark_prices = (
+                db.query(Price).join(Instrument).filter(Instrument.ticker == "IMOEX").order_by(Price.date.desc()).limit(lookback_days + 10).all()
+            )
+        benchmark_vals = [cast(float, p.close) for p in reversed(benchmark_prices) if p.close]
 
         result.positions = picks[:8]
         portfolio_prices: dict[str, list[float]] = {}
@@ -258,12 +269,12 @@ def backtest_allocation(
             if vals:
                 portfolio_prices[p["ticker"]] = vals
 
-        if not portfolio_prices or len(imoex_vals) < 20:
+        if not portfolio_prices or len(benchmark_vals) < 20:
             logger.warning("Not enough historical data for backtest")
             return result
 
         min_len = min(len(v) for v in portfolio_prices.values())
-        min_len = min(min_len, len(imoex_vals))
+        min_len = min(min_len, len(benchmark_vals))
 
         weights = [p.get("score", 1) for p in result.positions if p["ticker"] in portfolio_prices]
         total_w = sum(weights) or 1
@@ -289,7 +300,7 @@ def backtest_allocation(
                     total_slippage += slip
                     total_commission += comm
 
-            bench_ret = (imoex_vals[i] - imoex_vals[i - 1]) / imoex_vals[i - 1]
+            bench_ret = (benchmark_vals[i] - benchmark_vals[i - 1]) / benchmark_vals[i - 1]
             result.add_snapshot(str(i), port_ret, bench_ret)
             result.total_slippage += total_slippage * capital
             result.total_commission += total_commission * capital

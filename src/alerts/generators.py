@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 ALERT_TYPES = {
     "bond_maturity": "Приближение погашения облигации",
+    "bond_coupon": "Предстоящая купонная выплата",
+    "bond_rating_change": "Изменение кредитного рейтинга",
+    "bond_spread": "Изменение спреда доходности",
     "report_anomaly": "Аномалия в отчётности",
     "corporate_event": "Корпоративное событие",
     "signal_drop": "Падение уверенности сигнала",
@@ -53,6 +56,107 @@ def generate_bond_maturity_alerts(db: Any, days_threshold: int = 30) -> list[dic
                 "user_id": None,
             }
         )
+    return alerts
+
+
+def generate_bond_coupon_alerts(db: Any, days_ahead: int = 14) -> list[dict[str, Any]]:
+    """Alerts for upcoming coupon payments."""
+    from src.db.models import BondCouponSchedule
+
+    today = date.today()
+    cutoff = today + timedelta(days=days_ahead)
+    rows = (
+        db.query(BondCouponSchedule, Instrument.ticker)
+        .join(Instrument, Instrument.id == BondCouponSchedule.instrument_id)
+        .filter(
+            BondCouponSchedule.coupon_date >= today,
+            BondCouponSchedule.coupon_date <= cutoff,
+        )
+        .order_by(BondCouponSchedule.coupon_date.asc())
+        .all()
+    )
+    alerts = []
+    for schedule, ticker in rows:
+        days_left = (schedule.coupon_date - today).days
+        severity = 0.7 if days_left <= 3 else 0.4 if days_left <= 7 else 0.2
+        alerts.append({
+            "ticker": ticker,
+            "alert_type": "bond_coupon",
+            "severity": severity,
+            "title": f"Купон {ticker} через {days_left} дн.",
+            "message": (
+                f"Купонная выплата {ticker}: {schedule.coupon_value:.2f} ₽, "
+                f"дата: {schedule.coupon_date.strftime('%d.%m.%Y')}"
+            ),
+            "user_id": None,
+        })
+    return alerts
+
+
+def generate_bond_rating_alerts(db: Any) -> list[dict[str, Any]]:
+    """Alerts for low credit ratings on bonds."""
+    today = date.today()
+    low_ratings = ("BB+", "BB", "BB-", "B+", "B", "CCC", "CC", "C", "D", "NR")
+    rows = (
+        db.query(BondOffering, Instrument.ticker)
+        .join(Instrument, Instrument.id == BondOffering.instrument_id)
+        .filter(BondOffering.credit_rating.isnot(None))
+        .all()
+    )
+    alerts = []
+    for offering, ticker in rows:
+        rating = (offering.credit_rating or "").upper()
+        if rating in low_ratings:
+            alerts.append({
+                "ticker": ticker,
+                "alert_type": "bond_rating_change",
+                "severity": 0.7 if rating.startswith("B") else 0.9,
+                "title": f"Низкий рейтинг {ticker}: {offering.credit_rating}",
+                "message": (
+                    f"Облигация {ticker} имеет низкий кредитный рейтинг {offering.credit_rating}. "
+                    f"YTM: {offering.yield_to_maturity or '—'}%"
+                ),
+                "user_id": None,
+            })
+    return alerts
+
+
+def generate_bond_spread_alerts(db: Any, spread_threshold: float = 5.0) -> list[dict[str, Any]]:
+    """Alerts for large YTM spread to key rate."""
+    from src.collectors.macro import get_latest_key_rate
+
+    today = date.today()
+    key_rate = get_latest_key_rate(db)
+    if key_rate is None:
+        return []
+
+    rows = (
+        db.query(BondOffering, Instrument.ticker)
+        .join(Instrument, Instrument.id == BondOffering.instrument_id)
+        .filter(
+            BondOffering.yield_to_maturity.isnot(None),
+            BondOffering.maturity_date >= today,
+        )
+        .all()
+    )
+    alerts = []
+    for offering, ticker in rows:
+        spread = offering.yield_to_maturity - key_rate
+        if spread > spread_threshold:
+            severity = min(spread / 15, 0.9)
+            alerts.append({
+                "ticker": ticker,
+                "alert_type": "bond_spread",
+                "severity": severity,
+                "title": f"Высокий спред {ticker}: {spread:.1f}%",
+                "message": (
+                    f"Спред доходности {ticker} к ключевой ставке: {spread:.1f}% "
+                    f"(YTM {offering.yield_to_maturity:.1f}%, "
+                    f"ставка {key_rate:.1f}%). "
+                    f"Рейтинг: {offering.credit_rating or '—'}"
+                ),
+                "user_id": None,
+            })
     return alerts
 
 
@@ -232,6 +336,9 @@ def store_alerts(db: Any, alerts: list[dict[str, Any]]) -> int:
 def generate_all_alerts(db: Any) -> list[dict[str, Any]]:
     alerts = []
     alerts.extend(generate_bond_maturity_alerts(db))
+    alerts.extend(generate_bond_coupon_alerts(db))
+    alerts.extend(generate_bond_rating_alerts(db))
+    alerts.extend(generate_bond_spread_alerts(db))
     alerts.extend(generate_report_anomalies(db))
     alerts.extend(generate_corporate_event_alerts(db))
     alerts.extend(generate_signal_drop_alerts(db))

@@ -228,3 +228,63 @@ async def broadcast_today_signals() -> None:
                 logger.warning("Failed to send signal broadcast to %d: %s", uid, e)
     finally:
         db.close()
+
+
+async def broadcast_bond_alerts(
+    alert_type: str = "bond_coupon",
+    days_ahead: int = 14,
+) -> None:
+    """Broadcast bond alerts (coupon, maturity, rating, spread) to bond subscribers."""
+    if app is None:
+        logger.warning("Bot not running, skipping bond alert broadcast")
+        return
+
+    db = get_session()
+    try:
+        from src.alerts.generators import (
+            generate_bond_coupon_alerts,
+            generate_bond_maturity_alerts,
+            generate_bond_rating_alerts,
+            generate_bond_spread_alerts,
+        )
+
+        alerts: list[dict[str, Any]] = []
+
+        if alert_type in ("bond_coupon", "all"):
+            alerts.extend(generate_bond_coupon_alerts(db, days_ahead))
+        if alert_type in ("bond_maturity", "all"):
+            alerts.extend(generate_bond_maturity_alerts(db, days_ahead))
+        if alert_type in ("bond_rating_change", "all"):
+            alerts.extend(generate_bond_rating_alerts(db))
+        if alert_type in ("bond_spread", "all"):
+            alerts.extend(generate_bond_spread_alerts(db))
+
+        if not alerts:
+            logger.debug("No bond alerts to broadcast")
+            return
+
+        ns = NotificationService()
+        subscribers = await _ns_get_subscribers(ns, "signal")
+
+        for alert in alerts:
+            emoji = {
+                "bond_coupon": "💵",
+                "bond_maturity": "⏰",
+                "bond_rating_change": "⚠️",
+                "bond_spread": "📊",
+            }.get(alert.get("alert_type", ""), "🔔")
+
+            lines = [
+                f"{emoji} <b>{alert.get('title', 'Bond Alert')}</b>",
+                f"Тикер: {alert.get('ticker', '?')}",
+                f"{alert.get('message', '')}",
+            ]
+            text = "\n".join(lines)
+
+            for uid, cid in subscribers:
+                try:
+                    await app.bot.send_message(chat_id=uid, text=text, parse_mode="HTML")
+                except Exception as e:
+                    logger.warning("Failed to send bond alert to %d: %s", uid, e)
+    finally:
+        db.close()

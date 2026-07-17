@@ -1,9 +1,10 @@
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from src.analysis.feature_store import set_cache
 from src.db.connection import get_session
-from src.db.models import FeatureCache, SentimentSignal
+from src.db.models import SentimentSignal
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ def compute_social_features(ticker: str) -> dict[str, Any]:
         )
 
         if not rows:
-            return {
+            features = {
                 "social_volume_7d": 0,
                 "social_volume_30d": 0,
                 "social_avg_score_7d": 0.0,
@@ -31,6 +32,8 @@ def compute_social_features(ticker: str) -> dict[str, Any]:
                 "social_bullish_ratio_7d": 0.0,
                 "social_confidence_7d": 0.0,
             }
+            set_cache(ticker, "social_sentiment", features)
+            return features
 
         now = datetime.now(timezone.utc)
         cutoff_7d = now - timedelta(days=7)
@@ -60,29 +63,7 @@ def compute_social_features(ticker: str) -> dict[str, Any]:
             "social_confidence_7d": round(avg_confidence(recent_7d), 4),
         }
 
-        _cache_features(ticker, features)
+        set_cache(ticker, "social_sentiment", features)
         return features
-    finally:
-        db.close()
-
-
-def _cache_features(ticker: str, features: dict[str, Any]) -> None:
-    db = get_session()
-    try:
-        today = date.today()
-        existing = db.query(FeatureCache).filter_by(ticker=ticker, feature_type="social_sentiment", date=today).first()
-        if existing:
-            existing.value_json = features  # type: ignore[assignment]
-        else:
-            cached = FeatureCache(
-                ticker=ticker,
-                feature_type="social_sentiment",
-                date=today,
-                value_json=features,
-            )
-            db.add(cached)
-        db.commit()
-    except Exception as e:
-        logger.warning("Failed to cache social features for %s: %s", ticker, e)
     finally:
         db.close()

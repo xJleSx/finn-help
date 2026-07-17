@@ -36,6 +36,24 @@ from .misc import callback as callback  # noqa: E402
 from .misc import init as init  # noqa: E402
 from .misc import reset as reset  # noqa: E402
 from .misc import scheduler as scheduler  # noqa: E402
+
+security_app = typer.Typer(help="Security utilities — encryption, key generation, checks")
+app.add_typer(security_app, name="security")
+from .security import (
+    check_env as check_env,  # noqa: E402
+)
+from .security import (
+    encrypt_value as encrypt_value,  # noqa: E402
+)
+from .security import (
+    generate_jwt_refresh_secret as generate_jwt_refresh_secret,  # noqa: E402
+)
+from .security import (
+    generate_jwt_secret as generate_jwt_secret,  # noqa: E402
+)
+from .security import (
+    generate_key as generate_key,  # noqa: E402
+)
 from .trading import buy as buy  # noqa: E402
 from .trading import history as history  # noqa: E402
 from .trading import prune_models as prune_models  # noqa: E402

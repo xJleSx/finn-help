@@ -1,6 +1,7 @@
+import contextlib
 import logging
 from datetime import date, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -61,14 +62,26 @@ async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date:
         return v
 
     new_count = 0
+    rows_with_dates: list[tuple[dict, date]] = []
     for row in history:
         d = row.get("TRADEDATE") or row.get("tradedate")
         if isinstance(d, str):
             d = date.fromisoformat(d)
-        if not d:
-            continue
-        exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
-        if exists:
+        if d:
+            rows_with_dates.append((row, d))
+
+    if rows_with_dates:
+        existing_dates = {
+            r[0] for r in db.query(Price.date).filter(
+                Price.instrument_id == inst.id,
+                Price.date.in_([d for _, d in rows_with_dates]),
+            ).all()
+        }
+    else:
+        existing_dates = set()
+
+    for row, d in rows_with_dates:
+        if d in existing_dates:
             continue
         _o = _first(row.get("OPEN"), row.get("open"))
         _h = _first(row.get("HIGH"), row.get("high"))
@@ -173,6 +186,7 @@ async def collect_dividends(db: Session) -> None:
                 continue
             try:
                 dividends = await moex.get_dividends(str(inst.ticker))
+                rows_to_add: list[tuple[date, float]] = []
                 for row in dividends:
                     d = row.get("registryclosedate") or row.get("recordDate") or row.get("recorddate")
                     amt = row.get("value") or row.get("dividendGross")
@@ -180,15 +194,28 @@ async def collect_dividends(db: Session) -> None:
                         continue
                     if isinstance(d, str):
                         d = date.fromisoformat(d)
-                    exists = db.query(Dividend).filter_by(instrument_id=inst.id, date=d, amount=float(amt)).first()
-                    if not exists:
-                        div = Dividend(
-                            instrument_id=inst.id,
-                            date=d,
-                            amount=float(amt),
-                            currency="RUB",
-                        )
-                        db.add(div)
+                    rows_to_add.append((d, float(amt)))
+
+                if rows_to_add:
+                    existing_divs = {
+                        (r[0], float(r[1])) for r in db.query(Dividend.date, Dividend.amount).filter(
+                            Dividend.instrument_id == inst.id,
+                            Dividend.date.in_([d for d, _ in rows_to_add]),
+                        ).all() if r[1] is not None
+                    }
+                else:
+                    existing_divs = set()
+
+                for d, amt in rows_to_add:
+                    if (d, amt) in existing_divs:
+                        continue
+                    div = Dividend(
+                        instrument_id=inst.id,
+                        date=d,
+                        amount=amt,
+                        currency="RUB",
+                    )
+                    db.add(div)
                 db.commit()
             except Exception as e:
                 logger.warning(f"Dividends failed for {inst.ticker}: {e}")
@@ -211,6 +238,10 @@ def compute_indicators(db: Session, instrument_ids: set[int] | None = None) -> N
     for p in all_prices:
         prices_by_inst.setdefault(int(p.instrument_id), []).append(p)
 
+    existing_indicators: dict[int, set[date]] = {}
+    for ind in db.query(Indicator.instrument_id, Indicator.date).filter(Indicator.instrument_id.in_(ids)).all():
+        existing_indicators.setdefault(int(ind.instrument_id), set()).add(ind.date)
+
     for inst in instruments:
         prices = prices_by_inst.get(int(inst.id), [])
         if len(prices) < 50:
@@ -229,9 +260,9 @@ def compute_indicators(db: Session, instrument_ids: set[int] | None = None) -> N
             ]
         )
         df = analyzer.compute_all(df)
+        inst_existing = existing_indicators.get(int(inst.id), set())
         for _, row in df.iterrows():
-            exists = db.query(Indicator).filter_by(instrument_id=inst.id, date=row["date"]).first()
-            if exists:
+            if row["date"] in inst_existing:
                 continue
             ind = Indicator(
                 instrument_id=inst.id,
@@ -264,8 +295,13 @@ async def collect_news(db: Session) -> list[dict[str, Any]]:
         ticker_map[str(inst.ticker).upper()] = int(inst.id)
 
     saved_news: list[News] = []
+    urls = [item["url"] for item in news_list]
+    existing_by_url: dict[str, News] = {}
+    if urls:
+        for n in db.query(News).filter(News.url.in_(urls)).all():
+            existing_by_url[str(n.url)] = n
     for item in news_list:
-        exists = db.query(News).filter_by(url=item["url"]).first()
+        exists = existing_by_url.get(item["url"])
         if exists:
             saved_news.append(exists)
             continue
@@ -286,13 +322,25 @@ async def collect_news(db: Session) -> list[dict[str, Any]]:
         db.flush()
         saved_news.append(n)
 
+    candidate_pairs: list[tuple[int, int]] = []
     for n in saved_news:
         search_text = f"{n.title or ''} {n.summary or ''}".upper()
         for ticker, inst_id in ticker_map.items():
             if len(ticker) >= 2 and ticker in search_text:
-                ni_exists = db.query(NewsInstrument).filter_by(news_id=n.id, instrument_id=inst_id).first()
-                if not ni_exists:
-                    db.add(NewsInstrument(news_id=n.id, instrument_id=inst_id))
+                candidate_pairs.append((n.id, inst_id))
+
+    if candidate_pairs:
+        news_ids = list({p[0] for p in candidate_pairs})
+        existing_links = {
+            (r.news_id, r.instrument_id)
+            for r in db.query(NewsInstrument).filter(NewsInstrument.news_id.in_(news_ids)).all()
+        }
+    else:
+        existing_links = set()
+
+    for news_id, inst_id in candidate_pairs:
+        if (news_id, inst_id) not in existing_links:
+            db.add(NewsInstrument(news_id=news_id, instrument_id=inst_id))
 
     db.commit()
     return news_list
@@ -345,10 +393,37 @@ async def collect_fundamental(db: Session) -> None:
         return
 
     today = date.today()
+    inst_ids = [inst.id for inst in instruments]
+
+    existing_metrics: dict[int, FundamentalMetric] = {}
+    for m in db.query(FundamentalMetric).filter(
+        FundamentalMetric.instrument_id.in_(inst_ids),
+        FundamentalMetric.date == today,
+    ).all():
+        existing_metrics[int(m.instrument_id)] = m
+
+    from sqlalchemy import func as sqlfunc
+
+    latest_price_subq = db.query(
+        Price.instrument_id,
+        sqlfunc.max(Price.date).label('max_date'),
+    ).filter(
+        Price.instrument_id.in_(inst_ids),
+    ).group_by(Price.instrument_id).subquery()
+
+    last_prices: dict[int, float | None] = {}
+    for r in db.query(Price).join(
+        latest_price_subq,
+        sqlfunc.and_(
+            Price.instrument_id == latest_price_subq.c.instrument_id,
+            Price.date == latest_price_subq.c.max_date,
+        ),
+    ).all():
+        last_prices[int(r.instrument_id)] = float(r.close) if r.close is not None else None
+
     async with FundamentalDataCollector() as collector:
         for inst in instruments:
-            last_price_row = db.query(Price.close).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-            last_price = float(last_price_row[0]) if last_price_row and last_price_row[0] is not None else None
+            last_price = last_prices.get(int(inst.id))
 
             try:
                 data = await collector.fetch(str(inst.ticker), last_price=last_price)
@@ -356,7 +431,7 @@ async def collect_fundamental(db: Session) -> None:
                 logger.warning("Fundamental fetch failed for %s: %s", inst.ticker, e)
                 continue
 
-            existing = db.query(FundamentalMetric).filter_by(instrument_id=inst.id, date=today).first()
+            existing = existing_metrics.get(int(inst.id))
             if existing:
                 existing.market_cap = data["market_cap"]
                 existing.shares_outstanding = data["shares_outstanding"]
@@ -388,9 +463,19 @@ async def collect_macro(db: Session) -> None:
     collector = MacroCollector()
     items = await collector.fetch_all()
     today = date.today()
+    if items:
+        indicator_types = [item["indicator_type"] for item in items]
+        existing_types = {
+            r[0] for r in db.query(MacroIndicator.indicator_type).filter(
+                MacroIndicator.date == today,
+                MacroIndicator.indicator_type.in_(indicator_types),
+            ).all()
+        }
+    else:
+        existing_types = set()
+
     for item in items:
-        exists = db.query(MacroIndicator).filter_by(date=today, indicator_type=item["indicator_type"]).first()
-        if not exists:
+        if item["indicator_type"] not in existing_types:
             db.add(MacroIndicator(**item))
     db.commit()
 
@@ -415,9 +500,20 @@ async def collect_social_sentiment() -> None:
                 db = get_session()
                 try:
                     new_count = 0
+                    if posts:
+                        source_name = posts[0].source
+                        ext_ids = [post.external_id for post in posts]
+                        existing_ids = {
+                            r[0] for r in db.query(SocialPost.external_id).filter(
+                                SocialPost.source == source_name,
+                                SocialPost.external_id.in_(ext_ids),
+                            ).all()
+                        }
+                    else:
+                        existing_ids = set()
+
                     for post in posts:
-                        exists = db.query(SocialPost).filter_by(source=post.source, external_id=post.external_id).first()
-                        if exists:
+                        if post.external_id in existing_ids:
                             continue
                         sp = SocialPost(
                             source=post.source,
@@ -488,6 +584,7 @@ async def collect_financial_reports(db: Session) -> None:
 
     collector = FinancialReportCollector()
     try:
+        collected_financials: list[tuple[Instrument, dict, date, str]] = []
         for inst in instruments:
             data = await collector.fetch(inst.ticker)
             if not data:
@@ -497,9 +594,24 @@ async def collect_financial_reports(db: Session) -> None:
             if not report_date_str:
                 continue
             rd = date.fromisoformat(report_date_str) if isinstance(report_date_str, str) else report_date_str
+            collected_financials.append((inst, data, rd, period_type))
 
-            existing = db.query(FinancialReport).filter_by(instrument_id=inst.id, report_date=rd, period_type=period_type).first()
-            if existing:
+        if collected_financials:
+            existing_financials = {
+                (r.instrument_id, r.report_date, r.period_type)
+                for r in db.query(
+                    FinancialReport.instrument_id,
+                    FinancialReport.report_date,
+                    FinancialReport.period_type,
+                ).filter(
+                    FinancialReport.instrument_id.in_(list({c[0].id for c in collected_financials})),
+                ).all()
+            }
+        else:
+            existing_financials = set()
+
+        for inst, data, rd, period_type in collected_financials:
+            if (inst.id, rd, period_type) in existing_financials:
                 continue
             report = FinancialReport(
                 instrument_id=inst.id,
@@ -516,47 +628,148 @@ async def collect_financial_reports(db: Session) -> None:
 
 
 async def collect_bond_offerings(db: Session) -> None:
-    """Fetch/update bond offerings from MOEX ISS."""
+    """Fetch/update bond offerings from MOEX ISS. Updates existing records."""
     from src.collectors.bonds import BondOfferingCollector
-    from src.db.models import BondOffering
+    from src.db.models import BondCouponSchedule, BondOffering, BondOfferingHistory
 
     instruments = db.query(Instrument).filter(Instrument.instrument_type == "bond").all()
     if not instruments:
         return
 
     collector = BondOfferingCollector()
+    updated_count = 0
+    new_count = 0
+    coupon_count = 0
+
     try:
+        collected_bonds: list[tuple[Instrument, dict]] = []
         for inst in instruments:
             data = await collector.fetch_by_ticker(inst.ticker)
             if not data or not data.get("isin"):
                 continue
+            collected_bonds.append((inst, data))
 
+        if collected_bonds:
+            bond_inst_ids = list({c[0].id for c in collected_bonds})
+            existing_offering_map: dict[tuple[int, str], BondOffering] = {}
+            for o in db.query(BondOffering).filter(BondOffering.instrument_id.in_(bond_inst_ids)).all():
+                existing_offering_map[(int(o.instrument_id), str(o.isin))] = o
+        else:
+            existing_offering_map = {}
+
+        for inst, data in collected_bonds:
             isin = data["isin"]
-            existing = db.query(BondOffering).filter_by(instrument_id=inst.id, isin=isin).first()
-            if existing:
-                continue
+            existing = existing_offering_map.get((int(inst.id), isin))
 
-            offering = BondOffering(
-                instrument_id=inst.id,
-                offering_date=data.get("offering_date"),
-                isin=isin,
-                coupon_type=data.get("coupon_type", "fixed"),
-                coupon_rate=data.get("coupon_rate"),
-                coupon_period_days=data.get("coupon_period_days"),
-                yield_to_maturity=data.get("yield_to_maturity"),
-                maturity_date=data.get("maturity_date"),
-                credit_rating=data.get("credit_rating"),
-                volume=data.get("volume"),
-                has_amortization=data.get("has_amortization", False),
-                has_offer=data.get("has_offer", False),
-                nominal_price=data.get("nominal_price"),
-                current_price_pct=data.get("current_price_pct"),
-            )
-            db.add(offering)
+            offering_kwargs = {
+                "offering_date": data.get("offering_date"),
+                "isin": isin,
+                "coupon_type": data.get("coupon_type", "fixed"),
+                "coupon_rate": data.get("coupon_rate"),
+                "coupon_period_days": data.get("coupon_period_days"),
+                "yield_to_maturity": data.get("yield_to_maturity"),
+                "maturity_date": data.get("maturity_date"),
+                "maturity_years": (data["maturity_date"] - date.today()).days / 365.25 if data.get("maturity_date") else None,
+                "credit_rating": data.get("credit_rating"),
+                "volume": data.get("volume"),
+                "has_amortization": data.get("has_amortization", False),
+                "has_offer": data.get("has_offer", False),
+                "min_lot_rub": data.get("min_lot_rub"),
+                "qual_investor_only": data.get("qual_investor_only", False),
+                "nominal_price": data.get("nominal_price"),
+                "current_price_pct": data.get("current_price_pct"),
+                "duration_years": data.get("duration_years"),
+            }
+
+            if existing:
+                for key, val in offering_kwargs.items():
+                    if val is not None:
+                        setattr(existing, key, val)
+                updated_count += 1
+            else:
+                offering = BondOffering(
+                    instrument_id=inst.id,
+                    **offering_kwargs,
+                )
+                db.add(offering)
+                new_count += 1
+
+            # Store coupon schedule
+            coupon_schedule = data.get("coupon_schedule", [])
+            if coupon_schedule:
+                    db.query(BondCouponSchedule).filter_by(instrument_id=inst.id).delete()
+                    for cpn in coupon_schedule:
+                        cpn_date = _parse_coupon_date(cpn.get("coupondate") or cpn.get("couponDate"))
+                        if not cpn_date:
+                            continue
+                        with contextlib.suppress(ValueError, TypeError):
+                            value = float(cpn.get("value", 0))
+                        schedule_entry = BondCouponSchedule(
+                            instrument_id=inst.id,
+                            coupon_date=cpn_date,
+                            coupon_value=value,
+                            coupon_number=_safe_int(cpn.get("couponnumber") or cpn.get("couponNumber")),
+                            currency=cpn.get("currency", "RUB"),
+                            fix_date=_parse_coupon_date(cpn.get("fixdate") or cpn.get("fixDate")),
+                            face_value=_safe_float(cpn.get("facevalue") or cpn.get("faceValue")),
+                            initial_face_value=_safe_float(cpn.get("initialfacevalue") or cpn.get("initialFaceValue")),
+                        )
+                        db.add(schedule_entry)
+                        coupon_count += 1
+
+            # Save history snapshot
+            if data.get("yield_to_maturity") is not None or data.get("current_price_pct") is not None:
+                history_entry = BondOfferingHistory(
+                    instrument_id=inst.id,
+                    snapshot_date=date.today(),
+                    offering_date=data.get("offering_date"),
+                    isin=isin,
+                    coupon_type=data.get("coupon_type", "fixed"),
+                    coupon_rate=data.get("coupon_rate"),
+                    coupon_period_days=data.get("coupon_period_days"),
+                    yield_to_maturity=data.get("yield_to_maturity"),
+                    duration_years=data.get("duration_years"),
+                    spread_to_key_rate=data.get("spread_to_key_rate"),
+                    maturity_date=data.get("maturity_date"),
+                    maturity_years=(data["maturity_date"] - date.today()).days / 365.25 if data.get("maturity_date") else None,
+                    credit_rating=data.get("credit_rating"),
+                    current_price_pct=data.get("current_price_pct"),
+                )
+                db.add(history_entry)
+
         db.commit()
-        logger.info("Bond offerings collected for %d instruments", len(instruments))
+        logger.info("Bond offerings: %d new, %d updated, %d coupons stored", new_count, updated_count, coupon_count)
     finally:
         await collector.close()
+
+
+def _parse_coupon_date(val: Any) -> Optional[date]:
+    if not val:
+        return None
+    if isinstance(val, date):
+        return val
+    if isinstance(val, str):
+        try:
+            return date.fromisoformat(val[:10])
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _safe_int(val: Any) -> Optional[int]:
+    if val is None:
+        return None
+    with contextlib.suppress(ValueError, TypeError):
+        return int(val)
+    return None
+
+
+def _safe_float(val: Any) -> Optional[float]:
+    if val is None:
+        return None
+    with contextlib.suppress(ValueError, TypeError):
+        return float(val)
+    return None
 
 
 def collect_company_profiles(db: Session) -> None:

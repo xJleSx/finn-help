@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import logging
 from datetime import date
@@ -8,6 +9,8 @@ from src.collectors.moex import MOEXCollector
 
 logger = logging.getLogger(__name__)
 
+CONCURRENCY_LIMIT = 10
+
 
 class BondOfferingCollector(BaseCollector):
     """Collects bond offering details from MOEX ISS."""
@@ -15,6 +18,7 @@ class BondOfferingCollector(BaseCollector):
     def __init__(self) -> None:
         super().__init__()
         self._moex: Optional[MOEXCollector] = None
+        self._semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
     async def _get_moex(self) -> MOEXCollector:
         if self._moex is None:
@@ -26,16 +30,23 @@ class BondOfferingCollector(BaseCollector):
         moex = await self._get_moex()
         bonds_list = await moex.get_bonds()
         results: list[dict[str, Any]] = []
-        for bond in bonds_list:
+
+        async def _fetch_one(bond: dict[str, Any]) -> Optional[dict[str, Any]]:
             secid = bond.get("SECID") or bond.get("secid")
             if not secid:
-                continue
-            try:
-                info = await self._fetch_bond_info(moex, secid)
-                if info:
-                    results.append(info)
-            except Exception as e:
-                logger.warning("Bond info fetch failed for %s: %s", secid, e)
+                return None
+            async with self._semaphore:
+                try:
+                    return await self._fetch_bond_info(moex, secid)
+                except Exception as e:
+                    logger.warning("Bond info fetch failed for %s: %s", secid, e)
+                    return None
+
+        tasks = [_fetch_one(b) for b in bonds_list]
+        for coro in asyncio.as_completed(tasks):
+            info = await coro
+            if info:
+                results.append(info)
         return results
 
     async def fetch_by_ticker(self, ticker: str) -> dict[str, Any]:
@@ -56,11 +67,9 @@ class BondOfferingCollector(BaseCollector):
             "has_offer": False,
         }
 
-        # extended description has more fields — refetch to get all name-value pairs
         desc = await self._fetch_full_description(ticker)
         result.update(desc)
 
-        # current market data
         marketdata = await moex.get_marketdata(ticker, itype="bond")
         if marketdata:
             ytm = marketdata.get("YIELD") or marketdata.get("yield")
@@ -69,6 +78,28 @@ class BondOfferingCollector(BaseCollector):
             last_price = marketdata.get("LAST") or marketdata.get("last")
             if last_price is not None:
                 result["current_price_pct"] = float(last_price)
+            duration = marketdata.get("DURATION")
+            if duration is not None:
+                with contextlib.suppress(ValueError, TypeError):
+                    result["duration_years"] = float(duration)
+
+        # Calculate duration if not provided by MOEX
+        if "duration_years" not in result and result.get("maturity_date") and result.get("yield_to_maturity"):
+            result["duration_years"] = _estimate_duration(
+                maturity_date=result["maturity_date"],
+                ytm=result.get("yield_to_maturity"),
+            )
+
+        # Fetch coupon schedule in parallel
+        try:
+            coupons = await moex.get_coupons(ticker)
+            if coupons:
+                result["coupon_schedule"] = coupons
+                if not result.get("coupon_value") and coupons:
+                    with contextlib.suppress(ValueError, TypeError):
+                        result["coupon_value"] = float(coupons[0].get("value", 0))
+        except Exception as e:
+            logger.debug("Coupon schedule fetch failed for %s: %s", ticker, e)
 
         return result
 
@@ -116,6 +147,12 @@ class BondOfferingCollector(BaseCollector):
                 result["short_name"] = value
             elif name == "SECNAME":
                 result["full_name"] = value
+            elif name == "MINLOT":
+                with contextlib.suppress(ValueError, TypeError):
+                    result["min_lot_rub"] = float(value) if value else None
+            elif name == "QUALIFIEDINVESTOR":
+                qual_value = str(value).lower() if value else ""
+                result["qual_investor_only"] = qual_value in ("yes", "1", "true", "да")
         return result
 
     async def close(self) -> None:
@@ -141,3 +178,14 @@ def _parse_date(value: Any) -> Optional[date]:
         except (ValueError, TypeError):
             pass
     return None
+
+
+def _estimate_duration(maturity_date: date, ytm: Optional[float]) -> Optional[float]:
+    if not ytm or ytm <= 0:
+        return None
+    today = date.today()
+    if maturity_date <= today:
+        return 0.0
+    years_to_maturity = (maturity_date - today).days / 365.25
+    # Simple Macaulay approximation for bullet bonds
+    return round(years_to_maturity * (1 - 1 / (1 + ytm / 100) ** years_to_maturity) / (1 - 1 / (1 + ytm / 100)), 2)

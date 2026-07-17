@@ -1,3 +1,5 @@
-export { default as CouponHistoryCard } from "./CouponHistoryCard";
-export { default as CouponHistoryTable } from "./CouponHistoryTable";
-export { default as CouponStatusBadge } from "./CouponStatusBadge";
+export {
+  CouponHistoryCard,
+  CouponHistoryTable,
+  CouponStatusBadge,
+} from "@/features/bonds/components/details/CouponHistoryCard";

@@ -30,16 +30,21 @@ async def take_snapshot(period: str) -> None:
             logger.warning("No instruments for snapshot")
             return
 
+        inst_ids = [inst.id for inst in instruments]
         prev: dict[int, MetricSnapshot] = {}
-        for inst in instruments:
-            p = (
+        if inst_ids:
+            all_snaps = (
                 db.query(MetricSnapshot)
-                .filter(MetricSnapshot.instrument_id == inst.id, MetricSnapshot.period == period)
-                .order_by(MetricSnapshot.taken_at.desc())
-                .first()
+                .filter(
+                    MetricSnapshot.instrument_id.in_(inst_ids),
+                    MetricSnapshot.period == period,
+                )
+                .order_by(MetricSnapshot.instrument_id, MetricSnapshot.taken_at.desc())
+                .all()
             )
-            if p:
-                prev[int(inst.id)] = p
+            for s in all_snaps:
+                if s.instrument_id not in prev:
+                    prev[s.instrument_id] = s
 
         now_utc = datetime.now(timezone.utc)
 
@@ -68,13 +73,44 @@ async def take_snapshot(period: str) -> None:
             if geo_row:
                 geo_score = round(float(geo_row.score), 2)
 
+        inst_ids = [inst.id for inst in instruments]
+        indicator_map: dict[int, Any] = {}
+        for row in (
+            db.query(Indicator)
+            .distinct(Indicator.instrument_id)
+            .filter(Indicator.instrument_id.in_(inst_ids))
+            .order_by(Indicator.instrument_id, Indicator.date.desc())
+            .all()
+        ):
+            indicator_map[row.instrument_id] = row
+
+        price_map: dict[int, Any] = {}
+        for row in (
+            db.query(Price)
+            .distinct(Price.instrument_id)
+            .filter(Price.instrument_id.in_(inst_ids))
+            .order_by(Price.instrument_id, Price.date.desc())
+            .all()
+        ):
+            price_map[row.instrument_id] = row
+
+        signal_map: dict[int, Any] = {}
+        for row in (
+            db.query(SignalModel)
+            .distinct(SignalModel.instrument_id)
+            .filter(SignalModel.instrument_id.in_(inst_ids))
+            .order_by(SignalModel.instrument_id, SignalModel.date.desc())
+            .all()
+        ):
+            signal_map[row.instrument_id] = row
+
         for inst in instruments:
-            last_indicator = db.query(Indicator).filter(Indicator.instrument_id == inst.id).order_by(Indicator.date.desc()).first()
+            last_indicator = indicator_map.get(inst.id)
             if not last_indicator:
                 continue
 
-            last_price = db.query(Price).filter(Price.instrument_id == inst.id).order_by(Price.date.desc()).first()
-            last_signal = db.query(SignalModel).filter(SignalModel.instrument_id == inst.id).order_by(SignalModel.date.desc()).first()
+            last_price = price_map.get(inst.id)
+            last_signal = signal_map.get(inst.id)
 
             rsi_val = float(last_indicator.rsi) if last_indicator.rsi is not None else None
             macd_line = float(last_indicator.macd_line) if last_indicator.macd_line is not None else None
@@ -161,11 +197,35 @@ async def generate_daily_report() -> DailyReport | None:
         scores: list[float] = []
         portfolio_rows: list[dict[str, Any]] = []
 
-        portfolio_tickers = set()
-        for p in db.query(PortModel).all():
-            inst = db.query(Instrument).filter(Instrument.id == p.instrument_id).first()
-            if inst and inst.ticker:
-                portfolio_tickers.add(inst.ticker.upper())
+        portfolio_tickers: set[str] = set()
+        portfolio_positions = db.query(PortModel).all()
+        if portfolio_positions:
+            port_inst_ids = list({p.instrument_id for p in portfolio_positions if p.instrument_id})
+            port_insts = db.query(Instrument).filter(Instrument.id.in_(port_inst_ids)).all()
+            port_inst_map = {inst.id: inst.ticker for inst in port_insts if inst.ticker}
+            for p in portfolio_positions:
+                ticker = port_inst_map.get(p.instrument_id) if p.instrument_id else None
+                if ticker:
+                    portfolio_tickers.add(ticker.upper())
+
+        portfolio_signal_ids = [
+            s.instrument_id for s in signals_today
+            if s.fused_json and s.fused_json.get("ticker", "").upper() in portfolio_tickers
+        ]
+        snap_map: dict[int, Any] = {}
+        if portfolio_signal_ids:
+            all_snaps = (
+                db.query(MetricSnapshot)
+                .filter(
+                    MetricSnapshot.instrument_id.in_(portfolio_signal_ids),
+                    MetricSnapshot.period == "daily",
+                )
+                .order_by(MetricSnapshot.instrument_id, MetricSnapshot.taken_at.desc())
+                .all()
+            )
+            for snap in all_snaps:
+                if snap.instrument_id not in snap_map:
+                    snap_map[snap.instrument_id] = snap
 
         for s in signals_today:
             if not s.fused_json:
@@ -184,12 +244,7 @@ async def generate_daily_report() -> DailyReport | None:
 
             ticker = s.fused_json.get("ticker", "")
             if ticker and ticker.upper() in portfolio_tickers:
-                prev_snap = (
-                    db.query(MetricSnapshot)
-                    .filter(MetricSnapshot.instrument_id == s.instrument_id, MetricSnapshot.period == "daily")
-                    .order_by(MetricSnapshot.taken_at.desc())
-                    .first()
-                )
+                prev_snap = snap_map.get(s.instrument_id)
                 portfolio_rows.append(
                     {
                         "ticker": ticker.upper(),
@@ -263,18 +318,32 @@ async def generate_weekly_report_text() -> str:
         lines = ["📆 <b>Недельная сводка</b>", ""]
         changed: list[str] = []
 
-        for inst in instruments:
-            recent = (
+        inst_ids = [inst.id for inst in instruments]
+        weekly_map: dict[int, list[Any]] = {}
+        daily_map: dict[int, list[Any]] = {}
+        if inst_ids:
+            weekly_rows = (
                 db.query(MetricSnapshot)
-                .filter(MetricSnapshot.instrument_id == inst.id, MetricSnapshot.period == "weekly")
-                .order_by(MetricSnapshot.taken_at.desc())
-                .limit(2)
+                .filter(MetricSnapshot.instrument_id.in_(inst_ids), MetricSnapshot.period == "weekly")
+                .order_by(MetricSnapshot.instrument_id, MetricSnapshot.taken_at.desc())
                 .all()
             )
+            for row in weekly_rows:
+                weekly_map.setdefault(row.instrument_id, []).append(row)
+
+            daily_rows = (
+                db.query(MetricSnapshot)
+                .filter(MetricSnapshot.instrument_id.in_(inst_ids))
+                .order_by(MetricSnapshot.instrument_id, MetricSnapshot.taken_at.desc())
+                .all()
+            )
+            for row in daily_rows:
+                daily_map.setdefault(row.instrument_id, []).append(row)
+
+        for inst in instruments:
+            recent = (weekly_map.get(inst.id) or [])[:2]
             if len(recent) < 2:
-                recent_daily = (
-                    db.query(MetricSnapshot).filter(MetricSnapshot.instrument_id == inst.id).order_by(MetricSnapshot.taken_at.desc()).limit(2).all()
-                )
+                recent_daily = (daily_map.get(inst.id) or [])[:2]
                 if len(recent_daily) < 2:
                     continue
                 curr, prev_snap = recent_daily[0], recent_daily[1]

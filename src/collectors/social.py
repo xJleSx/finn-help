@@ -212,9 +212,14 @@ class SocialMediaCollector(BaseCollector):
     ) -> None:
         from src.db.models import News, NewsInstrument
 
+        content_hashes = [m["content_hash"] for m in messages]
+        existing_map: dict[str, Any] = {}
+        if content_hashes:
+            for r in db.query(News).filter(News.content_hash.in_(content_hashes)).all():
+                existing_map[r.content_hash] = r
+
         for msg in messages:
-            existing = db.query(News).filter(News.content_hash == msg["content_hash"]).first()
-            if existing:
+            if msg["content_hash"] in existing_map:
                 continue
 
             n = News(

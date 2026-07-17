@@ -55,12 +55,24 @@ class PortfolioAllocator:
 
         result = await db.execute(select(PortModel))
         positions = result.scalars().all()
+        if not positions:
+            return []
+        inst_ids = [p.instrument_id for p in positions if p.instrument_id]
+        inst_result = await db.execute(select(Instrument).where(Instrument.id.in_(inst_ids)))
+        inst_map = {r.id: r for r in inst_result.scalars().all()}
+
+        price_rows = await db.execute(
+            select(Price).where(Price.instrument_id.in_(inst_ids)).order_by(Price.instrument_id, Price.date.desc())
+        )
+        price_map: dict[int, Any] = {}
+        for r in price_rows.scalars().all():
+            if r.instrument_id not in price_map:
+                price_map[r.instrument_id] = r
+
         result_list = []
         for p in positions:
-            inst_result = await db.execute(select(Instrument).where(Instrument.id == p.instrument_id))
-            inst = inst_result.scalar_one_or_none()
-            price_result = await db.execute(select(Price).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc()))
-            price = price_result.scalars().first()
+            inst = inst_map.get(p.instrument_id)
+            price = price_map.get(p.instrument_id)
             current_price = price.close if price else 0
             value = current_price * p.quantity if current_price else 0
             result_list.append(
@@ -209,10 +221,25 @@ class PortfolioAllocator:
         from src.db.models import Portfolio as PortModel
 
         positions = db.query(PortModel).all()
+        if not positions:
+            return []
+        inst_ids = [p.instrument_id for p in positions if p.instrument_id]
+        inst_map = {r.id: r for r in db.query(Instrument).filter(Instrument.id.in_(inst_ids)).all()}
+        price_rows = (
+            db.query(Price)
+            .filter(Price.instrument_id.in_(inst_ids))
+            .order_by(Price.instrument_id, Price.date.desc())
+            .all()
+        )
+        price_map: dict[int, Any] = {}
+        for r in price_rows:
+            if r.instrument_id not in price_map:
+                price_map[r.instrument_id] = r
+
         result = []
         for p in positions:
-            inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
-            price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
+            inst = inst_map.get(p.instrument_id)
+            price = price_map.get(p.instrument_id)
             current_price = price.close if price else 0
             value = current_price * p.quantity if current_price else 0
             result.append(
@@ -227,16 +254,68 @@ class PortfolioAllocator:
 
     def _load_instruments(self, db: Any) -> list[dict[str, Any]]:
         instruments = db.query(Instrument).all()
+        if not instruments:
+            return []
+        inst_ids = [inst.id for inst in instruments]
+
+        price_rows = (
+            db.query(Price)
+            .filter(Price.instrument_id.in_(inst_ids))
+            .order_by(Price.instrument_id, Price.date.desc())
+            .all()
+        )
+        price_map: dict[int, Any] = {}
+        for r in price_rows:
+            if r.instrument_id not in price_map:
+                price_map[r.instrument_id] = r
+
+        one_year_ago = date.today() - timedelta(days=365)
+        all_divs = (
+            db.query(Dividend)
+            .filter(Dividend.instrument_id.in_(inst_ids), Dividend.date >= one_year_ago)
+            .order_by(Dividend.instrument_id, Dividend.date.desc())
+            .all()
+        )
+        div_map: dict[int, list[Any]] = {}
+        for d in all_divs:
+            div_map.setdefault(d.instrument_id, []).append(d)
+
+        all_fm = (
+            db.query(FundamentalMetric)
+            .filter(FundamentalMetric.instrument_id.in_(inst_ids))
+            .order_by(FundamentalMetric.instrument_id, FundamentalMetric.date.desc())
+            .all()
+        )
+        fm_map: dict[int, Any] = {}
+        for fm in all_fm:
+            if fm.instrument_id not in fm_map:
+                fm_map[fm.instrument_id] = fm
+
+        today = date.today()
+        all_upcoming = (
+            db.query(CorporateEvent)
+            .filter(
+                CorporateEvent.instrument_id.in_(inst_ids),
+                CorporateEvent.event_type == "dividend",
+                CorporateEvent.announcement_date >= today,
+            )
+            .order_by(CorporateEvent.instrument_id, CorporateEvent.announcement_date.asc())
+            .all()
+        )
+        upcoming_map: dict[int, Any] = {}
+        for ev in all_upcoming:
+            if ev.instrument_id not in upcoming_map:
+                upcoming_map[ev.instrument_id] = ev
+
         result = []
         for inst in instruments:
-            price = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
+            price = price_map.get(inst.id)
             last_price = price.close if price else None
             inst_ticker_sync = str(inst.ticker)
             sector = SECTOR_NAMES.get(inst_ticker_sync, str(inst.sector or ""))
 
             div_yield = 0.0
-            one_year_ago = date.today() - timedelta(days=365)
-            divs = db.query(Dividend).filter_by(instrument_id=inst.id).filter(Dividend.date >= one_year_ago).order_by(Dividend.date.desc()).all()
+            divs = div_map.get(inst.id, [])
             if divs and last_price and last_price > 0:
                 div_yield = float(sum(d.amount for d in divs) / last_price * 100)
                 if div_yield > 25:
@@ -249,17 +328,8 @@ class PortfolioAllocator:
                     )
                     div_yield = 25.0
 
-            fm = db.query(FundamentalMetric).filter_by(instrument_id=inst.id).order_by(FundamentalMetric.date.desc()).first()
-            upcoming_div = (
-                db.query(CorporateEvent)
-                .filter(
-                    CorporateEvent.instrument_id == inst.id,
-                    CorporateEvent.event_type == "dividend",
-                    CorporateEvent.announcement_date >= date.today(),
-                )
-                .order_by(CorporateEvent.announcement_date.asc())
-                .first()
-            )
+            fm = fm_map.get(inst.id)
+            upcoming_div = upcoming_map.get(inst.id)
 
             entry: dict[str, Any] = {
                 "id": inst.id,
@@ -290,20 +360,37 @@ class PortfolioAllocator:
     async def _load_instruments_async(self, db: AsyncSession) -> list[dict[str, Any]]:
         inst_result = await db.execute(select(Instrument))
         instruments = inst_result.scalars().all()
-        result = []
+        if not instruments:
+            return []
+        inst_ids = [inst.id for inst in instruments]
+
+        price_rows = await db.execute(
+            select(Price).where(Price.instrument_id.in_(inst_ids)).order_by(Price.instrument_id, Price.date.desc())
+        )
+        price_map: dict[int, Any] = {}
+        for r in price_rows.scalars().all():
+            if r.instrument_id not in price_map:
+                price_map[r.instrument_id] = r
+
         one_year_ago = date.today() - timedelta(days=365)
+        all_divs = await db.execute(
+            select(Dividend)
+            .where((Dividend.instrument_id.in_(inst_ids)) & (Dividend.date >= one_year_ago))
+            .order_by(Dividend.instrument_id, Dividend.date.desc())
+        )
+        div_map: dict[int, list[Any]] = {}
+        for d in all_divs.scalars().all():
+            div_map.setdefault(d.instrument_id, []).append(d)
+
+        result = []
         for inst in instruments:
-            price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()))
-            price = price_result.scalars().first()
+            price = price_map.get(inst.id)
             last_price = price.close if price else None
             inst_ticker_async = str(inst.ticker)
             sector = SECTOR_NAMES.get(inst_ticker_async, str(inst.sector or ""))
 
             div_yield = 0.0
-            divs_result = await db.execute(
-                select(Dividend).where((Dividend.instrument_id == inst.id) & (Dividend.date >= one_year_ago)).order_by(Dividend.date.desc())
-            )
-            divs = divs_result.scalars().all()
+            divs = div_map.get(inst.id, [])
             if divs and last_price and last_price > 0:
                 div_yield = float(sum(d.amount for d in divs) / last_price * 100)
                 if div_yield > 25:
@@ -436,12 +523,30 @@ class PortfolioAllocator:
                     reason_parts.append("надёжный БПИФ")
 
             if category == "bond":
-                if c["ticker"] in SAFE_BONDS:
+                is_ofz = c["ticker"].startswith("SU") or c["ticker"] in SAFE_BONDS
+                ytm = c.get("ytm") or c.get("yield_to_maturity")
+                credit_rating = c.get("credit_rating") or c.get("rating")
+
+                if is_ofz:
                     score += 2.0
                     reason_parts.append("ОФЗ — госгарантия")
                 else:
                     score += 1.0
                     reason_parts.append("корпоративная облигация")
+
+                if ytm is not None:
+                    ytm_bonus = min(max((ytm - 10) / 20, 0), 1.5)
+                    score += ytm_bonus
+                    reason_parts.append(f"YTM {ytm:.1f}%")
+
+                if credit_rating:
+                    rating_up = credit_rating.upper()
+                    if rating_up in ("AAA", "AA+"):
+                        score += 1.0
+                        reason_parts.append(f"рейтинг {credit_rating}")
+                    elif rating_up in ("AA", "AA-"):
+                        score += 0.5
+                        reason_parts.append(f"рейтинг {credit_rating}")
 
             # Fundamental scoring
             pe = c.get("pe_ratio")
@@ -558,12 +663,30 @@ class PortfolioAllocator:
                     reason_parts.append("надёжный БПИФ")
 
             if category == "bond":
-                if c["ticker"] in SAFE_BONDS:
+                is_ofz = c["ticker"].startswith("SU") or c["ticker"] in SAFE_BONDS
+                ytm = c.get("ytm") or c.get("yield_to_maturity")
+                credit_rating = c.get("credit_rating") or c.get("rating")
+
+                if is_ofz:
                     score += 2.0
                     reason_parts.append("ОФЗ — госгарантия")
                 else:
                     score += 1.0
                     reason_parts.append("корпоративная облигация")
+
+                if ytm is not None:
+                    ytm_bonus = min(max((ytm - 10) / 20, 0), 1.5)
+                    score += ytm_bonus
+                    reason_parts.append(f"YTM {ytm:.1f}%")
+
+                if credit_rating:
+                    rating_up = credit_rating.upper()
+                    if rating_up in ("AAA", "AA+"):
+                        score += 1.0
+                        reason_parts.append(f"рейтинг {credit_rating}")
+                    elif rating_up in ("AA", "AA-"):
+                        score += 0.5
+                        reason_parts.append(f"рейтинг {credit_rating}")
 
             # Fundamental scoring
             pe = c.get("pe_ratio")

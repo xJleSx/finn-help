@@ -1,6 +1,8 @@
 from src.db.models.base import Base
 from src.db.models.instrument import (
+    BondCouponSchedule,
     BondOffering,
+    BondOfferingHistory,
     CompanyProfile,
     CorporateEvent,
     Dividend,
@@ -59,6 +61,7 @@ from src.db.models.social import (
 from src.db.models.user import (
     AlertLog,
     AuthorSubscription,
+    BrokerCredential,
     ChannelPreference,
     Favorite,
     MutedAlert,
@@ -67,6 +70,7 @@ from src.db.models.user import (
     SmartAlertRule,
     Subscription,
     User,
+    UserProfileModel,
     UserSetting,
 )
 
@@ -82,7 +86,9 @@ __all__ = [
     "FinancialReport",
     "CompanyProfile",
     "CorporateEvent",
+    "BondCouponSchedule",
     "BondOffering",
+    "BondOfferingHistory",
     "MetricSnapshot",
     "Portfolio",
     "Transaction",
@@ -104,6 +110,8 @@ __all__ = [
     "SmartAlertRule",
     "AlertLog",
     "NotificationReceipt",
+    "BrokerCredential",
+    "UserProfileModel",
     "News",
     "NewsEvent",
     "NewsInstrument",

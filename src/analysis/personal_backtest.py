@@ -140,6 +140,17 @@ def run_personal_backtest(
         prices_map: dict[str, list[dict[str, Any]]] = {}
         for t in tickers:
             prices_map[t] = _prices_for_ticker(db, t, start, end)
+
+        # Auto-detect bond benchmark
+        has_bonds = any(
+            db.query(Instrument.instrument_type).filter(Instrument.ticker == t).scalar() == "bond"
+            for t in tickers
+        )
+        if has_bonds and benchmark == "IMOEX":
+            bench = _prices_for_ticker(db, "RGBITR", start, end)
+            if len(bench) >= 20:
+                benchmark = "RGBITR"
+
         bench_prices = _prices_for_ticker(db, benchmark, start, end)
 
         valid_tickers = [t for t in tickers if len(prices_map.get(t, [])) > 20]

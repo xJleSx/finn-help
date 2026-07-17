@@ -171,12 +171,16 @@ class NewsDeduplicator:
                 clusters.append(cluster)
 
         # Create events for clusters with multiple articles
+        rep_ids = [cluster[0] for cluster in clusters if len(cluster) > 1]
+        rep_map: dict[int, Any] = {}
+        if rep_ids:
+            for r in db_session.query(News).filter(News.id.in_(rep_ids)).all():
+                rep_map[r.id] = r
+
         for cluster in clusters:
             if len(cluster) > 1:
-                # Find representative article (first one)
-                representative = db_session.query(News).filter(News.id == cluster[0]).first()
+                representative = rep_map.get(cluster[0])
                 if representative:
-                    # Create event
                     event = NewsEvent(
                         title=representative.title or "Clustered Event",
                         summary=representative.summary,
@@ -190,7 +194,6 @@ class NewsDeduplicator:
                     db_session.add(event)
                     db_session.flush()
 
-                    # Link all articles in cluster to event
                     for article_id in cluster:
                         mapping[article_id] = event.id
 
@@ -223,10 +226,14 @@ class NewsDeduplicator:
         stats["articles_merged"] = len(mapping)
 
         # Update articles with event_id and recalculate source_count
-        for article_id, event_id in mapping.items():
-            article = db_session.query(News).filter(News.id == article_id).first()
-            if article:
-                article.event_id = event_id
+        if mapping:
+            all_article_ids = list(mapping)
+            article_rows = db_session.query(News).filter(News.id.in_(all_article_ids)).all()
+            article_map = {a.id: a for a in article_rows}
+            for article_id, event_id in mapping.items():
+                article = article_map.get(article_id)
+                if article:
+                    article.event_id = event_id
 
         db_session.commit()
         logger.info(f"Deduplication complete: {stats}")

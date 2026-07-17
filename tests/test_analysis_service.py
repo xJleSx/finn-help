@@ -447,10 +447,27 @@ class TestTrainModels:
     def _train_db(instruments, price_count=100, ind_count=10):
         db = MagicMock()
         db.execute.return_value.scalars.return_value.all.return_value = instruments
+        mock_ids = [inst.id for inst in instruments]
+
+        prices = []
+        for mid in mock_ids:
+            for _ in range(price_count):
+                p = MagicMock()
+                p.instrument_id = mid
+                prices.append(p)
+        indicators = []
+        for mid in mock_ids:
+            for _ in range(ind_count):
+                ind = MagicMock()
+                ind.instrument_id = mid
+                indicators.append(ind)
+
         price_mock = MagicMock()
-        price_mock.filter_by.return_value.order_by.return_value.all.return_value = [MagicMock() for _ in range(price_count)]
+        price_mock.filter.return_value.order_by.return_value.all.return_value = prices
+        price_mock.filter_by.return_value.order_by.return_value.all.return_value = prices
         ind_mock = MagicMock()
-        ind_mock.filter_by.return_value.order_by.return_value.all.return_value = [MagicMock() for _ in range(ind_count)]
+        ind_mock.filter.return_value.order_by.return_value.all.return_value = indicators
+        ind_mock.filter_by.return_value.order_by.return_value.all.return_value = indicators
 
         def query_side(model):
             if model is Price:

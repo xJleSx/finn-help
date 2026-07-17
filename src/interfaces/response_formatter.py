@@ -163,7 +163,7 @@ def build_financial_highlights(report: Optional[FinancialReport]) -> list[str]:
     return format_financial_facts(data)
 
 
-def build_bond_analysis(offering: Optional[BondOffering]) -> list[str]:
+def build_bond_analysis(offering: Optional[BondOffering], key_rate: Optional[float] = None, ofz_yield: Optional[float] = None) -> list[str]:
     if not offering:
         return []
     params = []
@@ -181,6 +181,12 @@ def build_bond_analysis(offering: Optional[BondOffering]) -> list[str]:
         params.append(f"YTM: {fmt_pct(offering.yield_to_maturity)}")
     if offering.credit_rating:
         params.append(f"Рейтинг: {offering.credit_rating}")
+    if offering.duration_years is not None:
+        params.append(f"Дюрация: {offering.duration_years:.1f} лет")
+        if offering.duration_years > 5:
+            params.append("⚠ Высокий процентный риск (дюрация > 5 лет)")
+        elif offering.duration_years < 2:
+            params.append("✓ Низкий процентный риск (дюрация < 2 лет)")
     if offering.maturity_date:
         params.append(f"Погашение: {offering.maturity_date.strftime('%d.%m.%Y')}")
     if offering.coupon_period_days:
@@ -195,6 +201,21 @@ def build_bond_analysis(offering: Optional[BondOffering]) -> list[str]:
         params.append(f"Мин. заявка: {fmt_rub(offering.min_lot_rub)}")
     if offering.qual_investor_only:
         params.append("Только квал. инвесторы")
+    if offering.yield_to_maturity is not None and offering.coupon_rate is not None:
+        spread = offering.yield_to_maturity - offering.coupon_rate
+        if spread > 0.5:
+            params.append(f"Дисконтная (YTM > купона на {spread:+.1f}%)")
+        elif spread < -0.5:
+            params.append(f"Премиальная (YTM < купона на {spread:+.1f}%)")
+    if offering.spread_to_key_rate is not None:
+        params.append(f"Спред к КС: {offering.spread_to_key_rate:+.1f}%")
+    if offering.yield_to_maturity is not None:
+        if key_rate is not None:
+            spread = offering.yield_to_maturity - key_rate
+            params.append(f"Спред YTM к КС: {spread:+.1f}%")
+        if ofz_yield is not None:
+            spread = offering.yield_to_maturity - ofz_yield
+            params.append(f"Спред YTM к ОФЗ: {spread:+.1f}%")
     return params
 
 

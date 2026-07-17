@@ -1,3 +1,4 @@
+import os
 import secrets
 from pathlib import Path
 
@@ -33,13 +34,14 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
     jwt_secret: str = _DEFAULT_JWT
+    jwt_refresh_secret: str = ""
     jwt_expire_minutes: int = 15
     password_min_length: int = 8
     tinkoff_token: str = ""
     tinkoff_sandbox: bool = True
     bcs_refresh_token: str = ""
     bcs_sandbox: bool = True
-    database_url: str = "postgresql://finn:finn@localhost:5432/finn"
+    database_url: str = "postgresql://finn@localhost:5432/finn"
     telegram_bot_token: str = ""
     telegram_proxy_url: str = ""
     telegram_allowed_ids: str = ""
@@ -54,6 +56,8 @@ class Settings(BaseSettings):
     enable_trading: bool = False
     max_trades_per_day: int = 5
     metrics_token: str = ""
+
+    use_mock_data: bool = False
 
     tax_capital_gains_rate: float = 0.13
     tax_dividend_rate: float = 0.13
@@ -174,6 +178,7 @@ class Settings(BaseSettings):
     smtp_from_email: str = ""
     smtp_use_tls: bool = True
 
+    encryption_key: str = ""
     sentry_dsn: str = ""
     sentry_environment: str = "production"
     lock_file_path: str = ""
@@ -185,3 +190,11 @@ class Settings(BaseSettings):
 
 settings = Settings()
 personal = load_personal_settings()
+
+if not os.environ.get("JWT_SECRET"):
+    import logging as _logging
+    _logging.warning(
+        "JWT_SECRET is not set in environment. Using ephemeral secret — "
+        "all sessions will be invalidated on restart. "
+        "Set JWT_SECRET in .env for persistent sessions."
+    )

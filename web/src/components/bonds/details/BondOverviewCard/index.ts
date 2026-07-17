@@ -1,3 +1,5 @@
-export { default as BondOverviewCard } from "./BondOverviewCard";
-export { default as OverviewGrid } from "./OverviewGrid";
-export { default as OverviewItem } from "./OverviewItem";
+export {
+  BondOverviewCard,
+  OverviewGrid,
+  OverviewItem,
+} from "@/features/bonds/components/details/BondOverviewCard";

@@ -155,6 +155,8 @@ class TBankClient:
         for p in resp.positions:
             it = p.instrument_type
             if it in allowed_types or str(it).lower() in type_names:
+                nkd = self._money(getattr(p, "current_nkd", 0) or 0) if hasattr(p, "current_nkd") else 0.0
+                clean_price = self._money(p.current_price)
                 positions.append(
                     {
                         "figi": p.figi,
@@ -162,7 +164,9 @@ class TBankClient:
                         "instrument_type": str(it),
                         "quantity": self._decimal(p.quantity),
                         "average_price": self._money(p.average_position_price),
-                        "current_price": self._money(p.current_price),
+                        "current_price": clean_price,
+                        "current_nkd": nkd,
+                        "dirty_price": clean_price + nkd,
                         "expected_yield": self._money(p.expected_yield),
                     }
                 )

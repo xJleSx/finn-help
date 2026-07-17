@@ -39,9 +39,8 @@ def sentry_set_user_context(user_id: int, username: str = "", portfolio_id: int 
             extra["portfolio_id"] = portfolio_id
         if extra:
             sentry_sdk.set_context("finadvisor", extra)
-    except Exception:
-        logger.exception("Unhandled exception")
-        pass
+    except Exception as e:
+        logger.warning("Failed to set Sentry user context: %s", e)
 
 
 def sentry_set_extra(key: str, value: object) -> None:
@@ -49,6 +48,5 @@ def sentry_set_extra(key: str, value: object) -> None:
         import sentry_sdk
 
         sentry_sdk.set_extra(key, value)
-    except Exception:
-        logger.exception("Unhandled exception")
-        pass
+    except Exception as e:
+        logger.warning("Failed to set Sentry extra %s: %s", key, e)

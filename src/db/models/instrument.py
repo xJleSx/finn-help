@@ -325,6 +325,62 @@ class BondOffering(Base):
     )
 
 
+class BondCouponSchedule(Base):
+    """Coupon schedule for bonds, fetched from MOEX ISS."""
+
+    __tablename__ = "bond_coupon_schedules"
+
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
+    coupon_date = Column(Date, nullable=False)
+    coupon_value = Column(Float, nullable=False, comment="Coupon amount in RUB")
+    coupon_number = Column(Integer, comment="Coupon sequence number")
+    currency = Column(String(3), default="RUB")
+    fix_date = Column(Date, comment="Rate fix date (for floaters)")
+    face_value = Column(Float, comment="Face value at time of payment (for amortization)")
+    initial_face_value = Column(Float, comment="Initial face value")
+    is_amortization = Column(Boolean, default=False, comment="True if this is an amortization payment")
+    paid = Column(Boolean, default=False, comment="Whether the coupon has been paid")
+    extra = Column(JSON)
+
+    instrument = relationship("Instrument", backref="coupon_schedule")
+
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "coupon_date", "coupon_number", name="uq_bond_coupon"),
+        Index("ix_bond_coupon_date", "coupon_date"),
+    )
+
+
+class BondOfferingHistory(Base):
+    """Historical snapshots of bond offerings for trend analysis."""
+
+    __tablename__ = "bond_offering_history"
+
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
+    snapshot_date = Column(Date, nullable=False)
+    offering_date = Column(Date, nullable=False)
+    isin = Column(String(12), index=True)
+
+    coupon_type = Column(String(20))
+    coupon_rate = Column(Float, comment="Ставка купона % годовых")
+    coupon_period_days = Column(Integer, comment="Купонный период в днях")
+    yield_to_maturity = Column(Float, comment="YTM %")
+    duration_years = Column(Float, comment="Дюрация в годах")
+    spread_to_key_rate = Column(Float, comment="Спред к ключевой ставке")
+
+    maturity_date = Column(Date, comment="Дата погашения")
+    maturity_years = Column(Float, comment="Срок обращения в годах")
+    credit_rating = Column(String(10), comment="Кредитный рейтинг")
+    current_price_pct = Column(Float, comment="Цена в % от номинала")
+
+    instrument = relationship("Instrument", backref="bond_offering_history")
+
+    __table_args__ = (
+        Index("ix_bond_offering_history_instr_date", "instrument_id", "snapshot_date"),
+    )
+
+
 class MetricSnapshot(Base):
     __tablename__ = "metric_snapshots"
 

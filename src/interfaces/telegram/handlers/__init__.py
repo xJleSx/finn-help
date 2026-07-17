@@ -21,6 +21,7 @@ from src.interfaces.telegram.handlers.analysis import (
     weekly,
     whatif,
 )
+from src.interfaces.telegram.handlers.bonds import bond_detail, bonds_list
 from src.interfaces.telegram.handlers.market import (
     news,
     price_cmd,
@@ -54,6 +55,8 @@ __all__ = [
     "analyze",
     "ask",
     "backtest",
+    "bond_detail",
+    "bonds_list",
     "bot_status",
     "channel_cmd",
     "chat_handler",

@@ -20,13 +20,25 @@ class PortfolioService:
         q = select(Portfolio).where(Portfolio.user_id == user_id)
         result = await self.db.execute(q)
         positions = result.scalars().all()
+        if not positions:
+            return []
+
+        inst_ids = [p.instrument_id for p in positions if p.instrument_id]
+        inst_result = await self.db.execute(select(Instrument).where(Instrument.id.in_(inst_ids)))
+        inst_map = {r.id: r for r in inst_result.scalars().all()}
+
+        price_rows = await self.db.execute(
+            select(Price).where(Price.instrument_id.in_(inst_ids)).order_by(Price.instrument_id, Price.date.desc())
+        )
+        price_map: dict[int, Any] = {}
+        for r in price_rows.scalars().all():
+            if r.instrument_id not in price_map:
+                price_map[r.instrument_id] = r
 
         output = []
         for p in positions:
-            inst_result = await self.db.execute(select(Instrument).where(Instrument.id == p.instrument_id))
-            inst = inst_result.scalar_one_or_none()
-            price_result = await self.db.execute(select(Price).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc()).limit(1))
-            last_price = price_result.scalar_one_or_none()
+            inst = inst_map.get(p.instrument_id)
+            last_price = price_map.get(p.instrument_id)
             current_price = last_price.close if last_price else 0
             output.append(
                 {
@@ -76,13 +88,25 @@ class PortfolioService:
             q = q.where(Portfolio.user_id == user_id)
         result = await self.db.execute(q)
         positions_raw = result.scalars().all()
+        if not positions_raw:
+            return []
+
+        inst_ids = [p.instrument_id for p in positions_raw if p.instrument_id]
+        inst_result = await self.db.execute(select(Instrument).where(Instrument.id.in_(inst_ids)))
+        inst_map = {r.id: r for r in inst_result.scalars().all()}
+
+        price_rows = await self.db.execute(
+            select(Price).where(Price.instrument_id.in_(inst_ids)).order_by(Price.instrument_id, Price.date.desc())
+        )
+        price_map: dict[int, Any] = {}
+        for r in price_rows.scalars().all():
+            if r.instrument_id not in price_map:
+                price_map[r.instrument_id] = r
 
         positions = []
         for p in positions_raw:
-            inst_result = await self.db.execute(select(Instrument).where(Instrument.id == p.instrument_id))
-            inst = inst_result.scalar_one_or_none()
-            price_result = await self.db.execute(select(Price).where(Price.instrument_id == p.instrument_id).order_by(Price.date.desc()).limit(1))
-            last_price = price_result.scalar_one_or_none()
+            inst = inst_map.get(p.instrument_id)
+            last_price = price_map.get(p.instrument_id)
             current_price = last_price.close if last_price else 0
             positions.append(
                 {

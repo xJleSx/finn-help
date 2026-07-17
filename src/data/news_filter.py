@@ -414,6 +414,12 @@ Return JSON with 'type' (news/spam/press_release/opinion/scam) and 'confidence' 
             "low_quality_source": 0,
         }
 
+        article_ids = [a.get("id") for a in articles if a.get("id")]
+        news_map: dict[int, Any] = {}
+        if article_ids:
+            for r in db_session.query(News).filter(News.id.in_(article_ids)).all():
+                news_map[r.id] = r
+
         for article in articles:
             try:
                 evaluation = self.evaluate_article(
@@ -423,7 +429,7 @@ Return JSON with 'type' (news/spam/press_release/opinion/scam) and 'confidence' 
                 )
 
                 # Update database
-                news_obj = db_session.query(News).filter(News.id == article.get("id")).first()
+                news_obj = news_map.get(article.get("id"))
                 if news_obj:
                     news_obj.is_relevant = evaluation["is_relevant"]
 

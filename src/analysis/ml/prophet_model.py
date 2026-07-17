@@ -187,9 +187,8 @@ class StatsModelsTrendPredictor(BaseRegressor):
                 if len(delta_series) > 0:
                     total_magnitude = float(delta_series.abs().sum())
                     return {"changed": total_magnitude > 0.02, "magnitude": round(total_magnitude, 4)}
-        except Exception:
-            logger.exception("Unhandled exception")
-            pass
+        except Exception as e:
+            logger.warning("Failed to detect changepoints: %s", e)
         return {"changed": False, "magnitude": 0.0}
 
     def _trend_strength(self, forecast: pd.DataFrame, trend_df: pd.DataFrame) -> float:

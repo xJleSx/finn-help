@@ -1,31 +1,31 @@
 "use client";
 
 import { use } from "react";
-import { useBond } from "@/hooks/bonds/useBond";
-import { useBondAnalysis, useAIAnalysis, useBondMetrics } from "@/hooks/bonds/useBondAnalysis";
-import { useBondCoupons } from "@/hooks/bonds/useBondCoupons";
-import { useBondCashFlow } from "@/hooks/bonds/useBondCashFlow";
-import { useBondPriceHistory } from "@/hooks/bonds/useBondPriceHistory";
+import { useBond } from "@/features/bonds/hooks/useBond";
+import { useBondAnalysis, useAIAnalysis, useBondMetrics } from "@/features/bonds/hooks/useBondAnalysis";
+import { useBondCoupons } from "@/features/bonds/hooks/useBondCoupons";
+import { useBondCashFlow } from "@/features/bonds/hooks/useBondCashFlow";
+import { useBondPriceHistory } from "@/features/bonds/hooks/useBondPriceHistory";
 
-import { AISummaryCard } from "@/components/bonds/details/AISummaryCard";
-import { BondOverviewCard } from "@/components/bonds/details/BondOverviewCard";
-import { FinancialMetricsCard } from "@/components/bonds/details/FinancialMetricsCard";
-import { PriceChartCard } from "@/components/bonds/details/PriceChartCard";
-import { CouponHistoryCard } from "@/components/bonds/details/CouponHistoryCard";
-import { CashFlowCard } from "@/components/bonds/details/CashFlowCard";
-import { AIAnalysisCard } from "@/components/bonds/details/AIAnalysisCard";
-import { CardErrorBoundary } from "@/components/bonds/details/ErrorBoundary";
+import { AISummaryCard } from "@/features/bonds/components/details/AISummaryCard";
+import { BondOverviewCard } from "@/features/bonds/components/details/BondOverviewCard";
+import { FinancialMetricsCard } from "@/features/bonds/components/details/FinancialMetricsCard";
+import { PriceChartCard } from "@/features/bonds/components/details/PriceChartCard";
+import { CouponHistoryCard } from "@/features/bonds/components/details/CouponHistoryCard";
+import { CashFlowCard } from "@/features/bonds/components/details/CashFlowCard";
+import { AIAnalysisCard } from "@/features/bonds/components/details/AIAnalysisCard";
+import { CardErrorBoundary } from "@/features/bonds/components/details/ErrorBoundary";
 
-import AISummarySkeleton from "@/components/bonds/details/skeleton/AISummarySkeleton";
-import MetricsSkeleton from "@/components/bonds/details/skeleton/MetricsSkeleton";
-import ChartSkeleton from "@/components/bonds/details/skeleton/ChartSkeleton";
-import CashFlowSkeleton from "@/components/bonds/details/skeleton/CashFlowSkeleton";
-import CouponSkeleton from "@/components/bonds/details/skeleton/CouponSkeleton";
-import AIAnalysisSkeleton from "@/components/bonds/details/skeleton/AIAnalysisSkeleton";
-import OverviewSkeleton from "@/components/bonds/details/skeleton/OverviewSkeleton";
+import AISummarySkeleton from "@/features/bonds/components/details/skeleton/AISummarySkeleton";
+import MetricsSkeleton from "@/features/bonds/components/details/skeleton/MetricsSkeleton";
+import ChartSkeleton from "@/features/bonds/components/details/skeleton/ChartSkeleton";
+import CashFlowSkeleton from "@/features/bonds/components/details/skeleton/CashFlowSkeleton";
+import CouponSkeleton from "@/features/bonds/components/details/skeleton/CouponSkeleton";
+import AIAnalysisSkeleton from "@/features/bonds/components/details/skeleton/AIAnalysisSkeleton";
+import OverviewSkeleton from "@/features/bonds/components/details/skeleton/OverviewSkeleton";
 
 import { Building2 } from "lucide-react";
-import type { BondDetails } from "@/types/bond-details";
+import type { BondDetails } from "@/features/bonds/types/bond-details";
 
 export default function BondDetailPage({ params }: { params: Promise<{ ticker: string }> }) {
   const { ticker } = use(params);

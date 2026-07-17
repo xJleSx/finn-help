@@ -26,12 +26,14 @@ def _get_pool() -> ConnectionPool | None:
             if _pool is None:
                 try:
                     url = settings.redis_url or "redis://localhost:6379/0"
+                    password = settings.redis_password or None
                     _pool = ConnectionPool.from_url(
                         url,
                         max_connections=settings.redis_max_connections,
                         socket_connect_timeout=settings.redis_socket_connect_timeout,
                         socket_timeout=settings.redis_socket_timeout,
                         decode_responses=True,
+                        password=password,
                     )
                     r = redis_mod.Redis(connection_pool=_pool)
                     r.ping()

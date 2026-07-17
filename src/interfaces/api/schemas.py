@@ -256,3 +256,84 @@ class AlertPreferencesResponse(BaseModel):
     muted_tickers: list[str] = Field(..., description="List of muted tickers")
     quiet_hours_start: str | None = Field(None, description="Quiet hours start time (HH:MM)")
     quiet_hours_end: str | None = Field(None, description="Quiet hours end time (HH:MM)")
+
+
+# ── Bond endpoints ─────────────────────────────────────────────────────
+
+class BondDetailResponse(BaseModel):
+    issuer: str = Field(..., description="Issuer name")
+    isin: str = Field(..., description="ISIN identifier")
+    ticker: str = Field(..., description="Ticker symbol")
+    currency: str = Field("RUB", description="Trading currency")
+    nominal: float = Field(..., description="Face value")
+    couponRate: float = Field(..., description="Coupon rate % per annum")
+    issueDate: str | None = Field(None, description="Issue date")
+    maturityDate: str | None = Field(None, description="Maturity date")
+    offerDate: str | None = Field(None, description="Put option date")
+    amortization: bool = Field(False, description="Has amortization")
+
+
+class BondAnalysisResponse(BaseModel):
+    score: float = Field(..., description="AI score 0-100")
+    verdict: str = Field(..., description="Strong buy / buy / hold / reduce / sell")
+    pros: list[str] = Field(default_factory=list, description="Positive factors")
+    cons: list[str] = Field(default_factory=list, description="Negative factors")
+    risks: list[str] = Field(default_factory=list, description="Risk factors")
+    allocation: float = Field(..., description="Recommended allocation %")
+    updatedAt: str = Field(..., description="Last updated ISO timestamp")
+
+
+class BondAIAnalysisResponse(BaseModel):
+    summary: str = Field(..., description="AI summary")
+    strengths: list[str] = Field(default_factory=list, description="Strengths")
+    weaknesses: list[str] = Field(default_factory=list, description="Weaknesses")
+    risks: list[str] = Field(default_factory=list, description="Risks")
+    recommendation: str = Field(..., description="Buy / Hold / Sell")
+    investmentHorizon: str = Field(..., description="Recommended horizon")
+    confidence: float = Field(..., description="AI confidence 0-100")
+
+
+class BondMetricsResponse(BaseModel):
+    yieldToMaturity: float | None = Field(None, description="YTM %")
+    currentYield: float | None = Field(None, description="Current yield %")
+    duration: float | None = Field(None, description="Macaulay duration years")
+    modifiedDuration: float | None = Field(None, description="Modified duration years")
+    coupon: float | None = Field(None, description="Coupon value in RUB")
+    accruedInterest: float | None = Field(None, description="Accrued interest (НКД) in RUB")
+    purchasePrice: float | None = Field(None, description="Average purchase price in RUB")
+    marketPrice: float | None = Field(None, description="Current market price in RUB")
+    profit: float | None = Field(None, description="Profit / loss in RUB")
+    fairValue: float | None = Field(None, description="Estimated fair value in RUB")
+
+
+class CouponPaymentResponse(BaseModel):
+    id: str = Field(..., description="Coupon ID")
+    date: str = Field(..., description="Payment date")
+    amount: float = Field(..., description="Payment amount in RUB")
+    status: str = Field(..., description="paid / pending / forecast")
+
+
+class CashFlowItemResponse(BaseModel):
+    id: str = Field(..., description="Cash flow item ID")
+    date: str = Field(..., description="Event date")
+    amount: float = Field(..., description="Amount in RUB")
+    type: str = Field(..., description="coupon / redemption")
+    status: str = Field(..., description="paid / expected / forecast")
+
+
+class CashFlowSummaryResponse(BaseModel):
+    totalPayments: int = Field(..., description="Total number of payments")
+    remainingCoupons: int = Field(..., description="Remaining coupon payments")
+    totalCashFlow: float = Field(..., description="Total projected cash flow")
+    averageCoupon: float = Field(..., description="Average coupon amount")
+    maturityDate: str = Field(..., description="Maturity date")
+
+
+class BondCashFlowResponse(BaseModel):
+    items: list[CashFlowItemResponse] = Field(..., description="Cash flow items")
+    summary: CashFlowSummaryResponse = Field(..., description="Cash flow summary")
+
+
+class BondPriceHistoryResponse(BaseModel):
+    price: list[dict[str, Any]] = Field(..., description="Price points [{time, value}]")
+    volume: list[dict[str, Any]] = Field(..., description="Volume points [{time, value}]")

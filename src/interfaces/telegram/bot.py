@@ -40,6 +40,8 @@ from src.interfaces.telegram.handlers import (
     analyze,
     ask,
     backtest,
+    bond_detail,
+    bonds_list,
     bot_status,
     channel_cmd,
     chat_handler,
@@ -221,6 +223,8 @@ async def run_bot() -> None:
     app.add_handler(CommandHandler("subscribe_author", subscribe_author))
     app.add_handler(CommandHandler("unsubscribe_author", unsubscribe_author))
     app.add_handler(CommandHandler("authors", my_authors))
+    app.add_handler(CommandHandler("bonds", bonds_list))
+    app.add_handler(CommandHandler("bond", bond_detail))
 
     app.add_handler(CallbackQueryHandler(button_callback))
 

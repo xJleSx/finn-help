@@ -253,3 +253,13 @@ class MacroCollector(BaseCollector):
             if row:
                 result[indicator_type] = row.value
         return result
+
+
+def get_latest_key_rate(db: Any) -> float | None:
+    """Get the latest key rate from the database. Used by alert generators."""
+    try:
+        vals = MacroCollector.latest_values(db)
+        return vals.get("key_rate")
+    except Exception:
+        logger.warning("Failed to fetch key rate")
+        return None

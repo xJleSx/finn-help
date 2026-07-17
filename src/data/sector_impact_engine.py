@@ -218,21 +218,7 @@ class SectorImpactEngine:
             return 1.3
         return 1.0
 
-    def calculate_daily_sector_risk(self, sector: str, db_session: Any, current_date: Optional[datetime] = None) -> dict[str, Any]:
-        if current_date is None:
-            current_date = datetime.now(timezone.utc)
-
-        from src.db.models import NewsSectorImpact
-
-        impacts = (
-            db_session.query(NewsSectorImpact)
-            .filter(
-                NewsSectorImpact.sector == sector,
-                NewsSectorImpact.created_at >= current_date - timedelta(days=90),
-            )
-            .all()
-        )
-
+    def _compute_sector_risk_from_impacts(self, sector: str, impacts: list[Any], current_date: datetime) -> dict[str, Any]:
         if not impacts:
             return {
                 "sector": sector,
@@ -301,15 +287,30 @@ class SectorImpactEngine:
         }
 
     def calculate_all_sectors_daily_risk(self, sectors: list[str], db_session: Any, current_date: Optional[datetime] = None) -> dict[str, Any]:
-        results = {}
+        if current_date is None:
+            current_date = datetime.now(timezone.utc)
+
+        from src.db.models import NewsSectorImpact
+
+        all_impacts = (
+            db_session.query(NewsSectorImpact)
+            .filter(
+                NewsSectorImpact.sector.in_(sectors),
+                NewsSectorImpact.created_at >= current_date - timedelta(days=90),
+            )
+            .all()
+        )
+        impacts_by_sector: dict[str, list[Any]] = {}
+        for imp in all_impacts:
+            impacts_by_sector.setdefault(imp.sector, []).append(imp)
 
         tracker = SectorCorrelationTracker()
         self._correlation_tracker = tracker
         tracker.load_from_history(db_session)
 
+        results = {}
         for sector in sectors:
-            risk = self.calculate_daily_sector_risk(sector, db_session, current_date)
-            results[sector] = risk
+            results[sector] = self._compute_sector_risk_from_impacts(sector, impacts_by_sector.get(sector, []), current_date)
 
         return results
 
@@ -415,6 +416,20 @@ class SectorImpactEngine:
 
         return list(set(h.sector for h in high_risk))
 
+    def calculate_daily_sector_risk(self, sector: str, db_session: Any, current_date: Optional[datetime] = None) -> dict[str, Any]:
+        if current_date is None:
+            current_date = datetime.now(timezone.utc)
+        from src.db.models import NewsSectorImpact
+        impacts = (
+            db_session.query(NewsSectorImpact)
+            .filter(
+                NewsSectorImpact.sector == sector,
+                NewsSectorImpact.created_at >= current_date - timedelta(days=90),
+            )
+            .all()
+        )
+        return self._compute_sector_risk_from_impacts(sector, impacts, current_date)
+
     def get_daily_risk_v2(self, sector: str, db_session: Any, current_date: Optional[datetime] = None) -> dict[str, Any]:
         result = self.calculate_daily_sector_risk(sector, db_session, current_date)
 
@@ -433,17 +448,30 @@ class SectorImpactEngine:
         return result
 
     def get_risk_heatmap(self, db_session: Any, sectors: Optional[list[str]] = None) -> list[dict[str, Any]]:
-        from src.db.models import Instrument
+        from src.db.models import Instrument, NewsSectorImpact
 
         if sectors is None:
             sectors = [r[0] for r in db_session.query(Instrument.sector).distinct().all() if r[0]]
+
+        current_date = datetime.now(timezone.utc)
+        all_impacts = (
+            db_session.query(NewsSectorImpact)
+            .filter(
+                NewsSectorImpact.sector.in_(sectors),
+                NewsSectorImpact.created_at >= current_date - timedelta(days=90),
+            )
+            .all()
+        )
+        impacts_by_sector: dict[str, list[Any]] = {}
+        for imp in all_impacts:
+            impacts_by_sector.setdefault(imp.sector, []).append(imp)
 
         tracker = SectorCorrelationTracker()
         tracker.load_from_history(db_session)
 
         results = []
         for sector in sectors:
-            risk = self.calculate_daily_sector_risk(sector, db_session)
+            risk = self._compute_sector_risk_from_impacts(sector, impacts_by_sector.get(sector, []), current_date)
             contagion = tracker.get_contagion_risk(sector)
             results.append(
                 {

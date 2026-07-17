@@ -1,4 +1,1 @@
-export interface BondAllocation {
-  recommended: number;
-  actual: number;
-}
+export * from "@/features/portfolio/types/bond-allocation";

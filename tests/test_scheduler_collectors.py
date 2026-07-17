@@ -49,9 +49,9 @@ class TestCollectFinancialReports:
         inst = MagicMock()
         inst.id = 1
         inst.ticker = "SBER"
-        db.query.return_value.filter.return_value.all.return_value = [inst]
-        existing = MagicMock()
-        db.query.return_value.filter_by.return_value.first.return_value = existing
+        existing = MagicMock(instrument_id=1, report_date=date(2024, 12, 31), period_type="FY")
+        db.query.return_value.filter.return_value = MagicMock()
+        db.query.return_value.filter.return_value.all.side_effect = [[inst], [existing]]
 
         async def run():
             with patch("src.collectors.financials.FinancialReportCollector") as mock_cls:
@@ -158,9 +158,9 @@ class TestCollectBondOfferings:
         inst = MagicMock()
         inst.id = 1
         inst.ticker = "SU26238RMFS5"
-        db.query.return_value.filter.return_value.all.return_value = [inst]
-        existing = MagicMock()
-        db.query.return_value.filter_by.return_value.first.return_value = existing
+        existing = MagicMock(instrument_id=1, isin="RU000A101X55")
+        db.query.return_value.filter.return_value = MagicMock()
+        db.query.return_value.filter.return_value.all.side_effect = [[inst], [existing]]
 
         async def run():
             with patch("src.collectors.bonds.BondOfferingCollector") as mock_cls:

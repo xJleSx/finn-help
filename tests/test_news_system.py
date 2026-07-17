@@ -526,11 +526,13 @@ class TestSectorImpactEngineV2:
         assert result["trend"] == "up"
 
     def test_get_risk_heatmap_structure(self, monkeypatch):
+        from unittest.mock import MagicMock
+
         from src.data.sector_impact_engine import SectorCorrelationTracker, SectorImpactEngine
 
         engine = SectorImpactEngine(None, None)
 
-        def mock_calc(sector, db, date=None):
+        def mock_calc(sector, impacts, date):
             return {
                 "sector": sector,
                 "risk_score": 3.0,
@@ -540,10 +542,12 @@ class TestSectorImpactEngineV2:
                 "contagion_sectors": [],
             }
 
-        monkeypatch.setattr(engine, "calculate_daily_sector_risk", mock_calc)
+        monkeypatch.setattr(engine, "_compute_sector_risk_from_impacts", mock_calc)
         monkeypatch.setattr(SectorCorrelationTracker, "load_from_history", lambda self, db: None)
 
-        result = engine.get_risk_heatmap(None, sectors=["energy", "banking"])
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.all.return_value = []
+        result = engine.get_risk_heatmap(mock_db, sectors=["energy", "banking"])
         assert len(result) == 2
         assert result[0]["sector"] == "energy"
         assert result[0]["regime"] in ("high", "medium", "low")
