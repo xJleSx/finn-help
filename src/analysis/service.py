@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 
 
 class AnalysisService:
+    """Central analysis orchestrator.
+
+    Architecture reference:
+      - docs/ARCHITECTURE.md — analysis pipeline
+      - docs/FinAdvisor_Technical_Documentation.docx — full analysis flow spec
+      - docs/adr/ADR-001-package-decomposition.md — module decomposition rationale
+    """
+
     def __init__(self) -> None:
         self.analyzer = TechnicalAnalyzer()
         self.fundamental = FundamentalAnalyzer()
@@ -174,7 +182,11 @@ class AnalysisService:
     ) -> dict[str, Any]:
         tech_signal = self.analyzer.generate_signal(ind_df)
         div_df = self._dividend_df(divs)
-        fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics)
+        if inst.instrument_type == "bond" and bond_offering:
+            key_rate = macro_context.get("key_rate") if macro_context else None
+            fund = self.fundamental.analyze_bond(bond_offering, key_rate=key_rate)
+        else:
+            fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics)
         geo = {"score": geo_score}
         volatility_regime = self.volatility.detect(df, ind_df)
         risk_metrics = compute_risk_metrics(df["close"].tolist())
@@ -195,6 +207,7 @@ class AnalysisService:
             mtf=mtf_concordance,
             event_context=event_context,
             trade_plan=trade_plan,
+            bond_offering=bond_offering,
         )
         fused["trends"] = trends
         fused["recent_events"] = event_context.get("recent_for_llm", [])
@@ -383,16 +396,28 @@ class AnalysisService:
             instruments = instruments.filter(Instrument.id.in_(updated_ids))
         instruments = instruments.all()
 
+        inst_ids = [inst.id for inst in instruments]
+        cached_signals: dict[int, Any] = {}
+        if inst_ids:
+            try:
+                today_signals = (
+                    db.query(Signal)
+                    .filter(
+                        Signal.instrument_id.in_(inst_ids),
+                        func.date(Signal.date) == date.today(),
+                    )
+                    .all()
+                )
+                for sig in today_signals:
+                    if sig.instrument_id not in cached_signals:
+                        cached_signals[sig.instrument_id] = sig
+            except Exception:
+                logger.warning("Failed to fetch cached signals, skipping all")
+                return []
+
         signals: list[dict[str, Any]] = []
         for inst in instruments:
-            cached = (
-                db.query(Signal)
-                .filter(
-                    Signal.instrument_id == inst.id,
-                    func.date(Signal.date) == date.today(),
-                )
-                .first()
-            )
+            cached = cached_signals.get(inst.id)
             if cached and cached.fused_json:
                 fused_json = cached.fused_json
                 if isinstance(fused_json, dict):

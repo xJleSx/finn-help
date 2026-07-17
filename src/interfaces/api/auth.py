@@ -24,7 +24,11 @@ if not settings.jwt_secret:
     )
 
 SECRET_KEY = settings.jwt_secret
-REFRESH_SECRET_KEY = settings.jwt_secret + "_refresh"
+
+_refresh_secret = settings.jwt_refresh_secret
+if not _refresh_secret:
+    _refresh_secret = settings.jwt_secret + "_refresh"
+REFRESH_SECRET_KEY = _refresh_secret
 ALGORITHM = "HS256"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
@@ -103,16 +107,7 @@ def is_refresh_token_blacklisted(token: str) -> bool:
     return token in _refresh_blacklist_fallback
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async for session in get_async_session():
-        yield session
-
-
-async def get_read_db() -> AsyncGenerator[AsyncSession, None]:
-    from src.db.connection import get_read_replica_session
-
-    async with get_read_replica_session() as session:
-        yield session
+from src.interfaces.api.dependencies import get_db, get_read_db  # noqa: F401  re-exported for backwards compat
 
 
 async def get_current_user(

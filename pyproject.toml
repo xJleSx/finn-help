@@ -44,7 +44,9 @@ dependencies = [
     "sentry-sdk>=2.0",
     "mlflow>=2.15.0",
     "celery>=5.5.0",
+    "cryptography>=42.0.0",
     "lxml>=6.1.1",
+    "python-docx>=1.2.0",
 ]
 
 [project.optional-dependencies]
@@ -73,6 +75,15 @@ dev = [
     "pytest-httpx>=0.36.2",
     "pytest-cov>=6.0.0",
     "pip-audit>=2.7.0",
+    "testcontainers>=4.0.0",
+]
+ci = [
+    "pytest>=9.1.0",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=6.0.0",
+]
+loadtest = [
+    "locust>=2.32.0",
 ]
 ml = [
     "torch>=2.3.0",
@@ -88,7 +99,7 @@ asyncio_default_fixture_loop_scope = "function"
 source = ["src"]
 
 [tool.coverage.report]
-fail_under = 65
+fail_under = 75
 exclude_also = [
     "def __repr__",
     "def __str__",
@@ -108,10 +119,6 @@ exclude = ["tests/", "alembic/"]
 plugins = ["sqlalchemy.ext.mypy.plugin"]
 
 [[tool.mypy.overrides]]
-module = ["src.interfaces.api.auth", "src.interfaces.api.routes_portfolio", "src.portfolio.service", "src.cache"]
-ignore_errors = true
-
-[[tool.mypy.overrides]]
 module = ["pandas.*", "sklearn.*", "statsmodels.*", "scipy.*"]
 ignore_missing_imports = true
 
@@ -120,93 +127,36 @@ module = ["telegram.*", "telegram.ext.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["src.interfaces.telegram.*", "src.interfaces.api.server"]
-ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = [
-    "src.interfaces.response_formatter",
-    "src.data.news_classifier",
-    "src.trading.execution.loop",
-    "src.analysis.anomaly.autoencoder",
-    "src.data.batch_processor",
-    "src.interfaces.nlq.*",
-]
-ignore_errors = true
+module = ["catboost.*", "lightgbm.*", "xgboost.*", "prophet.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["src.tasks.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["src.cli.*"]
+module = ["src.analysis.ml.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["src.scheduler.*"]
+module = ["src.analysis.anomaly.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["src.portfolio.allocator"]
+module = ["src.trading.brokers.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = [
-    "src.interfaces.api.routes.trading_v2",
-    "src.interfaces.api.routes.analysis",
-    "src.interfaces.api.routes.paper_trading",
-    "src.interfaces.api.routes.alert_preferences",
-    "src.analysis.metrics",
-    "src.alerts.smart",
-    "src.trading.execution.engine",
-    "src.trading.execution.stoploss",
-    "src.trading.execution.audit",
-    "src.trading.paper",
-    "src.data.news_processor",
-    "src.data.news_system",
-    "src.data.sector_impact_engine",
-    "src.data.news_clusterer",
-    "src.data.dashboard_provider",
-    "src.data.event_detector",
-    "src.data.impact_matrix",
-    "src.data.geopolitical_risk_engine",
-    "src.data.sector_mapper",
-    "src.analysis.summarizer",
-    "src.analysis.ml.*",
-    "src.analysis.rebalancing",
-    "src.analysis.risk_explorer",
-    "src.analysis.ml_coordinator",
-    "src.analysis.feature_drift",
-    "src.analysis.optimizer",
-    "src.analysis.anomaly.*",
-    "src.analysis.attribution",
-    "src.analysis.feature_store",
-    "src.trading.brokers.*",
-    "src.trading.compliance.*",
-    "src.core.health",
-    "src.core.http_client",
-    "src.core.logging",
-    "src.data.company_risk_aggregator",
-    "src.notifications.service",
-    "src.notifications.channels",
-    "src.notifications.retry",
-    "src.core.tracing",
-    "src.core.sentry",
-    "src.social.onchain_sentiment",
-    "src.analysis.regime",
-    "src.analysis.features",
-    "src.interfaces.telegram_guard",
-    "src.interfaces.telegram_alerter",
-    "src.interfaces.telegram_broadcaster",
-    "src.collectors.*",
-    "src.llm.*",
-    "src.model_registry",
-
-    "src.market.service",
-]
+module = ["src.collectors.*"]
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = ["src.interfaces.telegram.*"]
+ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = ["src.interfaces.telegram_guard", "src.interfaces.telegram_alerter", "src.interfaces.telegram_broadcaster"]
+ignore_errors = true
 
 [tool.ruff]
 line-length = 150

@@ -37,6 +37,12 @@ logger = structlog.get_logger(__name__)
 
 UPDATE_INTERVAL = 300  # 5 min (aggressive 24h mode)
 
+# Architecture reference:
+#   - docs/ARCHITECTURE.md — scheduler overview
+#   - docs/FinAdvisor_Technical_Documentation.docx — daily/weekly cycle spec
+#   - src/tasks/__init__.py — Celery beat schedule definitions
+#   - src/scheduler/tasks.py — daily_update / weekly_update implementations
+
 _running = False
 
 _MSK_OFFSET = 3 * 3600  # MSK = UTC+3
@@ -147,9 +153,8 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
 
         setup_signal_handlers()
         register_shutdown_hook(stop)
-    except Exception:
-        logger.exception("Unhandled exception")
-        pass
+    except Exception as e:
+        logger.error("Failed to set up signal handlers: %s", e)
 
     async def _check_shutdown() -> None:
         global _running

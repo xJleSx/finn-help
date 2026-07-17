@@ -4,8 +4,9 @@ import json
 import logging
 import time
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, Optional, Sequence, cast
 
+from prometheus_client import Counter, Gauge
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,10 @@ from src.db.connection import get_session
 from src.db.models import FeatureCache
 
 logger = logging.getLogger(__name__)
+
+CACHE_HITS = Counter("feature_cache_hits_total", "Feature cache hits", ["tier"])
+CACHE_MISSES = Counter("feature_cache_misses_total", "Feature cache misses", ["feature_type"])
+CACHE_ENTRIES = Gauge("feature_cache_entries", "Feature cache entries", ["tier"])
 
 FEATURE_TYPE_TTL: dict[str, int] = {
     "technical": 1,
@@ -129,6 +134,17 @@ def _is_stale(row: FeatureCache, max_age_days: int, version: int) -> bool:
     return age > max_age_days
 
 
+def _update_cache_gauges() -> None:
+    CACHE_ENTRIES.labels(tier="memory").set(_mem.size)
+    r = _get_redis()
+    if r:
+        try:
+            dbsize = r.dbsize()
+            CACHE_ENTRIES.labels(tier="redis").set(dbsize)
+        except Exception:
+            CACHE_ENTRIES.labels(tier="redis").set(0)
+
+
 def get_cached(
     ticker: str,
     feature_type: str,
@@ -140,6 +156,7 @@ def get_cached(
     mem_key = _mem_key(ticker, feature_type, version)
     cached = _mem.get(mem_key)
     if cached is not None:
+        CACHE_HITS.labels(tier="memory").inc()
         return cast(dict[str, Any], cached)
 
     r = _get_redis()
@@ -149,6 +166,7 @@ def get_cached(
             if data is not None:
                 parsed = json.loads(data)
                 _mem.set(mem_key, parsed)
+                CACHE_HITS.labels(tier="redis").inc()
                 return cast(dict[str, Any], parsed)
         except Exception as e:
             logger.debug("Redis get failed for %s/%s: %s", ticker, feature_type, e)
@@ -157,9 +175,12 @@ def get_cached(
     try:
         row = db.query(FeatureCache).filter_by(ticker=ticker.upper(), feature_type=feature_type).order_by(FeatureCache.date.desc()).first()
         if not row:
+            CACHE_MISSES.labels(feature_type=feature_type).inc()
             return None
         if _is_stale(row, max_age, version):
+            CACHE_MISSES.labels(feature_type=feature_type).inc()
             return None
+        CACHE_HITS.labels(tier="database").inc()
         _mem.set(mem_key, row.value_json)
         return cast(dict[str, Any], row.value_json)
     finally:
@@ -363,9 +384,31 @@ def clear_stale(max_age_days: int = 7) -> int:
         result = db.execute(delete(FeatureCache).where(FeatureCache.date < cutoff))
         db.commit()
         _mem.clear()
-        return result.rowcount or 0
+        removed = result.rowcount or 0
+        if removed:
+            logger.info("Cleared %d stale feature cache entries (>=%d days old)", removed, max_age_days)
+        return removed
     finally:
         db.close()
+
+
+async def clear_stale_async(db: AsyncSession | None = None, max_age_days: int = 7) -> int:
+    if db is None:
+        from src.db.connection import get_async_session as _get_async_session
+        async with _get_async_session() as session:
+            return await _clear_stale_async_impl(session, max_age_days)
+    return await _clear_stale_async_impl(db, max_age_days)
+
+
+async def _clear_stale_async_impl(db: AsyncSession, max_age_days: int) -> int:
+    cutoff = date.today() - timedelta(days=max_age_days)
+    result = await db.execute(delete(FeatureCache).where(FeatureCache.date < cutoff))
+    await db.commit()
+    _mem.clear()
+    removed = result.rowcount or 0
+    if removed:
+        logger.info("Cleared %d stale feature cache entries async (>=%d days old)", removed, max_age_days)
+    return removed
 
 
 def cached_or_compute(
@@ -381,6 +424,55 @@ def cached_or_compute(
     result = compute_fn()
     set_cache(ticker, feature_type, result, ttl_hours=ttl_hours)
     return result
+
+
+def get_batch(
+    tickers: Sequence[str],
+    feature_type: str,
+    max_age_days: int | None = None,
+) -> dict[str, Optional[dict[str, Any]]]:
+    result: dict[str, Optional[dict[str, Any]]] = {}
+    for ticker in tickers:
+        result[ticker] = get_cached(ticker, feature_type, max_age_days)
+    return result
+
+
+async def get_batch_async(
+    db: AsyncSession,
+    tickers: Sequence[str],
+    feature_type: str,
+    max_age_days: int | None = None,
+) -> dict[str, Optional[dict[str, Any]]]:
+    result: dict[str, Optional[dict[str, Any]]] = {}
+    for ticker in tickers:
+        result[ticker] = await get_cached_async(db, ticker, feature_type, max_age_days)
+    return result
+
+
+def set_batch(
+    items: Sequence[tuple[str, str, dict[str, Any]]],
+    ttl_hours: int | None = None,
+) -> None:
+    for ticker, feature_type, value in items:
+        set_cache(ticker, feature_type, value, ttl_hours=ttl_hours)
+
+
+async def set_batch_async(
+    db: AsyncSession,
+    items: Sequence[tuple[str, str, dict[str, Any]]],
+    ttl_hours: int | None = None,
+) -> None:
+    for ticker, feature_type, value in items:
+        await set_cache_async(db, ticker, feature_type, value, ttl_hours=ttl_hours)
+
+
+def list_feature_types() -> dict[str, int]:
+    db = get_session()
+    try:
+        rows = db.query(FeatureCache.feature_type, func.count(FeatureCache.id)).group_by(FeatureCache.feature_type).all()
+        return {row[0]: row[1] for row in rows}
+    finally:
+        db.close()
 
 
 def clear_memory_cache(ticker: Optional[str] = None) -> None:

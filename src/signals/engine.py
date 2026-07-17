@@ -1,8 +1,10 @@
-import logging
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import numpy as np
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.analysis.metrics import compute_max_drawdown
@@ -15,16 +17,54 @@ from src.constants import (
     MACRO_THRESHOLDS,
 )
 from src.db.models import Signal as SignalModel
+from src.signals.schemas import FusedSignal, RiskMetrics, SignalComponents, VolatilityRegime
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
-BASE_WEIGHTS = {
+BASE_WEIGHTS: dict[str, float] = {
     "technical": 0.35,
     "fundamental": 0.18,
     "geo": 0.17,
     "ml": 0.13,
     "sentiment": 0.12,
     "mtf": 0.05,
+}
+
+BOND_WEIGHTS: dict[str, float] = {
+    "technical": 0.10,
+    "fundamental": 0.40,
+    "geo": 0.15,
+    "ml": 0.10,
+    "sentiment": 0.05,
+    "mtf": 0.20,
+}
+
+# ── Dynamic weight bounds ───────────────────────────────────────────────
+WEIGHT_RANGES: dict[str, dict[str, float]] = {
+    "technical": {"min": 0.15, "max": 0.55},
+    "fundamental": {"min": 0.08, "max": 0.35},
+    "geo": {"min": 0.05, "max": 0.30},
+    "ml": {"min": 0.05, "max": 0.25},
+    "sentiment": {"min": 0.03, "max": 0.20},
+    "mtf": {"min": 0.02, "max": 0.15},
+}
+
+# ── Volatility regime multipliers ───────────────────────────────────────
+VOLATILITY_ADJUSTMENTS: dict[str, dict[str, float]] = {
+    "LOW": {"ml_mult": 0.8, "technical_mult": 1.1, "sentiment_mult": 0.7},
+    "NORMAL": {"ml_mult": 1.0, "technical_mult": 1.0, "sentiment_mult": 1.0},
+    "HIGH": {"ml_mult": 1.2, "technical_mult": 0.9, "sentiment_mult": 1.2},
+    "EXTREME": {"ml_mult": 1.4, "technical_mult": 0.7, "sentiment_mult": 1.4},
+}
+
+# ── Multiplicative risk penalties (per dimension) ───────────────────────
+RISK_PENALTY_MULTIPLIERS: dict[str, float] = {
+    "high_fundamental_risk": 0.85,
+    "high_geo_risk": 0.80,
+    "anomaly_detected": 0.75,
+    "low_liquidity": 0.90,
+    "high_concentration": 0.85,
+    "negative_trend": 0.90,
 }
 
 
@@ -78,6 +118,66 @@ def compute_risk_metrics(price_series: list[float]) -> dict[str, Any]:
 
 
 class SignalFusionEngine:
+    """Full signal fusion with dynamic weights and multiplicative risk adjustments.
+
+    Architecture reference:
+      - docs/ARCHITECTURE.md — overall fusion pipeline
+      - docs/FinAdvisor_Technical_Documentation.docx — detailed signal fusion spec
+      - docs/adr/ADR-001-package-decomposition.md — why signals is a standalone module
+    """
+
+    def _get_base_weights(self, instrument_type: str, user_id: str | None = None) -> dict[str, float]:
+        if instrument_type == "bond":
+            return dict(BOND_WEIGHTS)
+        if user_id:
+            try:
+                from src.user_profile import profile_manager
+                return profile_manager.get_weights(user_id)
+            except Exception:
+                pass
+        return dict(BASE_WEIGHTS)
+
+    def _apply_volatility_adjustment(
+        self, weights: dict[str, float], regime: str | None, reasons: list[str],
+    ) -> dict[str, float]:
+        if not regime or regime not in VOLATILITY_ADJUSTMENTS:
+            return weights
+        adj = VOLATILITY_ADJUSTMENTS[regime]
+        for key in list(weights.keys()):
+            mult_key = f"{key}_mult"
+            if mult_key in adj:
+                weights[key] *= adj[mult_key]
+        total = sum(weights.values())
+        if total > 0:
+            for key in weights:
+                weights[key] /= total
+        reasons.append(f"Волатильность: {regime}")
+        return weights
+
+    def _apply_weight_bounds(self, weights: dict[str, float]) -> dict[str, float]:
+        for key in weights:
+            bounds = WEIGHT_RANGES.get(key)
+            if bounds:
+                weights[key] = max(bounds["min"], min(bounds["max"], weights[key]))
+        total = sum(weights.values())
+        if total > 0:
+            for key in weights:
+                weights[key] /= total
+        return weights
+
+    def _apply_multiplicative_risk(
+        self, weights: dict[str, float], risk_flags: dict[str, bool], reasons: list[str],
+    ) -> dict[str, float]:
+        penalty = 1.0
+        for flag, active in risk_flags.items():
+            if active and flag in RISK_PENALTY_MULTIPLIERS:
+                penalty *= RISK_PENALTY_MULTIPLIERS[flag]
+                reasons.append(f"Риск-фактор: {flag}")
+        if penalty < 1.0:
+            for key in weights:
+                weights[key] *= penalty
+        return weights
+
     def fuse(
         self,
         ticker: str,
@@ -94,33 +194,25 @@ class SignalFusionEngine:
         event_context: Optional[dict[str, Any]] = None,
         trade_plan: Optional[dict[str, Any]] = None,
         user_id: Optional[str] = None,
+        bond_offering: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        reasons = []
-        if user_id:
-            from src.user_profile import profile_manager
+        reasons: list[str] = []
+        is_bond = instrument_type == "bond"
 
-            weights = profile_manager.get_weights(user_id)
-        else:
-            weights = dict(BASE_WEIGHTS)
+        # ── 1. Initial weights ──────────────────────────────────────────
+        weights = self._get_base_weights(instrument_type, user_id)
 
-        if volatility_regime and volatility_regime.get("adjustment"):
-            adj = volatility_regime["adjustment"]
-            for key in weights:
-                mult_key = f"{key}_mult"
-                if mult_key in adj:
-                    weights[key] *= adj[mult_key]
-            total = sum(weights.values())
-            if total > 0:
-                for key in weights:
-                    weights[key] /= total
-            reasons.append(f"Волатильность: {volatility_regime.get('regime', 'NORMAL')}")
+        # ── 2. Volatility regime adjustment ─────────────────────────────
+        regime = volatility_regime.get("regime") if volatility_regime else None
+        weights = self._apply_volatility_adjustment(weights, regime, reasons)
 
+        # ── 3. Technical score boost ────────────────────────────────────
         tech_score_raw = technical.get("score", 0.0) if technical else 0.0
         if tech_score_raw < 0:
             boost = 0.10
             weights["technical"] += boost
             for k in ["sentiment", "mtf", "geo"]:
-                if weights[k] >= boost * 0.5:
+                if weights.get(k, 0) >= boost * 0.5:
                     weights[k] -= boost * 0.4
             total = sum(weights.values())
             if total > 0:
@@ -128,8 +220,21 @@ class SignalFusionEngine:
                     weights[k] /= total
             reasons.append("Технический вес повышен — негативная техническая оценка")
 
+        # ── 4. Multiplicative risk penalties ────────────────────────────
+        risk_flags = {
+            "high_fundamental_risk": fundamental is not None and fundamental.get("risk", 0.5) > 0.7,
+            "high_geo_risk": geo is not None and geo.get("score", 0) > GEO_RISK_HIGH,
+            "anomaly_detected": fundamental is not None and len(fundamental.get("anomalies", [])) > 0,
+            "low_liquidity": volatility_regime is not None and volatility_regime.get("atr_ratio", 1) > 3,
+            "negative_trend": ml_prediction is not None and ml_prediction.get("trend_slope", 0) < -0.01,
+        }
+        weights = self._apply_multiplicative_risk(weights, risk_flags, reasons)
+
+        # ── 5. Clamp to bounds ─────────────────────────────────────────
+        weights = self._apply_weight_bounds(weights)
+
         macro_adjustment = 0.0
-        macro_reasons = []
+        macro_reasons: list[str] = []
 
         mt = MACRO_THRESHOLDS
 
@@ -266,6 +371,23 @@ class SignalFusionEngine:
             + event_penalty
         )
 
+        # Bond-specific scoring override
+        if is_bond and bond_offering:
+            from src.analysis.signals.bond_signals import analyze_bond
+
+            key_rate = macro_context.get("key_rate") if macro_context else None
+            ofz_yield = macro_context.get("ofz_10y") if macro_context else None
+            bond_signal = analyze_bond(bond_offering, key_rate=key_rate, ofz_yield=ofz_yield)
+            bond_score = bond_signal.get("score", 0.0)
+            bond_risk = bond_signal.get("risk", 0.5)
+            weighted_score = bond_score * weights["fundamental"] * 2 + weighted_score * 0.5
+            reasons.extend(bond_signal.get("reasons", []))
+            risk_override = bond_risk
+            if fundamental:
+                fundamental["risk"] = max(fundamental.get("risk", 0.5), bond_risk)
+            else:
+                fundamental = {"risk": bond_risk, "anomalies": [], "signals": []}
+
         macro_max = MACRO_MAX_ADJUSTMENT
         w = weights
         all_except_geo = w["technical"] + w["fundamental"] + w["ml"] + w["sentiment"] + w["mtf"]
@@ -336,49 +458,49 @@ class SignalFusionEngine:
 
         max_portfolio_pct = self._calc_max_position(action, geo_score, fund_risk, user_id=user_id)
 
-        fused = {
-            "ticker": ticker,
-            "instrument_type": instrument_type,
-            "action": action,
-            "confidence": round(confidence, 2),
-            "weighted_score": round(weighted_score, 2),
-            "reasons": reasons[:8],
-            "max_portfolio_pct": max_portfolio_pct,
-            "components": {
-                "technical": {"action": tech_action, "confidence": tech_conf, "score": tech_score},
-                "fundamental_risk": fund_risk,
-                "geo_risk": geo_score,
-                "ml": {
+        fused = FusedSignal(
+            ticker=ticker,
+            instrument_type=instrument_type,
+            action=action,
+            confidence=round(confidence, 2),
+            weighted_score=round(weighted_score, 2),
+            reasons=reasons[:8],
+            max_portfolio_pct=max_portfolio_pct,
+            components=SignalComponents(
+                technical={"action": tech_action, "confidence": tech_conf, "score": tech_score},
+                fundamental_risk=fund_risk,
+                geo_risk=geo_score,
+                ml={
                     "signal_score": ml_signal,
                     "confidence": ml_confidence,
                     "target_price": ml_target,
                     "change_pct": ml_change,
                 },
-                "sentiment": {
+                sentiment={
                     "score": round(sentiment_signal, 3),
                     "source": sentiment_source,
                 },
-                "mtf": {
+                mtf={
                     "direction": round(mtf_signal, 3) if mtf else 0,
                     "agreement": round(mtf_agreement, 3) if mtf else 0,
                 },
-            },
-        }
+            ),
+        )
 
         if risk_metrics:
-            fused["risk_metrics"] = risk_metrics
+            fused.risk_metrics = RiskMetrics(**risk_metrics)
 
         if volatility_regime:
-            fused["volatility_regime"] = {
-                "regime": volatility_regime.get("regime"),
-                "atr_ratio": volatility_regime.get("atr_ratio"),
-                "hv": volatility_regime.get("hv"),
-            }
+            fused.volatility_regime = VolatilityRegime(
+                regime=volatility_regime.get("regime", "NORMAL"),
+                atr_ratio=volatility_regime.get("atr_ratio"),
+                hv=volatility_regime.get("hv"),
+            )
 
         if trade_plan:
-            fused["trade_plan"] = trade_plan
+            fused.trade_plan = trade_plan
 
-        return fused
+        return fused.model_dump(exclude_none=True)
 
     def _downgrade_buy(self, action: str) -> str:
         if action == "BUY":
@@ -387,11 +509,12 @@ class SignalFusionEngine:
             return "HOLD"
         return action
 
-    def _calc_max_position(self, action: str, geo_risk: float, fund_risk: float, user_id: Optional[str] = None) -> int:
+    def _calc_max_position(
+        self, action: str, geo_risk: float, fund_risk: float, user_id: str | None = None,
+    ) -> int:
         pct = BASE_POSITION_PCT.get(action, 10)
         if user_id:
             from src.user_profile import profile_manager
-
             pct = min(pct, profile_manager.get_max_position(user_id))
         if geo_risk > GEO_RISK_HIGH:
             pct = min(pct, 10)
@@ -399,17 +522,17 @@ class SignalFusionEngine:
             pct = min(pct, 10)
         return pct
 
-    def _to_native(self, obj: Any) -> Any:
+    @staticmethod
+    def _to_native(obj: Any) -> Any:
         if isinstance(obj, dict):
-            return {k: self._to_native(v) for k, v in obj.items()}
+            return {k: SignalFusionEngine._to_native(v) for k, v in obj.items()}
         if isinstance(obj, list):
-            return [self._to_native(v) for v in obj]
+            return [SignalFusionEngine._to_native(v) for v in obj]
         if hasattr(obj, "item"):
             return obj.item()
         return obj
 
     def save_signal_sync(self, db: Any, instrument_id: int, fused: dict[str, Any]) -> SignalModel:
-        """Sync version for CLI / scheduler."""
         fused_clean = self._to_native(fused)
         signal = SignalModel(
             instrument_id=instrument_id,
@@ -420,6 +543,7 @@ class SignalFusionEngine:
         )
         db.add(signal)
         db.commit()
+        logger.info("signal_saved_sync", instrument_id=instrument_id, action=fused.get("action"))
         return signal
 
     async def save_signal(self, db: AsyncSession, instrument_id: int, fused: dict[str, Any]) -> SignalModel:
@@ -434,4 +558,5 @@ class SignalFusionEngine:
         db.add(signal)
         await db.commit()
         await db.refresh(signal)
+        logger.info("signal_saved_async", instrument_id=instrument_id, action=fused.get("action"))
         return signal
