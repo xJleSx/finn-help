@@ -1,4 +1,5 @@
 import logging
+from datetime import date as date_type
 from typing import Any
 
 from sqlalchemy import select
@@ -7,6 +8,7 @@ from src.config import personal, settings
 from src.db.connection import get_async_session
 from src.db.models import Instrument
 from src.db.models import Portfolio as PortModel
+from src.db.models import Price as PriceModel
 from src.scheduler.collectors import fetch_price_history_for_instrument
 from src.trading.brokers.tbank import TBankClient
 
@@ -72,6 +74,29 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
 
                 qty = pos.get("quantity", 0)
                 avg_price = pos.get("average_price", 0.0)
+                current_price = pos.get("current_price", 0.0)
+
+                # Save current_price from broker to Price table for fresh portfolio display
+                if current_price > 0:
+                    existing_price = await db.execute(
+                        select(PriceModel).where(
+                            PriceModel.instrument_id == inst.id,
+                            PriceModel.date == date_type.today(),
+                        )
+                    )
+                    price_row = existing_price.scalar_one_or_none()
+                    if price_row:
+                        price_row.close = current_price
+                    else:
+                        db.add(PriceModel(
+                            instrument_id=inst.id,
+                            date=date_type.today(),
+                            open=current_price,
+                            high=current_price,
+                            low=current_price,
+                            close=current_price,
+                            volume=0,
+                        ))
 
                 result = await db.execute(select(PortModel).where(PortModel.user_id == user_id, PortModel.instrument_id == inst.id))
                 existing = result.scalars().first()
