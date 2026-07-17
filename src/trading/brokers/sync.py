@@ -20,7 +20,13 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
     use_sandbox = settings.tinkoff_sandbox
     stats: dict[str, Any] = {"status": "ok", "positions_synced": 0, "errors": []}
 
-    async with TBankClient(use_sandbox=use_sandbox) as client:
+    try:
+        client = TBankClient(use_sandbox=use_sandbox)
+    except RuntimeError as e:
+        logger.warning("TBank init failed: %s", e)
+        return {"status": "sdk_missing", "positions_synced": 0}
+
+    async with client:
         accounts = await client.get_accounts()
         if not accounts:
             return {"status": "no_accounts", **stats}

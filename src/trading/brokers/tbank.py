@@ -67,9 +67,11 @@ class TBankClient:
         self._token = token or settings.tinkoff_token
         if not self._token:
             raise ValueError("TINKOFF_TOKEN not set in .env")
+        if not HAS_SDK:
+            raise RuntimeError("t-tech-investments SDK not installed. Run: uv pip install t-tech-investments --index-url https://opensource.tbank.ru/api/v4/projects/238/packages/pypi/simple")
         self._use_sandbox = use_sandbox
-        self._client: Optional[AsyncClient] = None
-        self._raw_client: Optional[AsyncClient] = None
+        self._client: Optional["AsyncClient"] = None
+        self._raw_client: Optional["AsyncClient"] = None
         self._circuit_breaker: CircuitBreaker = get_circuit_breaker("tbank")
         self._orders_cb: CircuitBreaker = get_circuit_breaker("tbank_orders")
         self._market_cb: CircuitBreaker = get_circuit_breaker("tbank_market")
@@ -82,6 +84,8 @@ class TBankClient:
         return "tbank"
 
     async def __aenter__(self) -> "TBankClient":
+        if not HAS_SDK:
+            raise RuntimeError("t-tech-investments SDK not installed")
         self._raw_client = AsyncClient(self._token, target=self._target())
         self._client = await self._raw_client.__aenter__()
         return self
