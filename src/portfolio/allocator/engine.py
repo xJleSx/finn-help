@@ -418,15 +418,19 @@ class PortfolioAllocator:
             )
         return result
 
+    def _type_matches(self, inst_type: str, target: str) -> bool:
+        backward = {"stock": ("stock", "2"), "bond": ("bond", "1"), "etf": ("etf", "3")}
+        return inst_type in backward.get(target, (target,))
+
     def _filter_candidates_by_category(self, instruments: list[dict[str, Any]], category: str) -> list[dict[str, Any]]:
         if category == "etf":
-            return [i for i in instruments if i["type"] == "etf" and i["last_price"]]
+            return [i for i in instruments if self._type_matches(i["type"], "etf") and i["last_price"]]
         if category == "dividend":
-            return [i for i in instruments if i["type"] == "stock" and i["is_dividend"] and i["last_price"]]
+            return [i for i in instruments if self._type_matches(i["type"], "stock") and i["is_dividend"] and i["last_price"]]
         if category == "bond":
-            return [i for i in instruments if i["type"] == "bond" and i["last_price"]]
+            return [i for i in instruments if self._type_matches(i["type"], "bond") and i["last_price"]]
         if category == "growth":
-            return [i for i in instruments if i["type"] == "stock" and i["is_growth"] and i["last_price"]]
+            return [i for i in instruments if self._type_matches(i["type"], "stock") and i["is_growth"] and i["last_price"]]
         return []
 
     async def _score_candidates_async(

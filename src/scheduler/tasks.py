@@ -68,9 +68,9 @@ async def daily_update() -> None:
     db_sync = get_session()
     try:
         loop = asyncio.get_running_loop()
-        updated_ids = await loop.run_in_executor(get_executor(), collect_prices, db_sync)
-        await loop.run_in_executor(get_executor(), collect_dividends, db_sync)
-        await loop.run_in_executor(get_executor(), collect_fundamental, db_sync)
+        updated_ids = await collect_prices(db_sync)
+        await collect_dividends(db_sync)
+        await collect_fundamental(db_sync)
         await loop.run_in_executor(get_executor(), lambda: compute_indicators(db_sync, instrument_ids=updated_ids))
         news_list = await loop.run_in_executor(get_executor(), collect_news, db_sync)
         await loop.run_in_executor(get_executor(), compute_geo_risk, db_sync, news_list)

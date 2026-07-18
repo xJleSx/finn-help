@@ -1,9 +1,9 @@
 PROFILES = {
     "conservative": {
-        "etf": {"weight": 0.50, "label": "БПИФ (ETF)", "max": 4},
-        "dividend": {"weight": 0.20, "label": "Дивидендные акции", "max": 3},
-        "bond": {"weight": 0.25, "label": "Облигации / ОФЗ", "max": 4},
-        "growth": {"weight": 0.05, "label": "Акции роста", "max": 1},
+        "bond": {"weight": 0.35, "label": "Облигации / ОФЗ", "max": 4},
+        "etf": {"weight": 0.25, "label": "БПИФ (ETF)", "max": 3},
+        "dividend": {"weight": 0.25, "label": "Дивидендные акции", "max": 3},
+        "growth": {"weight": 0.15, "label": "Акции роста", "max": 2},
     },
     "balanced": {
         "etf": {"weight": 0.40, "label": "БПИФ (ETF)", "max": 3},
