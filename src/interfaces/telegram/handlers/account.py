@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import cast
 
 import structlog
 from telegram import Update
@@ -198,7 +198,6 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception as e:
             logger.debug("Portfolio value calc failed: %s", e)
 
-        p_tickers: list[Any] = cast(list[Any], personal.get("favorite_tickers", []))
         p_horizon: str = cast(str, personal.get("investment_horizon", "medium"))
         horizon_label = {"short": "Краткосрочный", "medium": "Среднесрочный", "long": "Долгосрочный"}
 
@@ -223,8 +222,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     pct = val / portfolio_value * 100 if portfolio_value > 0 else 0
                     text += f"  • {sec}: {pct:.0f}%\n"
 
-        if p_tickers:
-            text += f"\n⭐ Избранные: {', '.join(p_tickers[:10])}\n"
+
 
         text += "\n<b>Команды:</b>\n"
         for k, name in names.items():

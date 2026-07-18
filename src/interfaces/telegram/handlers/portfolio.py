@@ -31,6 +31,16 @@ logger = structlog.get_logger(__name__)
 @guard(with_cooldown=True)
 async def allocate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
+        db = get_session()
+        try:
+            rows = get_portfolio_positions(db)
+            portfolio_total = sum(r["value"] for r in rows)
+        finally:
+            db.close()
+        if portfolio_total and portfolio_total >= 500:
+            amount = portfolio_total
+            await _reply_with_allocation(update, amount, exclude=set())
+            return
         await update.effective_message.reply_text("Укажите сумму: /allocate 100000")
         return
     try:
@@ -171,14 +181,17 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             lines.append("")
         total_value = 0.0
         total_cost = 0.0
+        total_clean_value = 0.0
         for r in rows:
             qty = r["quantity"]
             avg = r["avg_price"]
             cur = r["current_price"]
             val = r["value"]
+            clean_price = r.get("clean_price", cur)
+            clean_val = clean_price * qty
             cost = avg * qty
-            pnl = val - cost
-            pnl_pct = ((cur / avg) - 1) * 100 if avg > 0 else 0.0
+            pnl = clean_val - cost
+            pnl_pct = ((clean_price / avg) - 1) * 100 if avg > 0 else 0.0
             emoji = "🟢" if pnl > 0.5 else ("🔴" if pnl < -0.5 else "⚪")
             pnl_display = "" if abs(pnl) < 0.5 else f"{pnl:+,.2f}"
             pnl_pct_display = "" if abs(pnl_pct) < 0.01 else f"{pnl_pct:+.2f}%"
@@ -189,9 +202,10 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             total_value += val
             total_cost += cost
+            total_clean_value += clean_val
 
-        total_pnl = total_value - total_cost
-        total_pnl_pct = ((total_value / total_cost) - 1) * 100 if total_cost > 0 else 0.0
+        total_pnl = total_clean_value - total_cost
+        total_pnl_pct = ((total_clean_value / total_cost) - 1) * 100 if total_cost > 0 else 0.0
         total_emoji = "🟢" if total_pnl > 0.5 else ("🔴" if total_pnl < -0.5 else "⚪")
         total_pnl_str = "" if abs(total_pnl) < 0.5 else f"{total_pnl:+,.2f}"
         total_pnl_pct_str = "" if abs(total_pnl_pct) < 0.01 else f"{total_pnl_pct:+.2f}%"

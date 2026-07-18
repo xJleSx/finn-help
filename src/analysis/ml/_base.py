@@ -80,7 +80,7 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
         result["bb_width"] = 0.0
 
     close_arr = df["close"].values
-    returns = pd.Series(close_arr).pct_change()
+    returns = pd.Series(close_arr).pct_change(fill_method=None)
     hist_vol = returns.rolling(20).std()
     result["hist_vol_20"] = hist_vol.values
 
@@ -141,7 +141,7 @@ def enrich_macro(df: pd.DataFrame) -> pd.DataFrame:
         for col in macro_cols:
             result[col] = result[col].ffill().fillna(0)
             chg = f"{col}_chg"
-            result[chg] = result[col].pct_change().fillna(0)
+            result[chg] = result[col].pct_change(fill_method=None).fillna(0)
 
         return result
     finally:

@@ -21,6 +21,17 @@ def _acquire_instance_lock(name: str = "scheduler") -> bool:
         os.close(fd)
         return True
     except FileExistsError:
+        # Check if stale (PID no longer exists)
+        try:
+            old_pid = int(lock_path.read_text().strip())
+            if old_pid > 0:
+                try:
+                    os.kill(old_pid, 0)
+                except OSError:
+                    lock_path.unlink(missing_ok=True)
+                    return _acquire_instance_lock(name)
+        except (ValueError, OSError):
+            pass
         return False
 
 

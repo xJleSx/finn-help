@@ -170,7 +170,7 @@ def compute_classification_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> di
 
 
 def compute_threshold(close_series: pd.Series, lookahead: int = 5, fallback: float = 0.03) -> float:
-    returns = close_series.pct_change().dropna()
+    returns = close_series.pct_change(fill_method=None).dropna()
     if len(returns) < lookahead + 1:
         return fallback
     return float(max(fallback, returns.std() * 0.5))

@@ -1,11 +1,32 @@
-import logging
 from datetime import date, timedelta
+from typing import cast
 
 import numpy as np
+import structlog
 
 from src.analysis.personal_backtest import run_personal_backtest
+from src.config import personal
+from src.db.connection import get_session
+from src.db.models import Instrument
+from src.db.models import Portfolio as PortModel
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
+
+
+def _portfolio_tickers() -> list[str]:
+    db = get_session()
+    try:
+        rows = db.query(PortModel).all()
+        if not rows:
+            return []
+        tickers = []
+        for p in rows:
+            inst = db.query(Instrument.ticker).filter(Instrument.id == p.instrument_id).first()
+            if inst and inst.ticker:
+                tickers.append(inst.ticker)
+        return tickers
+    finally:
+        db.close()
 
 
 def generate_weekly_report() -> bytes | None:
@@ -20,11 +41,20 @@ def generate_weekly_report() -> bytes | None:
         end = date.today()
         start = end - timedelta(days=120)
 
+        tickers = _portfolio_tickers()
+        if not tickers:
+            tickers = cast(list[str], personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP"]))
+
         result = run_personal_backtest(
+            tickers=tickers,
             start=start,
             end=end,
             capital=100_000,
         )
+
+        if not result.equity_curve:
+            logger.warning("No equity curve data for weekly report")
+            return None
 
         # build figure
         fig, axes = plt.subplots(3, 1, figsize=(10, 10), gridspec_kw={"height_ratios": [3, 1.2, 1.2]})

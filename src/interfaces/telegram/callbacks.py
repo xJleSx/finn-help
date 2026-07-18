@@ -139,7 +139,7 @@ async def reply_keyboard_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif text == "\U0001f3ed Сектора":
         await sectors(update, context)
     elif text == "\U0001f4b0 Аллокация":
-        context.args = ["100000"]
+        context.args = []
         await allocate(update, context)
     elif text == "\U0001f9ea Стресс-тест":
         await stress(update, context)

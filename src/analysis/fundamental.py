@@ -139,7 +139,7 @@ class FundamentalAnalyzer:
 
         recent_3m = df[df["date"] >= (date.today() - timedelta(days=90))]
         if len(recent_3m) > 5:
-            vol = recent_3m["close"].pct_change().std() * (252**0.5)
+            vol = recent_3m["close"].pct_change(fill_method=None).std() * (252**0.5)
             if vol > 0.5:
                 anomalies.append(f"высокая волатильность: {vol:.1%} годовых")
                 risk_parts.append(0.15)

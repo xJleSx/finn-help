@@ -237,7 +237,7 @@ class RegimeDetector:
         adx_series = compute_adx(high, low, close)
         bb_pct = bb_width_percentile(close, lookback=volatility_lookback)
         trend_dir = trend_direction(close)
-        returns = close.pct_change().dropna()
+        returns = close.pct_change(fill_method=None).dropna()
         hurst = hurst_exponent(returns)
 
         vol_val = atr_pct.dropna()

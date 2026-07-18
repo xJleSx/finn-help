@@ -492,7 +492,8 @@ def get_portfolio_positions(db: Any) -> list[dict[str, Any]]:
         inst = db.query(Instrument).filter_by(id=p.instrument_id).first()
         price = db.query(Price).filter_by(instrument_id=p.instrument_id).order_by(Price.date.desc()).first()
 
-        is_bond = bool(inst and inst.instrument_type == "bond")
+        inst_type = inst.instrument_type if inst else ""
+        is_bond = bool(inst and inst_type in ("bond", "1"))
         close_val = price.close if price else 0.0
         open_val = price.open if price else 0.0
 
@@ -523,6 +524,7 @@ def get_portfolio_positions(db: Any) -> list[dict[str, Any]]:
                 "avg_price": float(p.avg_price) if p.avg_price else 0,
                 "current_price": float(display_price) if display_price else 0,
                 "value": current_value,
+                "clean_price": float(clean_price) if clean_price else 0,
                 "allocation_pct": 0,
                 "profit_pct": profit_pct,
             }

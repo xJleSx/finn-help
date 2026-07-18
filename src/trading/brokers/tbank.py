@@ -151,17 +151,23 @@ class TBankClient:
             InstrumentType.INSTRUMENT_TYPE_ETF,
         }
         type_names = {"share", "etf", "bond"}
+        tbank_to_readable = {
+            InstrumentType.INSTRUMENT_TYPE_SHARE: "stock",
+            InstrumentType.INSTRUMENT_TYPE_BOND: "bond",
+            InstrumentType.INSTRUMENT_TYPE_ETF: "etf",
+        }
         positions = []
         for p in resp.positions:
             it = p.instrument_type
             if it in allowed_types or str(it).lower() in type_names:
+                readable_type = tbank_to_readable.get(it, str(it).lower())
                 nkd = self._money(getattr(p, "current_nkd", 0) or 0) if hasattr(p, "current_nkd") else 0.0
                 clean_price = self._money(p.current_price)
                 positions.append(
                     {
                         "figi": p.figi,
                         "ticker": p.ticker if hasattr(p, "ticker") and p.ticker else p.figi,
-                        "instrument_type": str(it),
+                        "instrument_type": readable_type,
                         "quantity": self._decimal(p.quantity),
                         "average_price": self._money(p.average_position_price),
                         "current_price": clean_price,

@@ -72,10 +72,14 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                         except Exception as p_e:
                             logger.warning("Failed to fetch price history for new %s: %s", ticker, p_e)
 
+                broker_type = pos.get("instrument_type", "stock")
+                if inst and broker_type in ("stock", "bond", "etf") and inst.instrument_type in ("1", "2", "3"):
+                    inst.instrument_type = broker_type
+
+                is_bond = broker_type == "bond"
                 qty = pos.get("quantity", 0)
                 avg_price = pos.get("average_price", 0.0)
                 clean_price = pos.get("current_price", 0.0)
-                is_bond = pos.get("instrument_type", "") == "bond"
                 dirty_price = pos.get("dirty_price", clean_price) if is_bond else clean_price
 
                 # Save price from broker to Price table for fresh portfolio display

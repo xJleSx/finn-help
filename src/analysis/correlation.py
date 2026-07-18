@@ -74,7 +74,7 @@ class CorrelationAnalyzer:
             return None
 
         df = pd.DataFrame(price_dict)
-        returns = df.pct_change().dropna()
+        returns = df.pct_change(fill_method=None).dropna()
         if returns.shape[1] < 2 or returns.shape[0] < 10:
             return None
 
@@ -140,7 +140,7 @@ class CorrelationAnalyzer:
             return None
 
         df = pd.DataFrame(price_dict)
-        returns = df.pct_change().dropna()
+        returns = df.pct_change(fill_method=None).dropna()
         if returns.shape[1] < 2 or returns.shape[0] < 10:
             return None
 

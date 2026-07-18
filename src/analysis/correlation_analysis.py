@@ -38,7 +38,7 @@ def correlation_table(tickers: list[str] | None = None) -> str:
             return "Недостаточно данных для расчёта корреляции"
 
         df = pd.DataFrame(price_dict)
-        returns = df.pct_change().dropna()
+        returns = df.pct_change(fill_method=None).dropna()
         corr = returns.corr(method="pearson")
 
         lines = ["📊 *Корреляция доходностей (Pearson)*\n"]
