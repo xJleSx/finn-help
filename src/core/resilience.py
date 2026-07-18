@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import logging
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, ParamSpec, TypeVar
+from typing import Any, Optional, ParamSpec, Self, TypeVar
 
 import structlog
 
 logger = structlog.get_logger(__name__)
+_std_logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 RT = TypeVar("RT")
@@ -198,3 +200,81 @@ async def reset_all_circuit_breakers() -> None:
 
 def get_all_circuit_states() -> dict[str, dict[str, object]]:
     return {name: cb.snapshot() for name, cb in _circuit_breakers.items()}
+
+
+# ── Rate Limiter (token bucket) ─────────────────────────────────────────────────
+
+
+@dataclass
+class RateLimiterConfig:
+    max_rate: float = 10.0       # max calls per second
+    time_period: float = 1.0     # period in seconds
+    burst_multiplier: int = 2     # allow bursts up to max_rate * burst
+
+
+class AsyncRateLimiter:
+    """Token bucket rate limiter for async code.
+
+    Usage:
+        limiter = AsyncRateLimiter(RateLimiterConfig(max_rate=10))
+        async with limiter:
+            await make_request()
+    """
+
+    def __init__(self, config: RateLimiterConfig | None = None) -> None:
+        self.config = config or RateLimiterConfig()
+        self._tokens: float = float(self.config.max_rate * self.config.burst_multiplier)
+        self._max_tokens: float = self._tokens
+        self._last_refill: float = time.monotonic()
+        self._lock: asyncio.Lock = asyncio.Lock()
+
+    def _refill(self) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last_refill
+        self._tokens = min(self._max_tokens, self._tokens + elapsed * self.config.max_rate)
+        self._last_refill = now
+
+    async def acquire(self) -> None:
+        while True:
+            async with self._lock:
+                self._refill()
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return
+                wait_time = (1.0 - self._tokens) / self.config.max_rate
+            await asyncio.sleep(max(wait_time, 0.001))
+
+    async def __aenter__(self) -> Self:
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        pass
+
+    async def snapshot(self) -> dict[str, object]:
+        async with self._lock:
+            self._refill()
+            return {
+                "tokens": round(self._tokens, 2),
+                "max_tokens": self._max_tokens,
+                "max_rate": self.config.max_rate,
+                "burst": self.config.burst_multiplier,
+            }
+
+
+_rate_limiters: dict[str, AsyncRateLimiter] = {}
+_rate_limiters_lock = asyncio.Lock()
+
+
+def get_rate_limiter(name: str = "default", config: RateLimiterConfig | None = None) -> AsyncRateLimiter:
+    if name not in _rate_limiters:
+        _rate_limiters[name] = AsyncRateLimiter(config)
+    return _rate_limiters[name]
+
+
+def configure_rate_limiter(name: str, **kwargs: Any) -> AsyncRateLimiter:
+    rl = get_rate_limiter(name)
+    for k, v in kwargs.items():
+        if hasattr(rl.config, k):
+            setattr(rl.config, k, v)
+    return rl

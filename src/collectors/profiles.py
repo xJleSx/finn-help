@@ -91,26 +91,20 @@ class MOEXCorporateEventCollector(BaseCollector):
         super().__init__()
 
     async def fetch_corporate_events(self, ticker: str) -> list[dict[str, Any]]:
-        """Fetch corporate events for a ticker.
+        """Fetch corporate events for a ticker with pagination.
 
         MOEX endpoint: /securities/{ticker}/events.json
         """
         try:
-            data = await self._fetch_json(
+            rows = await self._paginate(
                 f"{self.BASE}/securities/{ticker}/events.json",
-                params={"iss.meta": "off"},
+                table_name="events",
             )
 
-            events_table = (data or {}).get("events", {}).get("data", [])
-            columns = (data or {}).get("events", {}).get("columns", [])
-            if not columns or not events_table:
-                return []
-
             result = []
-            for row in events_table:
-                event = dict(zip(columns, row))
-                if event.get("isin") or event.get("id"):
-                    result.append(self._normalize_event(event))
+            for row in rows:
+                if row.get("isin") or row.get("id"):
+                    result.append(self._normalize_event(row))
             return result
 
         except httpx.HTTPError as e:

@@ -13,6 +13,7 @@ from src.collectors.base import BaseCollector
 from src.config import settings
 from src.core.executor import get_executor
 from src.db.models import AltDataPoint
+from src.db.queries import bulk_upsert
 
 logger = logging.getLogger(__name__)
 
@@ -255,28 +256,27 @@ class AlternativeDataCollector(BaseCollector):
         points: list[AltDataPoint] = []
 
         for source_name, items in data.items():
+            rows_to_upsert: list[dict[str, Any]] = []
             for item in items:
                 indicator_name = item.get("indicator_name", "")
                 value = item.get("value")
                 dt = item.get("date", date.today())
 
                 if indicator_name and value is not None:
-                    point = AltDataPoint(
-                        source_name=source_name,
-                        indicator_name=indicator_name,
-                        value=float(value),
-                        date=dt if isinstance(dt, date) else date.today(),
-                    )
-                    db.add(point)
-                    points.append(point)
+                    rows_to_upsert.append({
+                        "source_name": source_name,
+                        "indicator_name": indicator_name,
+                        "value": float(value),
+                        "date": dt if isinstance(dt, date) else date.today(),
+                    })
 
-        if points:
-            try:
-                db.commit()
-            except Exception as e:
-                logger.error("Failed to store alt data: %s", e)
-                db.rollback()
-                return []
+            if rows_to_upsert:
+                processed = bulk_upsert(
+                    db, AltDataPoint, rows_to_upsert,
+                    conflict_columns=["source_name", "indicator_name", "date"],
+                    update_columns=["value"],
+                )
+                logger.debug("AltData %s: %d rows upserted", source_name, processed)
 
         return points
 

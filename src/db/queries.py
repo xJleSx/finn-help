@@ -1,8 +1,82 @@
-from typing import Optional
+from __future__ import annotations
 
+import logging
+from typing import Any, Optional
+
+from sqlalchemy import Table
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from src.db.connection import _is_postgres
+from src.db.connection import settings as _conn_settings
 from src.db.models import Instrument, Price
+
+logger = logging.getLogger(__name__)
+
+
+def _get_dialect_insert() -> Any:
+    if _is_postgres(_conn_settings.database_url):
+        return pg_insert
+    return sqlite_insert
+
+
+def bulk_upsert(
+    db: Session,
+    model: Any,
+    rows: list[dict[str, Any]],
+    conflict_columns: list[str],
+    update_columns: list[str] | None = None,
+    chunk_size: int = 500,
+) -> int:
+    """Idempotent upsert using INSERT ... ON CONFLICT.
+
+    PostgreSQL: uses ON CONFLICT (conflict_columns) DO UPDATE SET ...
+    SQLite 3.24+: uses ON CONFLICT (conflict_columns) DO UPDATE SET ...
+
+    Returns number of rows processed.
+    """
+    if not rows:
+        return 0
+
+    table: Table = model.__table__
+    dialect_insert = _get_dialect_insert()
+    pk_cols = [c.name for c in table.primary_key.columns]
+    actual_conflict = [c for c in conflict_columns if c not in pk_cols and c in [col.name for col in table.columns]]
+    if not actual_conflict:
+        actual_conflict = conflict_columns
+
+    processed = 0
+    for i in range(0, len(rows), chunk_size):
+        chunk = rows[i : i + chunk_size]
+        stmt = dialect_insert(model).values(chunk)
+
+        if update_columns:
+            update_dict = {col: stmt.excluded[col] for col in update_columns if col in stmt.excluded}
+            if update_dict:
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=actual_conflict,
+                    set_=update_dict,
+                )
+            else:
+                stmt = stmt.on_conflict_do_nothing(index_elements=actual_conflict)
+        else:
+            stmt = stmt.on_conflict_do_nothing(index_elements=actual_conflict)
+
+        try:
+            db.execute(stmt)
+            processed += len(chunk)
+        except Exception as e:
+            logger.warning("bulk_upsert chunk failed for %s: %s — falling back to individual inserts", model.__tablename__, e)
+            for row in chunk:
+                try:
+                    fallback = dialect_insert(model).values([row]).on_conflict_do_nothing(index_elements=actual_conflict)
+                    db.execute(fallback)
+                    processed += 1
+                except Exception as inner:
+                    logger.debug("bulk_upsert individual row failed: %s", inner)
+
+    return processed
 
 
 def get_instrument(db: Session, ticker: str) -> Optional[Instrument]:

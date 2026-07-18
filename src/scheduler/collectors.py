@@ -39,6 +39,8 @@ def _first(v1: Any, v2: Any) -> Any:
 
 
 async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date: str, moex: MOEXCollector) -> int:
+    from src.db.queries import bulk_upsert
+
     board: str = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
     history = await moex.get_history(str(inst.ticker), from_date=from_date, board=board)
     if not history:
@@ -61,28 +63,14 @@ async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date:
             return v * nominal / 100
         return v
 
-    new_count = 0
-    rows_with_dates: list[tuple[dict, date]] = []
+    rows_to_upsert: list[dict[str, Any]] = []
     for row in history:
         d = row.get("TRADEDATE") or row.get("tradedate")
         if isinstance(d, str):
             d = date.fromisoformat(d)
-        if d:
-            rows_with_dates.append((row, d))
-
-    if rows_with_dates:
-        existing_dates = {
-            r[0] for r in db.query(Price.date).filter(
-                Price.instrument_id == inst.id,
-                Price.date.in_([d for _, d in rows_with_dates]),
-            ).all()
-        }
-    else:
-        existing_dates = set()
-
-    for row, d in rows_with_dates:
-        if d in existing_dates:
+        if not d:
             continue
+
         _o = _first(row.get("OPEN"), row.get("open"))
         _h = _first(row.get("HIGH"), row.get("high"))
         _l = _first(row.get("LOW"), row.get("low"))
@@ -92,18 +80,25 @@ async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date:
             _h = _bond_normalize(_h)
             _l = _bond_normalize(_l)
             _c = _bond_normalize(_c)
-        p = Price(
-            instrument_id=inst.id,
-            date=d,
-            open=_o,
-            high=_h,
-            low=_l,
-            close=_c,
-            volume=_first(row.get("VOLUME"), row.get("volume")),
-        )
-        db.add(p)
-        new_count += 1
-    return new_count
+
+        rows_to_upsert.append({
+            "instrument_id": int(inst.id),
+            "date": d,
+            "open": _o,
+            "high": _h,
+            "low": _l,
+            "close": _c,
+            "volume": _first(row.get("VOLUME"), row.get("volume")),
+        })
+
+    if not rows_to_upsert:
+        return 0
+
+    return bulk_upsert(
+        db, Price, rows_to_upsert,
+        conflict_columns=["instrument_id", "date"],
+        update_columns=["open", "high", "low", "close", "volume"],
+    )
 
 
 async def fetch_price_history_for_instrument(ticker: str, instrument_type: str) -> int:
@@ -169,6 +164,8 @@ def _check_price_freshness(db: Session, max_age_days: int = STALENESS_THRESHOLD_
 
 
 async def collect_dividends(db: Session) -> None:
+    from src.db.queries import bulk_upsert
+
     async with MOEXCollector() as moex:
         instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
         if not instruments:
@@ -186,7 +183,7 @@ async def collect_dividends(db: Session) -> None:
                 continue
             try:
                 dividends = await moex.get_dividends(str(inst.ticker))
-                rows_to_add: list[tuple[date, float]] = []
+                rows_to_upsert: list[dict[str, Any]] = []
                 for row in dividends:
                     d = row.get("registryclosedate") or row.get("recordDate") or row.get("recorddate")
                     amt = row.get("value") or row.get("dividendGross")
@@ -194,28 +191,19 @@ async def collect_dividends(db: Session) -> None:
                         continue
                     if isinstance(d, str):
                         d = date.fromisoformat(d)
-                    rows_to_add.append((d, float(amt)))
+                    rows_to_upsert.append({
+                        "instrument_id": int(inst.id),
+                        "date": d,
+                        "amount": float(amt),
+                        "currency": "RUB",
+                    })
 
-                if rows_to_add:
-                    existing_divs = {
-                        (r[0], float(r[1])) for r in db.query(Dividend.date, Dividend.amount).filter(
-                            Dividend.instrument_id == inst.id,
-                            Dividend.date.in_([d for d, _ in rows_to_add]),
-                        ).all() if r[1] is not None
-                    }
-                else:
-                    existing_divs = set()
-
-                for d, amt in rows_to_add:
-                    if (d, amt) in existing_divs:
-                        continue
-                    div = Dividend(
-                        instrument_id=inst.id,
-                        date=d,
-                        amount=amt,
-                        currency="RUB",
+                if rows_to_upsert:
+                    bulk_upsert(
+                        db, Dividend, rows_to_upsert,
+                        conflict_columns=["instrument_id", "date", "amount"],
+                        update_columns=["currency"],
                     )
-                    db.add(div)
                 db.commit()
             except Exception as e:
                 logger.warning(f"Dividends failed for {inst.ticker}: {e}")
@@ -223,6 +211,7 @@ async def collect_dividends(db: Session) -> None:
 
 def compute_indicators(db: Session, instrument_ids: set[int] | None = None) -> None:
     from src.analysis.technical import TechnicalAnalyzer
+    from src.db.queries import bulk_upsert
 
     analyzer = TechnicalAnalyzer()
     q = db.query(Instrument)
@@ -237,10 +226,6 @@ def compute_indicators(db: Session, instrument_ids: set[int] | None = None) -> N
     prices_by_inst: dict[int, list[Price]] = {}
     for p in all_prices:
         prices_by_inst.setdefault(int(p.instrument_id), []).append(p)
-
-    existing_indicators: dict[int, set[date]] = {}
-    for ind in db.query(Indicator.instrument_id, Indicator.date).filter(Indicator.instrument_id.in_(ids)).all():
-        existing_indicators.setdefault(int(ind.instrument_id), set()).add(ind.date)
 
     for inst in instruments:
         prices = prices_by_inst.get(int(inst.id), [])
@@ -260,32 +245,37 @@ def compute_indicators(db: Session, instrument_ids: set[int] | None = None) -> N
             ]
         )
         df = analyzer.compute_all(df)
-        inst_existing = existing_indicators.get(int(inst.id), set())
+        rows_to_upsert: list[dict[str, Any]] = []
         for _, row in df.iterrows():
-            if row["date"] in inst_existing:
-                continue
-            ind = Indicator(
-                instrument_id=inst.id,
-                date=row["date"],
-                rsi=row.get("rsi"),
-                macd_line=row.get("macd_line"),
-                macd_signal=row.get("macd_signal"),
-                macd_hist=row.get("macd_hist"),
-                sma_20=row.get("sma_20"),
-                sma_50=row.get("sma_50"),
-                sma_200=row.get("sma_200"),
-                bb_upper=row.get("bb_upper"),
-                bb_lower=row.get("bb_lower"),
-                bb_mid=row.get("bb_mid"),
-                volume_sma_20=row.get("volume_sma_20"),
-                atr=row.get("atr"),
+            rows_to_upsert.append({
+                "instrument_id": int(inst.id),
+                "date": row["date"],
+                "rsi": row.get("rsi"),
+                "macd_line": row.get("macd_line"),
+                "macd_signal": row.get("macd_signal"),
+                "macd_hist": row.get("macd_hist"),
+                "sma_20": row.get("sma_20"),
+                "sma_50": row.get("sma_50"),
+                "sma_200": row.get("sma_200"),
+                "bb_upper": row.get("bb_upper"),
+                "bb_lower": row.get("bb_lower"),
+                "bb_mid": row.get("bb_mid"),
+                "volume_sma_20": row.get("volume_sma_20"),
+                "atr": row.get("atr"),
+            })
+
+        if rows_to_upsert:
+            bulk_upsert(
+                db, Indicator, rows_to_upsert,
+                conflict_columns=["instrument_id", "date"],
+                update_columns=["rsi", "macd_line", "macd_signal", "macd_hist", "sma_20", "sma_50", "sma_200", "bb_upper", "bb_lower", "bb_mid", "volume_sma_20", "atr"],
             )
-            db.add(ind)
         db.commit()
 
 
 async def collect_news(db: Session) -> list[dict[str, Any]]:
     from src.db.models import NewsInstrument
+    from src.db.queries import bulk_upsert
 
     collector = NewsCollector()
     news_list = await collector.fetch_all(max_per_feed=NEWS_MAX_PER_FEED)
@@ -295,32 +285,34 @@ async def collect_news(db: Session) -> list[dict[str, Any]]:
         ticker_map[str(inst.ticker).upper()] = int(inst.id)
 
     saved_news: list[News] = []
-    urls = [item["url"] for item in news_list]
-    existing_by_url: dict[str, News] = {}
-    if urls:
-        for n in db.query(News).filter(News.url.in_(urls)).all():
-            existing_by_url[str(n.url)] = n
+    news_rows: list[dict[str, Any]] = []
     for item in news_list:
-        exists = existing_by_url.get(item["url"])
-        if exists:
-            saved_news.append(exists)
-            continue
         detail = item.get("sentiment_detail", {})
-        n = News(
-            url=item["url"],
-            title=item["title"],
-            summary=item["summary"],
-            source_type=item["source_type"],
-            source_name=item["source_name"],
-            published_at=item["published_at"],
-            sentiment_score=item.get("sentiment_score"),
-            sentiment_weighted=item.get("sentiment_weighted"),
-            sentiment_bert_score=detail.get("bert_score"),
-            source_weight=detail.get("source_weight"),
+        news_rows.append({
+            "url": item["url"],
+            "title": item["title"],
+            "summary": item.get("summary", ""),
+            "source_type": item["source_type"],
+            "source_name": item["source_name"],
+            "published_at": item["published_at"],
+            "sentiment_score": item.get("sentiment_score"),
+            "sentiment_weighted": item.get("sentiment_weighted"),
+            "sentiment_bert_score": detail.get("bert_score"),
+            "source_weight": detail.get("source_weight"),
+        })
+
+    if news_rows:
+        bulk_upsert(
+            db, News, news_rows,
+            conflict_columns=["url"],
+            update_columns=["title", "summary", "sentiment_score", "sentiment_weighted", "sentiment_bert_score", "source_weight"],
         )
-        db.add(n)
         db.flush()
-        saved_news.append(n)
+
+        for item in news_list:
+            n = db.query(News).filter_by(url=item["url"]).first()
+            if n:
+                saved_news.append(n)
 
     candidate_pairs: list[tuple[int, int]] = []
     for n in saved_news:
@@ -347,6 +339,8 @@ async def collect_news(db: Session) -> list[dict[str, Any]]:
 
 
 async def compute_geo_risk(db: Session, news_list: list[dict[str, Any]]) -> None:
+    from src.db.queries import bulk_upsert
+
     sent = divergence.detect(news_list=news_list)
     cbr = CBRCollector()
     try:
@@ -368,25 +362,24 @@ async def compute_geo_risk(db: Session, news_list: list[dict[str, Any]]) -> None
     risk = geo_risk.score(news_list, currency_volatility=currency_vol)
 
     today = date.today()
-    existing = db.query(GeoRiskScore).filter_by(date=today).first()
-    if existing:
-        existing.score = risk["score"]
-        existing.components_json = dict(risk.get("components") or {})  # type: ignore[assignment]
-        existing.sources_json = {"sentiment_divergence": sent, "news_count": len(news_list)}  # type: ignore[assignment]
-    else:
-        score = GeoRiskScore(
-            date=today,
-            score=risk["score"],
-            components_json=risk.get("components"),
-            sources_json={"sentiment_divergence": sent, "news_count": len(news_list)},
-        )
-        db.add(score)
+    bulk_upsert(
+        db, GeoRiskScore,
+        [{
+            "date": today,
+            "score": risk["score"],
+            "components_json": dict(risk.get("components") or {}),
+            "sources_json": {"sentiment_divergence": sent, "news_count": len(news_list)},
+        }],
+        conflict_columns=["date"],
+        update_columns=["score", "components_json", "sources_json"],
+    )
     db.commit()
 
 
 async def collect_fundamental(db: Session) -> None:
     from src.collectors.fundamental import FundamentalDataCollector
     from src.db.models import FundamentalMetric, Price
+    from src.db.queries import bulk_upsert
 
     instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
     if not instruments:
@@ -394,13 +387,6 @@ async def collect_fundamental(db: Session) -> None:
 
     today = date.today()
     inst_ids = [inst.id for inst in instruments]
-
-    existing_metrics: dict[int, FundamentalMetric] = {}
-    for m in db.query(FundamentalMetric).filter(
-        FundamentalMetric.instrument_id.in_(inst_ids),
-        FundamentalMetric.date == today,
-    ).all():
-        existing_metrics[int(m.instrument_id)] = m
 
     from sqlalchemy import func as sqlfunc
 
@@ -431,22 +417,18 @@ async def collect_fundamental(db: Session) -> None:
                 logger.warning("Fundamental fetch failed for %s: %s", inst.ticker, e)
                 continue
 
-            existing = existing_metrics.get(int(inst.id))
-            if existing:
-                existing.market_cap = data["market_cap"]
-                existing.shares_outstanding = data["shares_outstanding"]
-                extra_val = data.get("extra")
-                if extra_val is not None:
-                    existing.extra = extra_val
-            else:
-                metric = FundamentalMetric(
-                    instrument_id=inst.id,
-                    date=today,
-                    market_cap=data["market_cap"],
-                    shares_outstanding=data["shares_outstanding"],
-                    extra=data.get("extra"),
-                )
-                db.add(metric)
+            bulk_upsert(
+                db, FundamentalMetric,
+                [{
+                    "instrument_id": int(inst.id),
+                    "date": today,
+                    "market_cap": data["market_cap"],
+                    "shares_outstanding": data["shares_outstanding"],
+                    "extra": data.get("extra"),
+                }],
+                conflict_columns=["instrument_id", "date"],
+                update_columns=["market_cap", "shares_outstanding", "extra"],
+            )
         db.commit()
 
 
@@ -459,24 +441,29 @@ async def generate_signals(db: Session, updated_ids: set[int] | None = None) -> 
 async def collect_macro(db: Session) -> None:
     from src.collectors.macro import MacroCollector
     from src.db.models import MacroIndicator
+    from src.db.queries import bulk_upsert
 
     collector = MacroCollector()
     items = await collector.fetch_all()
     today = date.today()
-    if items:
-        indicator_types = [item["indicator_type"] for item in items]
-        existing_types = {
-            r[0] for r in db.query(MacroIndicator.indicator_type).filter(
-                MacroIndicator.date == today,
-                MacroIndicator.indicator_type.in_(indicator_types),
-            ).all()
-        }
-    else:
-        existing_types = set()
+    if not items:
+        return
 
+    rows: list[dict[str, Any]] = []
     for item in items:
-        if item["indicator_type"] not in existing_types:
-            db.add(MacroIndicator(**item))
+        rows.append({
+            "date": item.get("date", today),
+            "indicator_type": item["indicator_type"],
+            "value": item["value"],
+            "source": item.get("source"),
+        })
+
+    if rows:
+        bulk_upsert(
+            db, MacroIndicator, rows,
+            conflict_columns=["date", "indicator_type"],
+            update_columns=["value", "source"],
+        )
     db.commit()
 
 
@@ -499,37 +486,30 @@ async def collect_social_sentiment() -> None:
                 posts = await src.fetch_posts()
                 db = get_session()
                 try:
-                    new_count = 0
-                    if posts:
-                        source_name = posts[0].source
-                        ext_ids = [post.external_id for post in posts]
-                        existing_ids = {
-                            r[0] for r in db.query(SocialPost.external_id).filter(
-                                SocialPost.source == source_name,
-                                SocialPost.external_id.in_(ext_ids),
-                            ).all()
-                        }
-                    else:
-                        existing_ids = set()
+                    from src.db.queries import bulk_upsert
 
+                    rows_to_upsert: list[dict[str, Any]] = []
                     for post in posts:
-                        if post.external_id in existing_ids:
-                            continue
-                        sp = SocialPost(
-                            source=post.source,
-                            external_id=post.external_id,
-                            author_nick=post.author_nick,
-                            author_id=post.author_id,
-                            text=post.text,
-                            published_at=post.published_at,
-                            url=post.url,
-                            tickers_mentioned=post.tickers,
-                            raw_json=post.raw,
+                        rows_to_upsert.append({
+                            "source": post.source,
+                            "external_id": post.external_id,
+                            "author_nick": post.author_nick,
+                            "author_id": post.author_id,
+                            "text": post.text,
+                            "published_at": post.published_at,
+                            "url": post.url,
+                            "tickers_mentioned": post.tickers,
+                            "raw_json": post.raw,
+                        })
+
+                    if rows_to_upsert:
+                        processed = bulk_upsert(
+                            db, SocialPost, rows_to_upsert,
+                            conflict_columns=["source", "external_id"],
+                            update_columns=["text", "author_nick", "published_at", "tickers_mentioned"],
                         )
-                        db.add(sp)
-                        new_count += 1
+                        logger.info("Social %s: %d posts upserted", src.source_name, processed)
                     db.commit()
-                    logger.info("Social %s: %d new posts", src.source_name, new_count)
                 finally:
                     db.close()
             except Exception as e:
@@ -577,6 +557,7 @@ async def collect_financial_reports(db: Session) -> None:
     """Fetch/update IFRS financial reports from SmartLab."""
     from src.collectors.financials import FinancialReportCollector
     from src.db.models import FinancialReport
+    from src.db.queries import bulk_upsert
 
     instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
     if not instruments:
@@ -584,7 +565,7 @@ async def collect_financial_reports(db: Session) -> None:
 
     collector = FinancialReportCollector()
     try:
-        collected_financials: list[tuple[Instrument, dict, date, str]] = []
+        rows_to_upsert: list[dict[str, Any]] = []
         for inst in instruments:
             data = await collector.fetch(inst.ticker)
             if not data:
@@ -594,33 +575,24 @@ async def collect_financial_reports(db: Session) -> None:
             if not report_date_str:
                 continue
             rd = date.fromisoformat(report_date_str) if isinstance(report_date_str, str) else report_date_str
-            collected_financials.append((inst, data, rd, period_type))
 
-        if collected_financials:
-            existing_financials = {
-                (r.instrument_id, r.report_date, r.period_type)
-                for r in db.query(
-                    FinancialReport.instrument_id,
-                    FinancialReport.report_date,
-                    FinancialReport.period_type,
-                ).filter(
-                    FinancialReport.instrument_id.in_(list({c[0].id for c in collected_financials})),
-                ).all()
+            row: dict[str, Any] = {
+                "instrument_id": int(inst.id),
+                "report_date": rd,
+                "period_type": period_type,
+                "source": "smartlab",
             }
-        else:
-            existing_financials = set()
+            for k, v in data.items():
+                if hasattr(FinancialReport, k):
+                    row[k] = v
+            rows_to_upsert.append(row)
 
-        for inst, data, rd, period_type in collected_financials:
-            if (inst.id, rd, period_type) in existing_financials:
-                continue
-            report = FinancialReport(
-                instrument_id=inst.id,
-                report_date=rd,
-                period_type=period_type,
-                source="smartlab",
-                **{k: v for k, v in data.items() if hasattr(FinancialReport, k)},
+        if rows_to_upsert:
+            bulk_upsert(
+                db, FinancialReport, rows_to_upsert,
+                conflict_columns=["instrument_id", "report_date", "period_type"],
+                update_columns=[k for k in rows_to_upsert[0] if k not in ("instrument_id", "report_date", "period_type")],
             )
-            db.add(report)
         db.commit()
         logger.info("Financial reports collected for %d instruments", len(instruments))
     finally:

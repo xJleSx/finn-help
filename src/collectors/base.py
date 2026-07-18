@@ -15,9 +15,12 @@ from tenacity import (
 )
 
 from src.core.resilience import (
+    AsyncRateLimiter,
     CircuitBreaker,
     CircuitBreakerOpenError,
+    RateLimiterConfig,
     get_circuit_breaker,
+    get_rate_limiter,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,20 +31,29 @@ class BaseCollector(ABC):
     MAX_RETRIES: int = 3
     RETRY_DELAY: float = 2.0
     TIMEOUT: float = 30.0
+    RATE_LIMIT: float = 10.0  # max requests per second (MOEX ISS default)
 
     def __init__(self) -> None:
         self._client: Optional[httpx.AsyncClient] = None
         self._circuit_breaker: CircuitBreaker = get_circuit_breaker(self.__class__.__name__)
+        self._rate_limiter: AsyncRateLimiter = get_rate_limiter(
+            self.__class__.__name__,
+            RateLimiterConfig(max_rate=self.RATE_LIMIT, burst_multiplier=3),
+        )
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=self.TIMEOUT, follow_redirects=True)
         return self._client
 
+    async def _rate_limited_fetch(self, url: str, params: Optional[dict[str, Any]] = None) -> httpx.Response:
+        client = await self._get_client()
+        async with self._rate_limiter:
+            return await client.get(url, params=params)
+
     async def _fetch_json(self, url: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         async def _do_fetch() -> dict[str, Any]:
-            client = await self._get_client()
-            resp = await client.get(url, params=params)
+            resp = await self._rate_limited_fetch(url, params)
             resp.raise_for_status()
             data = resp.json()
             if not isinstance(data, dict):
@@ -80,8 +92,9 @@ class BaseCollector(ABC):
 
     async def _fetch_text(self, url: str, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None) -> str:
         async def _do_fetch() -> str:
-            client = await self._get_client()
-            resp = await client.get(url, params=params, headers=headers)
+            async with self._rate_limiter:
+                client = await self._get_client()
+                resp = await client.get(url, params=params, headers=headers)
             resp.raise_for_status()
             return resp.text
 
@@ -119,8 +132,9 @@ class BaseCollector(ABC):
         self, url: str, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None
     ) -> dict[str, Any] | list[Any]:
         async def _do_fetch() -> dict[str, Any] | list[Any]:
-            client = await self._get_client()
-            resp = await client.get(url, params=params, headers=headers)
+            async with self._rate_limiter:
+                client = await self._get_client()
+                resp = await client.get(url, params=params, headers=headers)
             resp.raise_for_status()
             return resp.json()
 
@@ -153,6 +167,57 @@ class BaseCollector(ABC):
                     )
                     raise
         return None
+
+    async def _paginate(
+        self,
+        path: str,
+        params: Optional[dict[str, Any]] = None,
+        table_name: str = "securities",
+        page_size: int = 100,
+        max_pages: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Generic cursor-based pagination for MOEX ISS endpoints.
+
+        Iterates through pages using the 'start' cursor parameter
+        and reading '{table_name}.cursor' from the response.
+        """
+        all_rows: list[dict[str, Any]] = []
+        base_params = dict(params or {})
+        base_params.setdefault("iss.meta", "off")
+        start = 0
+
+        for _ in range(max_pages):
+            page_params = {**base_params, "start": str(start)}
+            data = await self._fetch_json(path, page_params)
+            rows = self._parse_table(data, table_name)
+            if not rows:
+                break
+            all_rows.extend(rows)
+
+            cursor = data.get(f"{table_name}.cursor") or data.get("cursor")
+            if isinstance(cursor, dict):
+                cursor_rows = cursor.get("data", [])
+                if cursor_rows and len(cursor_rows[0]) > 1:
+                    total = int(cursor_rows[0][1])
+                    if start + len(rows) >= total:
+                        break
+                    start += len(rows)
+                    continue
+            break
+
+        return all_rows
+
+    @staticmethod
+    def _parse_table(data: dict[str, Any], table_name: str) -> list[dict[str, Any]]:
+        """Parse a named table from a MOEX ISS JSON response."""
+        table = data.get(table_name)
+        if not isinstance(table, dict):
+            return []
+        cols = table.get("columns")
+        rows = table.get("data")
+        if not isinstance(cols, list) or not isinstance(rows, list):
+            return []
+        return [dict(zip(cols, row)) for row in rows]
 
     async def close(self) -> None:
         if self._client and not self._client.is_closed:

@@ -187,6 +187,7 @@ async def execute_order(
     order_type: str = "market",
     time_in_force: str = "day",
     is_short: bool = False,
+    skip_risk_checks: bool = False,
 ) -> OrderRecord:
     global _mode
     effective_mode = mode_override if mode_override is not None else _mode
@@ -208,6 +209,41 @@ async def execute_order(
     )
 
     effective_direction = Direction.SHORT if is_short else Direction(direction.upper())
+
+    if not skip_risk_checks and effective_mode != TradeMode.DRY_RUN:
+        from src.db.connection import get_session as _risk_db
+        from src.db.models import Portfolio as _PortModel
+
+        portfolio_value: float = 0.0
+        _rdb = _risk_db()
+        try:
+            port = _rdb.query(_PortModel).first()
+            if port:
+                portfolio_value = float(port.total_value or 0)
+        except Exception as e:
+            logger.debug("Could not get portfolio value for risk check: %s", e)
+        finally:
+            _rdb.close()
+
+        from src.trading.risk.manager import get_risk_manager
+
+        rm = get_risk_manager()
+        ok, risk_msg = await rm.can_trade(
+            ticker=ticker,
+            quantity=quantity,
+            price=record.price,
+            portfolio_value=portfolio_value,
+            direction=direction,
+            is_short=is_short,
+        )
+        if not ok:
+            record.status = "rejected"
+            record.reason = f"RISK: {risk_msg}"
+            logger.warning("Order REJECTED: %s %d %s — %s", direction, quantity, ticker, risk_msg)
+            _execution_log.append(record)
+            record.db_id = save_order(record)
+            await _notify_trade(record, reason)
+            return record
 
     if effective_mode == TradeMode.DRY_RUN:
         record.status = "simulated"

@@ -126,22 +126,19 @@ class MOEXCollector(BaseCollector):
         return [dict(zip(cols, row)) for row in rows]
 
     async def get_securities(self) -> list[dict[str, Any]]:
-        data = await self._fetch_json("/securities.json", {"iss.meta": "off"})
-        return self._parse_table(data, "securities")
+        return await self._paginate("/securities.json", table_name="securities")
 
     async def get_stocks(self) -> list[dict[str, Any]]:
-        data = await self._fetch_json(
+        return await self._paginate(
             "/engines/stock/markets/shares/boards/TQBR/securities.json",
-            {"iss.meta": "off"},
+            table_name="securities",
         )
-        return self._parse_table(data, "securities")
 
     async def get_etfs(self) -> list[dict[str, Any]]:
-        data = await self._fetch_json(
+        return await self._paginate(
             "/engines/stock/markets/shares/boards/TQTF/securities.json",
-            {"iss.meta": "off"},
+            table_name="securities",
         )
-        return self._parse_table(data, "securities")
 
     async def get_history(
         self,
@@ -163,43 +160,21 @@ class MOEXCollector(BaseCollector):
         if not path:
             path = BOARD_MAP["shares"]
 
-        all_rows: list[dict[str, Any]] = []
-        start = 0
-        while True:
-            params: dict[str, Any] = {
-                "from": from_date,
-                "till": to_date,
-                "iss.meta": "off",
-                "start": str(start),
-            }
-            data = await self._fetch_json(path.format(ticker=ticker), params)
-            rows = self._parse_table(data, "history")
-            if not rows:
-                break
-            all_rows.extend(rows)
-
-            cursor = data.get("history.cursor")
-            if isinstance(cursor, dict):
-                cursor_rows = cursor.get("data", [])
-                if cursor_rows:
-                    total = int(cursor_rows[0][1]) if len(cursor_rows[0]) > 1 else 0
-                    if start + len(rows) >= total:
-                        break
-                    start += len(rows)
-                    continue
-            break
-
-        return all_rows
+        return await self._paginate(
+            path.format(ticker=ticker),
+            params={"from": from_date, "till": to_date},
+            table_name="history",
+        )
 
     async def _get_bond_history(self, ticker: str, from_date: str, to_date: str) -> tuple[list[dict[str, Any]], str | None]:
         for board_id in BOND_BOARDS:
             path = f"/history/engines/stock/markets/bonds/boards/{board_id}/securities/{ticker}.json"
             try:
-                data = await self._fetch_json(
+                rows = await self._paginate(
                     path,
-                    {"from": from_date, "till": to_date, "iss.meta": "off"},
+                    params={"from": from_date, "till": to_date},
+                    table_name="history",
                 )
-                rows = self._parse_table(data, "history")
                 if rows:
                     return rows, board_id
             except Exception as e:
@@ -208,11 +183,10 @@ class MOEXCollector(BaseCollector):
         return [], None
 
     async def get_dividends(self, ticker: str) -> list[dict[str, Any]]:
-        data = await self._fetch_json(
+        return await self._paginate(
             f"/securities/{ticker}/dividends.json",
-            {"iss.meta": "off"},
+            table_name="dividends",
         )
-        return self._parse_table(data, "dividends")
 
     async def get_marketdata(self, ticker: str, itype: str = "stock") -> dict[str, Any]:
         if itype == "bond":
@@ -236,25 +210,25 @@ class MOEXCollector(BaseCollector):
         rows = self._parse_table(data, "marketdata")
         return rows[0] if rows else {}
 
-    async def get_bond_history_with_board(
+    def get_bond_history_with_board(
         self,
         ticker: str,
         from_date: str,
         to_date: str,
     ) -> tuple[list[dict[str, Any]], str | None]:
         """Like get_history but also returns the MOEX board ID (TQCB/TQBD/TQOB)."""
-        return await self._get_bond_history(ticker, from_date, to_date)
+        return self._get_bond_history(ticker, from_date, to_date)
 
     async def get_bonds(self) -> list[dict[str, Any]]:
         seen = set()
         results = []
         for board_id in BOND_BOARDS:
             try:
-                data = await self._fetch_json(
+                board_rows = await self._paginate(
                     f"/engines/stock/markets/bonds/boards/{board_id}/securities.json",
-                    {"iss.meta": "off"},
+                    table_name="securities",
                 )
-                for entry in self._parse_table(data, "securities"):
+                for entry in board_rows:
                     secid = entry.get("SECID") or entry.get("secid")
                     if secid and secid not in seen:
                         seen.add(secid)
@@ -294,12 +268,11 @@ class MOEXCollector(BaseCollector):
         return info
 
     async def get_coupons(self, ticker: str) -> list[dict[str, Any]]:
-        """Get coupon schedule from MOEX ISS."""
-        data = await self._fetch_json(
+        """Get coupon schedule from MOEX ISS with pagination."""
+        return await self._paginate(
             f"/securities/{ticker}/coupons.json",
-            {"iss.meta": "off"},
+            table_name="coupons",
         )
-        return self._parse_table(data, "coupons")
 
     async def get_aggregates(self, ticker: str) -> list[dict[str, Any]]:
         """Get aggregated bond data (face value, accrued interest, etc.)."""

@@ -236,3 +236,262 @@ def compute_correlation_adjusted_size(
         adjusted[ticker] = position_sizes[ticker] * penalty
 
     return adjusted
+
+
+# ── RiskManager: unified pre-trade risk gate ──────────────────────────────────
+
+_TradeCheckResult = tuple[bool, str]
+
+
+class RiskManager:
+    """Unified risk management gate that checks all controls before a trade.
+
+    Usage:
+        rm = RiskManager()
+        ok, reason = await rm.can_trade(ticker="SBER", quantity=100, price=250.0, portfolio_value=500000)
+        if not ok:
+            logger.warning("Trade blocked: %s", reason)
+    """
+
+    def __init__(self) -> None:
+        self._var_cache: dict[str, dict[str, float]] = {}
+        self._sentiment_cache: dict[str, list[float]] = {}
+
+    async def can_trade(
+        self,
+        ticker: str,
+        quantity: int,
+        price: float,
+        portfolio_value: float = 0.0,
+        direction: str = "BUY",
+        is_short: bool = False,
+    ) -> _TradeCheckResult:
+        """Run all risk checks and return (allowed: bool, reason: str)."""
+        checks = [
+            self._check_kill_switch(),
+            self._check_trading_enabled(),
+        ]
+
+        if portfolio_value > 0:
+            checks.extend([
+                self._check_position_size(quantity, price, portfolio_value),
+                self._check_concentration(ticker, quantity, price, portfolio_value),
+                self._check_var(ticker),
+                self._check_daily_loss(portfolio_value),
+                self._check_drawdown(portfolio_value),
+            ])
+
+        if is_short:
+            checks.append(self._check_short_eligibility(ticker, quantity))
+
+        checks.append(self._check_sentiment(ticker))
+
+        for check_fn in checks:
+            ok, reason = await check_fn
+            if not ok:
+                return False, reason
+
+        return True, "All risk checks passed"
+
+    async def _check_kill_switch(self) -> _TradeCheckResult:
+        from src.trading.risk.guards import is_kill_switch_active
+
+        if is_kill_switch_active():
+            return False, "Kill switch is active — trading halted"
+        return True, "Kill switch OK"
+
+    async def _check_trading_enabled(self) -> _TradeCheckResult:
+        from src.config import settings
+
+        if not settings.enable_trading:
+            return False, "Trading disabled via ENABLE_TRADING config"
+        return True, "Trading enabled"
+
+    async def _check_position_size(self, quantity: int, price: float, portfolio_value: float) -> _TradeCheckResult:
+        from src.trading.risk.guards import check_position_size
+
+        position_value = quantity * price
+        ok, msg = check_position_size(position_value, portfolio_value)
+        if not ok:
+            return False, f"Position size limit: {msg}"
+        return True, msg
+
+    async def _check_concentration(self, ticker: str, quantity: int, price: float, portfolio_value: float) -> _TradeCheckResult:
+        from src.trading.compliance.limits import check_position_limit
+
+        position_pct = (quantity * price) / portfolio_value if portfolio_value > 0 else 0
+        ok, msg = check_position_limit(ticker, position_pct)
+        if not ok:
+            return False, f"Concentration limit: {msg}"
+        return True, msg
+
+    async def _check_var(self, ticker: str) -> _TradeCheckResult:
+        from src.trading.risk.guards import check_var_limit
+
+        var_data = self._var_cache.get(ticker)
+        if var_data is not None:
+            var_95 = float(var_data.get("var_95", 0)) / 100
+        else:
+            try:
+                from src.db.connection import get_session
+                from src.db.models.instrument import Instrument, Price
+
+                db = get_session()
+                try:
+                    inst = db.query(Instrument).filter_by(ticker=ticker).first()
+                    if inst:
+                        prices_list = [
+                            float(p.close) for p in db.query(Price)
+                            .filter_by(instrument_id=int(inst.id))
+                            .order_by(Price.date.desc())
+                            .limit(100).all()
+                            if p.close
+                        ]
+                        if len(prices_list) > 20:
+                            var_data = compute_var(prices_list)
+                            self._var_cache[ticker] = var_data
+                            var_95 = float(var_data.get("var_95", 0)) / 100
+                        else:
+                            var_95 = 0.0
+                    else:
+                        var_95 = 0.0
+                finally:
+                    db.close()
+            except Exception:
+                var_95 = 0.0
+
+        ok, msg = check_var_limit(var_95)
+        if not ok:
+            return False, f"VaR limit: {msg}"
+        return True, msg
+
+    async def _check_daily_loss(self, portfolio_value: float) -> _TradeCheckResult:
+        from src.trading.risk.guards import check_daily_loss
+
+        try:
+            from src.trading.risk.guards import get_day_pnl
+
+            _, pnl_pct = get_day_pnl()
+            triggered = check_daily_loss(pnl_pct)
+            if triggered:
+                return False, f"Daily loss limit hit ({pnl_pct:.2%})"
+            return True, f"Daily P&L: {pnl_pct:.2%}"
+        except Exception:
+            return True, "Daily loss check unavailable"
+
+    async def _check_drawdown(self, portfolio_value: float) -> _TradeCheckResult:
+        from src.trading.risk.guards import current_drawdown
+
+        dd = current_drawdown()
+        from src.trading.risk.guards import max_drawdown_pct
+        limit = max_drawdown_pct()
+        if abs(dd) > limit:
+            return False, f"Max drawdown exceeded: {dd:.2%} > {limit:.2%}"
+        return True, f"Drawdown: {dd:.2%} / {limit:.2%}"
+
+    async def _check_short_eligibility(self, ticker: str, quantity: int) -> _TradeCheckResult:
+        from src.trading.compliance.limits import check_short_eligibility
+
+        ok, msg = check_short_eligibility(ticker, quantity)
+        if not ok:
+            return False, f"Short eligibility: {msg}"
+        return True, msg
+
+    async def _check_sentiment(self, ticker: str) -> _TradeCheckResult:
+        from src.trading.risk.guards import check_news_sentiment
+
+        scores = self._sentiment_cache.get(ticker)
+        if scores is None:
+            try:
+                from datetime import datetime, timedelta, timezone
+
+                from src.db.connection import get_session
+
+                db = get_session()
+                try:
+                    from src.db.models import Instrument, News, NewsInstrument
+                    inst = db.query(Instrument).filter_by(ticker=ticker).first()
+                    if inst:
+                        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+                        news_list = (
+                            db.query(News)
+                            .join(NewsInstrument)
+                            .filter(
+                                NewsInstrument.instrument_id == int(inst.id),
+                                News.published_at >= cutoff,
+                                News.sentiment_score.isnot(None),
+                            )
+                            .all()
+                        )
+                        scores = [float(n.sentiment_score) for n in news_list if n.sentiment_score is not None]
+                        self._sentiment_cache[ticker] = scores
+                    else:
+                        scores = []
+                finally:
+                    db.close()
+            except Exception:
+                scores = []
+
+        ok, msg = check_news_sentiment(scores)
+        if not ok:
+            return False, f"Sentiment check: {msg}"
+        return True, msg
+
+    async def compute_position_size(
+        self,
+        capital: float,
+        price: float,
+        ticker: str = "",
+        var_cache: dict[str, dict[str, float]] | None = None,
+    ) -> int:
+        """Compute safe position size considering volatility, VaR, and liquidity."""
+        if var_cache:
+            self._var_cache.update(var_cache)
+
+        var_info = self._var_cache.get(ticker, {"var_95": 2.0})
+        var_95 = float(var_info.get("var_95", 2.0))
+
+        from src.trading.risk.guards import risk_per_trade
+        risk_pt = risk_per_trade()
+
+        sl_pct = min(5.0, max(1.0, var_95 * 3))
+        pos = compute_vol_adjusted_size(capital, risk_pt, price * sl_pct / 100, price)
+
+        try:
+            import numpy as np
+
+            from src.db.connection import get_session
+            from src.db.models.instrument import Instrument, Price
+
+            db = get_session()
+            try:
+                inst = db.query(Instrument).filter_by(ticker=ticker).first()
+                if inst:
+                    prices_list = [float(p.close) for p in db.query(Price).filter_by(instrument_id=int(inst.id)).order_by(Price.date.desc()).limit(20).all() if p.close]
+                    if prices_list:
+                        avg_vol = float(np.mean(prices_list)) * 1000
+                        pos = compute_liquidity_constrained_size(pos, avg_vol)
+            finally:
+                db.close()
+        except Exception as e:
+            logger.debug("Position size calc unavailable for %s: %s", ticker, e)
+
+        return max(pos, 1)
+
+    def invalidate_cache(self, ticker: str | None = None) -> None:
+        if ticker:
+            self._var_cache.pop(ticker, None)
+            self._sentiment_cache.pop(ticker, None)
+        else:
+            self._var_cache.clear()
+            self._sentiment_cache.clear()
+
+
+_default_risk_manager: RiskManager | None = None
+
+
+def get_risk_manager() -> RiskManager:
+    global _default_risk_manager
+    if _default_risk_manager is None:
+        _default_risk_manager = RiskManager()
+    return _default_risk_manager
