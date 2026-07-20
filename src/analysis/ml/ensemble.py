@@ -30,6 +30,10 @@ class EnsemblePredictor:
         self._meta_model: Any = None
         self._ticker = ticker
         self._meta_trained_at: float = 0.0
+        self._meta_discarded: bool = False
+        self._meta_discard_acc: float = 0.0
+        self._meta_used_count: int = 0
+        self._meta_skip_count: int = 0
 
     @property
     def model_name(self) -> str:
@@ -136,11 +140,14 @@ class EnsemblePredictor:
         uncertainty = min(max(uncertainty, 0.0), 1.0)
 
         meta_probs = self._stacking_predict(df, results)
-        if meta_probs is not None:
+        use_meta = meta_probs is not None and not getattr(self, '_meta_discarded', False)
+        if use_meta:
             avg_prob = meta_probs
             signal_score = (meta_probs - 0.5) * 2
+            self._meta_used_count = getattr(self, '_meta_used_count', 0) + 1
         else:
             signal_score = (avg_prob - 0.5) * 2
+            self._meta_skip_count = getattr(self, '_meta_skip_count', 0) + 1
 
         oos_agg = {
             "oos_accuracy": float(np.mean([o.get("oos_accuracy", 0.5) for o in oos_list])),
@@ -327,15 +334,33 @@ class EnsemblePredictor:
 
             val_acc = float(np.mean(self._meta_model.predict(meta_x_scaled) == y_val))
             if val_acc < 0.52:
-                logger.debug("OOF meta-learner acc %.3f < 0.52, discarding", val_acc)
-                self._scaler = None
-                self._meta_model = None
-                return
+                if val_acc >= 0.48:
+                    logger.info(
+                        "OOF meta-learner acc %.3f < 0.52 — soft fallback, using weighted avg",
+                        val_acc,
+                    )
+                    self._meta_discarded = True
+                    self._meta_discard_acc = val_acc
+                else:
+                    logger.warning(
+                        "OOF meta-learner acc %.3f < 0.48, discarding meta-learner",
+                        val_acc,
+                    )
+                    self._meta_discarded = True
+                    self._meta_discard_acc = val_acc
+                    self._scaler = None
+                    self._meta_model = None
+                    return
 
             import time
 
             self._meta_trained_at = time.time()
-            logger.info("OOF meta-learner trained: acc=%.3f, models=%d", val_acc, active_models)
+            self._meta_discarded = False
+            logger.info(
+                "OOF meta-learner trained: acc=%.3f, models=%d",
+                val_acc,
+                active_models,
+            )
         except Exception as e:
             logger.warning("OOF meta-learner training failed: %s", e)
             self._scaler = None
