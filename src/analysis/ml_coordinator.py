@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, cast
 
 import pandas as pd
@@ -99,23 +100,41 @@ def _train_news_impact_sync(sym: str) -> bool:
 
 
 class MLCoordinator:
-    def __init__(self) -> None:
-        self._prophet_cache: dict[str, Any] = {}
-        self._ensemble_cache: dict[str, Any] = {}
+    def __init__(self, cache_ttl_seconds: int = 3600) -> None:
+        self._prophet_cache: dict[str, tuple[Any, float]] = {}
+        self._ensemble_cache: dict[str, tuple[Any, float]] = {}
+        self._cache_ttl = cache_ttl_seconds
+
+    def _evict_expired(self) -> None:
+        now = datetime.now(timezone.utc).timestamp()
+        self._prophet_cache = {
+            k: v for k, v in self._prophet_cache.items()
+            if now - v[1] < self._cache_ttl
+        }
+        self._ensemble_cache = {
+            k: v for k, v in self._ensemble_cache.items()
+            if now - v[1] < self._cache_ttl
+        }
 
     def get_prophet(self, ticker: str = "") -> Any:
-        if ticker not in self._prophet_cache:
-            from src.analysis.ml.prophet_model import StatsModelsTrendPredictor
+        self._evict_expired()
+        if ticker in self._prophet_cache:
+            return self._prophet_cache[ticker][0]
+        from src.analysis.ml.prophet_model import StatsModelsTrendPredictor
 
-            self._prophet_cache[ticker] = StatsModelsTrendPredictor(ticker=ticker)
-        return self._prophet_cache[ticker]
+        instance = StatsModelsTrendPredictor(ticker=ticker)
+        self._prophet_cache[ticker] = (instance, datetime.now(timezone.utc).timestamp())
+        return instance
 
     def get_ensemble(self, ticker: str = "") -> Any:
-        if ticker not in self._ensemble_cache:
-            from src.analysis.ml.ensemble import EnsemblePredictor
+        self._evict_expired()
+        if ticker in self._ensemble_cache:
+            return self._ensemble_cache[ticker][0]
+        from src.analysis.ml.ensemble import EnsemblePredictor
 
-            self._ensemble_cache[ticker] = EnsemblePredictor(ticker=ticker)
-        return self._ensemble_cache[ticker]
+        instance = EnsemblePredictor(ticker=ticker)
+        self._ensemble_cache[ticker] = (instance, datetime.now(timezone.utc).timestamp())
+        return instance
 
     def _prepare_events(
         self, ind_df: pd.DataFrame, events: list[MarketEvent] | None, event_builder: EventFeatureBuilder | None
@@ -321,4 +340,16 @@ class MLCoordinator:
         return all_results
 
 
-ml_coordinator = MLCoordinator()
+_ml_coordinator_instance: MLCoordinator | None = None
+
+
+def get_ml_coordinator() -> MLCoordinator:
+    global _ml_coordinator_instance  # noqa: PLW0603
+    if _ml_coordinator_instance is None:
+        _ml_coordinator_instance = MLCoordinator(
+            cache_ttl_seconds=getattr(settings, "ml_cache_ttl", 3600)
+        )
+    return _ml_coordinator_instance
+
+
+ml_coordinator = get_ml_coordinator()

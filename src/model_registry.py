@@ -3,7 +3,7 @@ import hashlib
 import json
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -304,3 +304,62 @@ def prune_models(max_versions: int = 5, model_dir: Optional[Path] = None) -> dic
         logger.info("Prune: nothing to clean")
 
     return {"registry_pruned": registry_pruned, "orphan_files_removed": orphan_removed}
+
+
+# ── Version pinning and device support ─────────────────────────────────────
+
+
+def get_latest_version(name: str) -> Optional[str]:
+    registry = _load_registry()
+    if name not in registry:
+        return None
+    return registry[name].get("latest")
+
+
+def set_production_version(name: str, version: str) -> None:
+    registry = _load_registry()
+    if name not in registry:
+        raise ValueError(f"Model '{name}' not found in registry")
+    meta = next((v for v in registry[name]["versions"] if v["version"] == version), None)
+    if not meta:
+        raise ValueError(f"Version '{version}' not found for model '{name}'")
+    registry[name]["production"] = version
+    _save_registry(registry)
+    logger.info("Model %s production version set to %s", name, version)
+
+
+def get_production_version(name: str) -> Optional[str]:
+    registry = _load_registry()
+    if name not in registry:
+        return None
+    return registry[name].get("production")
+
+
+def get_device() -> str:
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+    except ImportError:
+        pass
+    return "cpu"
+
+
+def save_model_with_device(
+    model: Any,
+    name: str,
+    device: Optional[str] = None,
+    metrics: Optional[dict[str, Any]] = None,
+    params: Optional[dict[str, Any]] = None,
+) -> str:
+    if device is None:
+        device = get_device()
+    version = save_model(model, name, metrics=metrics, params=params)
+    registry = _load_registry()
+    for v in registry[name]["versions"]:
+        if v["version"] == version:
+            v["device"] = device
+    _save_registry(registry)
+    return version
