@@ -3,13 +3,13 @@ import logging
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, select
 
 from src.alerts.generators import generate_all_alerts, store_alerts
 from src.analysis.rebalancing import RebalancingEngine
 from src.analysis.service import analysis_service
 from src.core.executor import get_executor
-from src.db.connection import get_session
+from src.db.connection import get_async_session, get_session
 from src.db.models import Signal as SignalModel
 from src.scheduler.collectors import (
     collect_alternative_data,
@@ -54,86 +54,83 @@ async def _process_in_batches(items: list[Any], processor: Any, batch_size: int 
     return results
 
 
-def _delete_today_signals_sync(db: Session) -> None:
-    today = date.today()
-    db.query(SignalModel).filter(
-        SignalModel.date >= today,
-        SignalModel.date < today + timedelta(days=1),
-    ).delete()
-    db.commit()
-
-
 async def daily_update() -> None:
     logger.info("Starting daily update cycle...")
-    db_sync = get_session()
-    try:
-        loop = asyncio.get_running_loop()
-        updated_ids = await collect_prices(db_sync)
-        await collect_dividends(db_sync)
-        await collect_fundamental(db_sync)
-        await loop.run_in_executor(get_executor(), lambda: compute_indicators(db_sync, instrument_ids=updated_ids))
-        news_list = await loop.run_in_executor(get_executor(), collect_news, db_sync)
-        await loop.run_in_executor(get_executor(), compute_geo_risk, db_sync, news_list)
-        await loop.run_in_executor(get_executor(), collect_macro, db_sync)
-        await loop.run_in_executor(get_executor(), collect_alternative_data, db_sync)
-        await loop.run_in_executor(get_executor(), collect_social_posts, db_sync)
-        await loop.run_in_executor(get_executor(), collect_social_sentiment)
+    async with get_async_session() as db:
+        try:
+            loop = asyncio.get_running_loop()
+            updated_ids = await collect_prices(db)
+            await collect_dividends(db)
+            await collect_fundamental(db)
+            await loop.run_in_executor(get_executor(), lambda: compute_indicators(get_session(), instrument_ids=updated_ids))
+            news_list = await collect_news(db)
+            await compute_geo_risk(db, news_list)
+            await collect_macro(db)
+            await collect_alternative_data(db)
+            await collect_social_posts(db)
+            await collect_social_sentiment()
 
-        digest = await loop.run_in_executor(get_executor(), run_news_summarizer, db_sync)
-        if digest:
-            logger.info("Daily digest (%d chars)", len(digest))
+            digest = await run_news_summarizer(db)
+            if digest:
+                logger.info("Daily digest (%d chars)", len(digest))
 
-        await loop.run_in_executor(get_executor(), run_sector_impact_analysis, db_sync)
-        await loop.run_in_executor(get_executor(), collect_bond_offerings, db_sync)
+            await run_sector_impact_analysis(db)
+            await collect_bond_offerings(db)
 
-        sync_result = await sync_portfolio_from_broker(user_id=1)
-        if sync_result.get("positions_synced", 0) > 0 or sync_result.get("removed", 0) > 0:
-            logger.info(
-                "Portfolio synced: %d positions, %d removed",
-                sync_result["positions_synced"],
-                sync_result.get("removed", 0),
-            )
+            sync_result = await sync_portfolio_from_broker(user_id=1)
+            if sync_result.get("positions_synced", 0) > 0 or sync_result.get("removed", 0) > 0:
+                logger.info(
+                    "Portfolio synced: %d positions, %d removed",
+                    sync_result["positions_synced"],
+                    sync_result.get("removed", 0),
+                )
 
-        await loop.run_in_executor(get_executor(), _delete_today_signals_sync, db_sync)
-        await loop.run_in_executor(get_executor(), lambda: generate_signals(db_sync, updated_ids=None))
-        logger.info("Daily update cycle completed")
-    except Exception as e:
-        logger.error("Daily update cycle failed: %s", e)
-        db_sync.rollback()
-    finally:
-        db_sync.close()
+            await _delete_today_signals(db)
+            await generate_signals(db, updated_ids=None)
+            logger.info("Daily update cycle completed")
+        except Exception as e:
+            logger.error("Daily update cycle failed: %s", e)
+
+
+async def _delete_today_signals(db: Any) -> None:
+    today = date.today()
+    await db.execute(
+        delete(SignalModel).where(
+            SignalModel.date >= today,
+            SignalModel.date < today + timedelta(days=1),
+        )
+    )
+    await db.commit()
 
 
 async def weekly_update() -> None:
     """Weekly tasks: financial reports, bond offerings, company profiles, corporate events, alerts, rebalance."""
     logger.info("Starting weekly update cycle...")
     loop = asyncio.get_running_loop()
-    db_sync = get_session()
-    try:
-        await loop.run_in_executor(get_executor(), collect_financial_reports, db_sync)
-        await loop.run_in_executor(get_executor(), collect_company_profiles, db_sync)
-        await loop.run_in_executor(get_executor(), collect_corporate_events, db_sync)
+    async with get_async_session() as db:
+        try:
+            await collect_financial_reports(db)
+            await loop.run_in_executor(get_executor(), lambda: collect_company_profiles(get_session()))
+            await collect_corporate_events(db)
 
-        await loop.run_in_executor(
-            get_executor(),
-            lambda: analysis_service.train_models(db_sync),
-        )
+            await loop.run_in_executor(
+                get_executor(),
+                lambda: analysis_service.train_models(get_session()),
+            )
 
-        rebalancer = RebalancingEngine()
-        plan = await loop.run_in_executor(get_executor(), lambda: rebalancer.analyze_portfolio(db_sync, user_id=0))
-        if plan:
-            logger.info("Rebalance plan: %d actions", len(plan))
+            rebalancer = RebalancingEngine()
+            plan = await loop.run_in_executor(get_executor(), lambda: rebalancer.analyze_portfolio(get_session(), user_id=0))
+            if plan:
+                logger.info("Rebalance plan: %d actions", len(plan))
 
-        alerts = await loop.run_in_executor(get_executor(), generate_all_alerts, db_sync)
-        stored = await loop.run_in_executor(get_executor(), store_alerts, db_sync, alerts)
-        if stored:
-            logger.info("Alerts generated: %d new", stored)
+            alerts = await loop.run_in_executor(get_executor(), lambda: generate_all_alerts(get_session()))
+            stored = await loop.run_in_executor(get_executor(), lambda: store_alerts(get_session(), alerts))
+            if stored:
+                logger.info("Alerts generated: %d new", stored)
 
-        logger.info("Weekly update cycle completed")
-    except Exception as e:
-        logger.error("Weekly update cycle failed: %s", e)
-    finally:
-        db_sync.close()
+            logger.info("Weekly update cycle completed")
+        except Exception as e:
+            logger.error("Weekly update cycle failed: %s", e)
 
     # Periodic model cleanup — runs even if weekly cycle partially fails
     try:

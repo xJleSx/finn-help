@@ -11,7 +11,9 @@ from src.cli.output import console
 from src.collectors.cbr import CBRCollector
 from src.collectors.financials import FinancialReportCollector
 from src.collectors.moex import MOEXCollector
-from src.db.connection import get_session
+from sqlalchemy import select
+
+from src.db.connection import get_async_session
 from src.db.models import BondOffering, Dividend, FinancialReport, Instrument, Price
 
 from . import app
@@ -20,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> None:
-    db = get_session()
-    try:
-        inst = db.query(Instrument).filter_by(ticker=tk).first()
+    async with get_async_session() as db:
+        result = await db.execute(select(Instrument).filter_by(ticker=tk))
+        inst = result.scalars().first()
         if not inst:
             market_data = await moex.get_marketdata(tk, itype=itype)
             if not market_data:
@@ -35,11 +37,14 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> 
                 lot_size=market_data.get("LOTSIZE", 1),
             )
             db.add(inst)
-            db.commit()
+            await db.commit()
 
         board = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
-        last_date = db.query(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).first()
-        from_date = (last_date[0] + timedelta(days=1)).isoformat() if last_date else (date.today() - timedelta(days=365)).isoformat()
+        last_result = await db.execute(
+            select(Price.date).filter_by(instrument_id=inst.id).order_by(Price.date.desc()).limit(1)
+        )
+        last_date = last_result.scalar()
+        from_date = (last_date + timedelta(days=1)).isoformat() if last_date else (date.today() - timedelta(days=365)).isoformat()
 
         history = await moex.get_history(tk, from_date=from_date, board=board)
         if not history:
@@ -51,8 +56,10 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> 
                     continue
                 if isinstance(d, str):
                     d = date.fromisoformat(d)
-                exists = db.query(Price).filter_by(instrument_id=inst.id, date=d).first()
-                if not exists:
+                exists_result = await db.execute(
+                    select(Price).filter_by(instrument_id=inst.id, date=d)
+                )
+                if not exists_result.scalars().first():
                     price = Price(
                         instrument_id=inst.id,
                         date=d,
@@ -63,7 +70,7 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> 
                         volume=row.get("VOLUME") or row.get("volume"),
                     )
                     db.add(price)
-            db.commit()
+            await db.commit()
 
         if inst.instrument_type in ("stock", "etf"):
             dividends = await moex.get_dividends(tk)
@@ -74,8 +81,10 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> 
                     continue
                 if isinstance(d, str):
                     d = date.fromisoformat(d)
-                div_exists = db.query(Dividend).filter_by(instrument_id=inst.id, date=d, amount=float(amt)).first()
-                if not div_exists:
+                div_exists_result = await db.execute(
+                    select(Dividend).filter_by(instrument_id=inst.id, date=d, amount=float(amt))
+                )
+                if not div_exists_result.scalars().first():
                     div = Dividend(
                         instrument_id=inst.id,
                         date=d,
@@ -83,7 +92,7 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> 
                         currency="RUB",
                     )
                     db.add(div)
-            db.commit()
+            await db.commit()
 
         # Auto-fetch IFRS financial report for stocks
         if inst.instrument_type in ("stock", "etf"):
@@ -97,24 +106,22 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> 
                     if reporting_date_str:
                         rdate = date.fromisoformat(reporting_date_str)
                         # Check if report for this date already exists
-                        existing = db.query(FinancialReport).filter_by(instrument_id=inst.id, report_date=rdate, period_type=period_type).first()
+                        existing_result = await db.execute(
+                            select(FinancialReport).filter_by(instrument_id=inst.id, report_date=rdate, period_type=period_type)
+                        )
+                        existing = existing_result.scalars().first()
                         if not existing:
                             fr = FinancialReport(instrument_id=inst.id, report_date=rdate, period_type=period_type)
                             for key, val in fin_data.items():
                                 if hasattr(fr, key) and isinstance(val, (int, float)):
                                     setattr(fr, key, val)
                             db.add(fr)
-                            db.commit()
+                            await db.commit()
                             logger.info("Financial report saved for %s (%s)", tk, reporting_date_str)
             except Exception as e:
                 logger.warning("Failed to fetch financials for %s: %s", tk, e)
-                db.rollback()
+                await db.rollback()
 
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Ошибка при обновлении {tk}: {e}")
-    finally:
-        db.close()
 
 
 @app.command()

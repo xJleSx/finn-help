@@ -1,9 +1,12 @@
+import asyncio
 import contextlib
 import logging
 from datetime import date, timedelta, timezone
 from typing import Any, Optional
 
 import pandas as pd
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from src.collectors.cbr import CBRCollector
@@ -14,7 +17,7 @@ from src.constants import (
     DIVIDEND_CHECK_DAYS,
     NEWS_MAX_PER_FEED,
 )
-from src.db.connection import get_session
+from src.db.connection import get_async_session, get_session
 from src.db.models import (
     Dividend,
     GeoRiskScore,
@@ -23,6 +26,7 @@ from src.db.models import (
     News,
     Price,
 )
+from src.db.queries import async_bulk_upsert
 from src.geo.risk_scorer import GeoRiskScorer
 from src.geo.sentiment_divergence import SentimentDivergenceDetector
 
@@ -38,9 +42,7 @@ def _first(v1: Any, v2: Any) -> Any:
     return v1 if v1 is not None else v2
 
 
-async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date: str, moex: MOEXCollector) -> int:
-    from src.db.queries import bulk_upsert
-
+async def _fetch_prices_for_instrument(db: AsyncSession, inst: Instrument, from_date: str, moex: MOEXCollector) -> int:
     board: str = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
     history = await moex.get_history(str(inst.ticker), from_date=from_date, board=board)
     if not history:
@@ -56,7 +58,7 @@ async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date:
             if fv:
                 nominal = float(fv)
                 inst.nominal = nominal
-                db.flush()
+                await db.flush()
 
     def _bond_normalize(v: float | None) -> float | None:
         if v is not None and nominal is not None:
@@ -94,7 +96,7 @@ async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date:
     if not rows_to_upsert:
         return 0
 
-    return bulk_upsert(
+    return await async_bulk_upsert(
         db, Price, rows_to_upsert,
         conflict_columns=["instrument_id", "date"],
         update_columns=["open", "high", "low", "close", "volume"],
@@ -104,78 +106,85 @@ async def _fetch_prices_for_instrument(db: Session, inst: Instrument, from_date:
 async def fetch_price_history_for_instrument(ticker: str, instrument_type: str) -> int:
     """Авто-загрузка цен для нового инструмента при синке портфеля."""
     from_date = (date.today() - timedelta(days=DEFAULT_HISTORY_DAYS)).isoformat()
-    db = get_session()
-    try:
-        inst = db.query(Instrument).filter_by(ticker=ticker).first()
+    async with get_async_session() as db:
+        inst = (await db.execute(select(Instrument).filter_by(ticker=ticker))).scalars().first()
         if not inst:
             logger.warning("Instrument %s not found in DB, cannot fetch price history", ticker)
             return 0
         async with MOEXCollector() as moex:
             new_count = await _fetch_prices_for_instrument(db, inst, from_date, moex)
-        if new_count:
-            db.commit()
         return new_count
-    finally:
-        db.close()
 
 
-async def collect_prices(db: Session) -> set[int]:
+async def collect_prices(db: AsyncSession) -> set[int]:
     updated_ids: set[int] = set()
     async with MOEXCollector() as moex:
-        instruments = db.query(Instrument).all()
+        result = await db.execute(select(Instrument))
+        instruments = result.scalars().all()
         if not instruments:
             return updated_ids
 
         from sqlalchemy import func as sqlfunc
 
-        last_dates: dict[int, date | None] = dict(db.query(Price.instrument_id, sqlfunc.max(Price.date)).group_by(Price.instrument_id).all())  # type: ignore[arg-type]
+        last_dates_result = await db.execute(
+            select(Price.instrument_id, sqlfunc.max(Price.date).label("max_date"))
+            .group_by(Price.instrument_id)
+        )
+        last_dates: dict[int, date | None] = {}
+        for row in last_dates_result:
+            last_dates[row.instrument_id] = row.max_date
 
         for inst in instruments:
             last_dt = last_dates.get(int(inst.id))
             days_back = DEFAULT_HISTORY_DAYS
             from_date = last_dt.isoformat() if last_dt else (date.today() - timedelta(days=days_back)).isoformat()
             new_count = await _fetch_prices_for_instrument(db, inst, from_date, moex)
-            db.commit()
+            await db.commit()
             if new_count > 0:
                 updated_ids.add(int(inst.id))
-    _check_price_freshness(db)
+    await _check_price_freshness(db)
     return updated_ids
 
 
-def _check_price_freshness(db: Session, max_age_days: int = STALENESS_THRESHOLD_DAYS) -> None:
+async def _check_price_freshness(db: AsyncSession, max_age_days: int = STALENESS_THRESHOLD_DAYS) -> None:
     from sqlalchemy import func as sqlfunc
 
     subq = (
-        db.query(
+        select(
             Price.instrument_id,
             sqlfunc.max(Price.date).label("last_date"),
         )
         .group_by(Price.instrument_id)
         .subquery()
     )
-    stale = (
-        db.query(Instrument.ticker, Instrument.instrument_type, subq.c.last_date)
+    stmt = (
+        select(Instrument.ticker, Instrument.instrument_type, subq.c.last_date)
         .join(subq, Instrument.id == subq.c.instrument_id)
-        .filter(subq.c.last_date < date.today() - timedelta(days=max_age_days))
-        .all()
+        .where(subq.c.last_date < date.today() - timedelta(days=max_age_days))
     )
-    for ticker, itype, last_date in stale:
+    result = await db.execute(stmt)
+    for ticker, itype, last_date in result:
         logger.warning("Stale data: %s (%s) — last price %s, >%d days ago", ticker, itype, last_date, max_age_days)
 
 
-async def collect_dividends(db: Session) -> None:
-    from src.db.queries import bulk_upsert
-
+async def collect_dividends(db: AsyncSession) -> None:
     async with MOEXCollector() as moex:
-        instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
+        result = await db.execute(
+            select(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"]))
+        )
+        instruments = result.scalars().all()
         if not instruments:
             return
 
         from sqlalchemy import func as sqlfunc
 
-        last_dates: dict[int, date | None] = dict(
-            db.query(Dividend.instrument_id, sqlfunc.max(Dividend.date)).group_by(Dividend.instrument_id).all()  # type: ignore[arg-type]
+        last_dates_result = await db.execute(
+            select(Dividend.instrument_id, sqlfunc.max(Dividend.date).label("max_date"))
+            .group_by(Dividend.instrument_id)
         )
+        last_dates: dict[int, date | None] = {}
+        for row in last_dates_result:
+            last_dates[row.instrument_id] = row.max_date
 
         for inst in instruments:
             last_dt = last_dates.get(int(inst.id))
@@ -199,12 +208,12 @@ async def collect_dividends(db: Session) -> None:
                     })
 
                 if rows_to_upsert:
-                    bulk_upsert(
+                    await async_bulk_upsert(
                         db, Dividend, rows_to_upsert,
                         conflict_columns=["instrument_id", "date", "amount"],
                         update_columns=["currency"],
                     )
-                db.commit()
+                await db.commit()
             except Exception as e:
                 logger.warning(f"Dividends failed for {inst.ticker}: {e}")
 
@@ -273,15 +282,16 @@ def compute_indicators(db: Session, instrument_ids: set[int] | None = None) -> N
         db.commit()
 
 
-async def collect_news(db: Session) -> list[dict[str, Any]]:
+async def collect_news(db: AsyncSession) -> list[dict[str, Any]]:
     from src.db.models import NewsInstrument
-    from src.db.queries import bulk_upsert
 
     collector = NewsCollector()
     news_list = await collector.fetch_all(max_per_feed=NEWS_MAX_PER_FEED)
 
+    result = await db.execute(select(Instrument))
+    instruments = result.scalars().all()
     ticker_map: dict[str, int] = {}
-    for inst in db.query(Instrument).all():
+    for inst in instruments:
         ticker_map[str(inst.ticker).upper()] = int(inst.id)
 
     saved_news: list[News] = []
@@ -302,15 +312,16 @@ async def collect_news(db: Session) -> list[dict[str, Any]]:
         })
 
     if news_rows:
-        bulk_upsert(
+        await async_bulk_upsert(
             db, News, news_rows,
             conflict_columns=["url"],
             update_columns=["title", "summary", "sentiment_score", "sentiment_weighted", "sentiment_bert_score", "source_weight"],
         )
-        db.flush()
+        await db.flush()
 
         for item in news_list:
-            n = db.query(News).filter_by(url=item["url"]).first()
+            n_result = await db.execute(select(News).filter_by(url=item["url"]))
+            n = n_result.scalars().first()
             if n:
                 saved_news.append(n)
 
@@ -323,9 +334,12 @@ async def collect_news(db: Session) -> list[dict[str, Any]]:
 
     if candidate_pairs:
         news_ids = list({p[0] for p in candidate_pairs})
+        links_result = await db.execute(
+            select(NewsInstrument).filter(NewsInstrument.news_id.in_(news_ids))
+        )
         existing_links = {
             (r.news_id, r.instrument_id)
-            for r in db.query(NewsInstrument).filter(NewsInstrument.news_id.in_(news_ids)).all()
+            for r in links_result.scalars().all()
         }
     else:
         existing_links = set()
@@ -334,13 +348,11 @@ async def collect_news(db: Session) -> list[dict[str, Any]]:
         if (news_id, inst_id) not in existing_links:
             db.add(NewsInstrument(news_id=news_id, instrument_id=inst_id))
 
-    db.commit()
+    await db.commit()
     return news_list
 
 
-async def compute_geo_risk(db: Session, news_list: list[dict[str, Any]]) -> None:
-    from src.db.queries import bulk_upsert
-
+async def compute_geo_risk(db: AsyncSession, news_list: list[dict[str, Any]]) -> None:
     sent = divergence.detect(news_list=news_list)
     cbr = CBRCollector()
     try:
@@ -352,7 +364,10 @@ async def compute_geo_risk(db: Session, news_list: list[dict[str, Any]]) -> None
     usd_rate = next((r for r in rates if r["code"] == "USD"), None)
     currency_vol = 0.0
     if usd_rate:
-        prev = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
+        prev_result = await db.execute(
+            select(GeoRiskScore).order_by(GeoRiskScore.date.desc()).limit(1)
+        )
+        prev = prev_result.scalars().first()
         if prev and prev.components_json:
             prev_stress = prev.components_json.get("currency_stress", 0)
             currency_vol = prev_stress * 0.7 + min(abs(usd_rate.get("change_pct", 0)) * 5, 2.0) * 0.3
@@ -362,7 +377,7 @@ async def compute_geo_risk(db: Session, news_list: list[dict[str, Any]]) -> None
     risk = geo_risk.score(news_list, currency_volatility=currency_vol)
 
     today = date.today()
-    bulk_upsert(
+    await async_bulk_upsert(
         db, GeoRiskScore,
         [{
             "date": today,
@@ -373,15 +388,17 @@ async def compute_geo_risk(db: Session, news_list: list[dict[str, Any]]) -> None
         conflict_columns=["date"],
         update_columns=["score", "components_json", "sources_json"],
     )
-    db.commit()
+    await db.commit()
 
 
-async def collect_fundamental(db: Session) -> None:
+async def collect_fundamental(db: AsyncSession) -> None:
     from src.collectors.fundamental import FundamentalDataCollector
     from src.db.models import FundamentalMetric, Price
-    from src.db.queries import bulk_upsert
 
-    instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
+    result = await db.execute(
+        select(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"]))
+    )
+    instruments = result.scalars().all()
     if not instruments:
         return
 
@@ -390,21 +407,28 @@ async def collect_fundamental(db: Session) -> None:
 
     from sqlalchemy import func as sqlfunc
 
-    latest_price_subq = db.query(
-        Price.instrument_id,
-        sqlfunc.max(Price.date).label('max_date'),
-    ).filter(
-        Price.instrument_id.in_(inst_ids),
-    ).group_by(Price.instrument_id).subquery()
+    latest_price_subq = (
+        select(
+            Price.instrument_id,
+            sqlfunc.max(Price.date).label('max_date'),
+        )
+        .filter(Price.instrument_id.in_(inst_ids))
+        .group_by(Price.instrument_id)
+        .subquery()
+    )
 
+    prices_result = await db.execute(
+        select(Price)
+        .join(
+            latest_price_subq,
+            sqlfunc.and_(
+                Price.instrument_id == latest_price_subq.c.instrument_id,
+                Price.date == latest_price_subq.c.max_date,
+            ),
+        )
+    )
     last_prices: dict[int, float | None] = {}
-    for r in db.query(Price).join(
-        latest_price_subq,
-        sqlfunc.and_(
-            Price.instrument_id == latest_price_subq.c.instrument_id,
-            Price.date == latest_price_subq.c.max_date,
-        ),
-    ).all():
+    for r in prices_result.scalars().all():
         last_prices[int(r.instrument_id)] = float(r.close) if r.close is not None else None
 
     async with FundamentalDataCollector() as collector:
@@ -417,7 +441,7 @@ async def collect_fundamental(db: Session) -> None:
                 logger.warning("Fundamental fetch failed for %s: %s", inst.ticker, e)
                 continue
 
-            bulk_upsert(
+            await async_bulk_upsert(
                 db, FundamentalMetric,
                 [{
                     "instrument_id": int(inst.id),
@@ -429,19 +453,18 @@ async def collect_fundamental(db: Session) -> None:
                 conflict_columns=["instrument_id", "date"],
                 update_columns=["market_cap", "shares_outstanding", "extra"],
             )
-        db.commit()
+        await db.commit()
 
 
-async def generate_signals(db: Session, updated_ids: set[int] | None = None) -> list[dict[str, Any]]:
+async def generate_signals(db: AsyncSession, updated_ids: set[int] | None = None) -> list[dict[str, Any]]:
     from src.analysis.service import analysis_service
 
-    return analysis_service.analyze_all_sync(db, updated_ids=updated_ids)
+    return await analysis_service.analyze_all(db, updated_ids=updated_ids)
 
 
-async def collect_macro(db: Session) -> None:
+async def collect_macro(db: AsyncSession) -> None:
     from src.collectors.macro import MacroCollector
     from src.db.models import MacroIndicator
-    from src.db.queries import bulk_upsert
 
     collector = MacroCollector()
     items = await collector.fetch_all()
@@ -459,12 +482,23 @@ async def collect_macro(db: Session) -> None:
         })
 
     if rows:
-        bulk_upsert(
+        await async_bulk_upsert(
             db, MacroIndicator, rows,
             conflict_columns=["date", "indicator_type"],
             update_columns=["value", "source"],
         )
-    db.commit()
+    await db.commit()
+
+
+def _train_sentiment_evolution() -> None:
+    from src.analysis.ml.sentiment_evolution import SentimentEvolutionModel
+
+    try:
+        model = SentimentEvolutionModel(ticker="__all__")
+        model.train()
+        logger.info("Sentiment evolution model trained")
+    except Exception as e:
+        logger.warning("Sentiment evolution training failed: %s", e)
 
 
 async def collect_social_sentiment() -> None:
@@ -478,16 +512,12 @@ async def collect_social_sentiment() -> None:
             logger.info("No active social sources, skipping social collection")
             return
 
-        from src.db.connection import get_session
         from src.db.models import SocialPost
 
         for src in sources:
             try:
                 posts = await src.fetch_posts()
-                db = get_session()
-                try:
-                    from src.db.queries import bulk_upsert
-
+                async with get_async_session() as db:
                     rows_to_upsert: list[dict[str, Any]] = []
                     for post in posts:
                         rows_to_upsert.append({
@@ -503,15 +533,12 @@ async def collect_social_sentiment() -> None:
                         })
 
                     if rows_to_upsert:
-                        processed = bulk_upsert(
+                        processed = await async_bulk_upsert(
                             db, SocialPost, rows_to_upsert,
                             conflict_columns=["source", "external_id"],
                             update_columns=["text", "author_nick", "published_at", "tickers_mentioned"],
                         )
                         logger.info("Social %s: %d posts upserted", src.source_name, processed)
-                    db.commit()
-                finally:
-                    db.close()
             except Exception as e:
                 logger.error("Social collection failed for %s: %s", src.source_name, e)
 
@@ -519,47 +546,41 @@ async def collect_social_sentiment() -> None:
         logger.info("Social sentiment: %d signals created", count)
 
         # Compute social features for all tickers
-        from src.db.connection import get_session as gs2
         from src.social.features import compute_social_features
+        from src.core.executor import get_executor
 
-        db2 = gs2()
-        try:
-            from src.db.models import Instrument
+        async with get_async_session() as db:
+            result = await db.execute(select(Instrument.ticker))
+            tickers = [r.ticker for r in result]
 
-            tickers = [r.ticker for r in db2.query(Instrument.ticker).all()]
+            loop = asyncio.get_running_loop()
+            ex = get_executor()
             for ticker in tickers:
                 try:
-                    compute_social_features(db2, ticker)
+                    await loop.run_in_executor(ex, compute_social_features, ticker)
                 except Exception as e:
                     logger.debug("Social features computation failed for %s: %s", ticker, e)
-            db2.commit()
-        finally:
-            db2.close()
 
         # Train sentiment evolution model
-        from src.analysis.ml.sentiment_evolution import SentimentEvolutionModel
-
         try:
-            db3 = gs2()
-            try:
-                model = SentimentEvolutionModel(ticker="__all__")
-                model.train(db3)
-                logger.info("Sentiment evolution model trained")
-            finally:
-                db3.close()
+            loop = asyncio.get_running_loop()
+            ex = get_executor()
+            await loop.run_in_executor(ex, _train_sentiment_evolution)
         except Exception as e:
             logger.warning("Sentiment evolution training failed: %s", e)
     except Exception as e:
         logger.error("Social sentiment cycle failed: %s", e)
 
 
-async def collect_financial_reports(db: Session) -> None:
+async def collect_financial_reports(db: AsyncSession) -> None:
     """Fetch/update IFRS financial reports from SmartLab."""
     from src.collectors.financials import FinancialReportCollector
     from src.db.models import FinancialReport
-    from src.db.queries import bulk_upsert
 
-    instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
+    result = await db.execute(
+        select(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"]))
+    )
+    instruments = result.scalars().all()
     if not instruments:
         return
 
@@ -588,23 +609,26 @@ async def collect_financial_reports(db: Session) -> None:
             rows_to_upsert.append(row)
 
         if rows_to_upsert:
-            bulk_upsert(
+            await async_bulk_upsert(
                 db, FinancialReport, rows_to_upsert,
                 conflict_columns=["instrument_id", "report_date", "period_type"],
                 update_columns=[k for k in rows_to_upsert[0] if k not in ("instrument_id", "report_date", "period_type")],
             )
-        db.commit()
+        await db.commit()
         logger.info("Financial reports collected for %d instruments", len(instruments))
     finally:
         await collector.close()
 
 
-async def collect_bond_offerings(db: Session) -> None:
+async def collect_bond_offerings(db: AsyncSession) -> None:
     """Fetch/update bond offerings from MOEX ISS. Updates existing records."""
     from src.collectors.bonds import BondOfferingCollector
     from src.db.models import BondCouponSchedule, BondOffering, BondOfferingHistory
 
-    instruments = db.query(Instrument).filter(Instrument.instrument_type == "bond").all()
+    result = await db.execute(
+        select(Instrument).filter(Instrument.instrument_type == "bond")
+    )
+    instruments = result.scalars().all()
     if not instruments:
         return
 
@@ -624,7 +648,10 @@ async def collect_bond_offerings(db: Session) -> None:
         if collected_bonds:
             bond_inst_ids = list({c[0].id for c in collected_bonds})
             existing_offering_map: dict[tuple[int, str], BondOffering] = {}
-            for o in db.query(BondOffering).filter(BondOffering.instrument_id.in_(bond_inst_ids)).all():
+            offering_result = await db.execute(
+                select(BondOffering).filter(BondOffering.instrument_id.in_(bond_inst_ids))
+            )
+            for o in offering_result.scalars().all():
                 existing_offering_map[(int(o.instrument_id), str(o.isin))] = o
         else:
             existing_offering_map = {}
@@ -669,25 +696,27 @@ async def collect_bond_offerings(db: Session) -> None:
             # Store coupon schedule
             coupon_schedule = data.get("coupon_schedule", [])
             if coupon_schedule:
-                    db.query(BondCouponSchedule).filter_by(instrument_id=inst.id).delete()
-                    for cpn in coupon_schedule:
-                        cpn_date = _parse_coupon_date(cpn.get("coupondate") or cpn.get("couponDate"))
-                        if not cpn_date:
-                            continue
-                        with contextlib.suppress(ValueError, TypeError):
-                            value = float(cpn.get("value", 0))
-                        schedule_entry = BondCouponSchedule(
-                            instrument_id=inst.id,
-                            coupon_date=cpn_date,
-                            coupon_value=value,
-                            coupon_number=_safe_int(cpn.get("couponnumber") or cpn.get("couponNumber")),
-                            currency=cpn.get("currency", "RUB"),
-                            fix_date=_parse_coupon_date(cpn.get("fixdate") or cpn.get("fixDate")),
-                            face_value=_safe_float(cpn.get("facevalue") or cpn.get("faceValue")),
-                            initial_face_value=_safe_float(cpn.get("initialfacevalue") or cpn.get("initialFaceValue")),
-                        )
-                        db.add(schedule_entry)
-                        coupon_count += 1
+                await db.execute(
+                    delete(BondCouponSchedule).filter_by(instrument_id=inst.id)
+                )
+                for cpn in coupon_schedule:
+                    cpn_date = _parse_coupon_date(cpn.get("coupondate") or cpn.get("couponDate"))
+                    if not cpn_date:
+                        continue
+                    with contextlib.suppress(ValueError, TypeError):
+                        value = float(cpn.get("value", 0))
+                    schedule_entry = BondCouponSchedule(
+                        instrument_id=inst.id,
+                        coupon_date=cpn_date,
+                        coupon_value=value,
+                        coupon_number=_safe_int(cpn.get("couponnumber") or cpn.get("couponNumber")),
+                        currency=cpn.get("currency", "RUB"),
+                        fix_date=_parse_coupon_date(cpn.get("fixdate") or cpn.get("fixDate")),
+                        face_value=_safe_float(cpn.get("facevalue") or cpn.get("faceValue")),
+                        initial_face_value=_safe_float(cpn.get("initialfacevalue") or cpn.get("initialFaceValue")),
+                    )
+                    db.add(schedule_entry)
+                    coupon_count += 1
 
             # Save history snapshot
             if data.get("yield_to_maturity") is not None or data.get("current_price_pct") is not None:
@@ -709,7 +738,7 @@ async def collect_bond_offerings(db: Session) -> None:
                 )
                 db.add(history_entry)
 
-        db.commit()
+        await db.commit()
         logger.info("Bond offerings: %d new, %d updated, %d coupons stored", new_count, updated_count, coupon_count)
     finally:
         await collector.close()
@@ -745,7 +774,7 @@ def _safe_float(val: Any) -> Optional[float]:
 
 
 def collect_company_profiles(db: Session) -> None:
-    """Fetch/update company profiles from SmartLab."""
+    """Fetch/update company profiles from SmartLab. Sync, run in executor."""
     from src.collectors.profiles import SmartLabProfileCollector, store_company_profile
 
     instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
@@ -764,11 +793,14 @@ def collect_company_profiles(db: Session) -> None:
         collector.close()
 
 
-async def collect_corporate_events(db: Session) -> None:
+async def collect_corporate_events(db: AsyncSession) -> None:
     """Fetch/update corporate events from MOEX ISS."""
     from src.collectors.profiles import MOEXCorporateEventCollector, store_corporate_event
 
-    instruments = db.query(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"])).all()
+    result = await db.execute(
+        select(Instrument).filter(Instrument.instrument_type.in_(["stock", "etf"]))
+    )
+    instruments = result.scalars().all()
     if not instruments:
         return
 
@@ -782,12 +814,12 @@ async def collect_corporate_events(db: Session) -> None:
                     stored += 1
             if stored:
                 logger.info("Corporate events for %s: %d new", inst.ticker, stored)
-        db.commit()
+        await db.commit()
     finally:
         await collector.close()
 
 
-async def collect_alternative_data(db: Session) -> int:
+async def collect_alternative_data(db: AsyncSession) -> int:
     """Collect alternative data (CBR rates, Rosstat, Google Trends)."""
     from src.collectors.alternative import AlternativeDataCollector
 
@@ -802,7 +834,7 @@ async def collect_alternative_data(db: Session) -> int:
         await collector.close()
 
 
-async def run_news_summarizer(db: Session) -> str | None:
+async def run_news_summarizer(db: AsyncSession) -> str | None:
     """Cluster and summarize today's news, save digest."""
     from src.analysis.summarizer import NewsSummarizer
 
@@ -817,7 +849,7 @@ async def run_news_summarizer(db: Session) -> str | None:
     return None
 
 
-async def run_sector_impact_analysis(db: Session) -> int:
+async def run_sector_impact_analysis(db: AsyncSession) -> int:
     """Calculate sector impacts from today's news and store sector risk."""
     from datetime import datetime, timedelta
 
@@ -828,7 +860,10 @@ async def run_sector_impact_analysis(db: Session) -> int:
     engine = SectorImpactEngine(impact_matrix=ImpactMatrix(), sector_mapper=SectorMapper())
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-        articles = db.query(News).filter(News.published_at >= cutoff, News.is_relevant).all()
+        result = await db.execute(
+            select(News).filter(News.published_at >= cutoff, News.is_relevant)
+        )
+        articles = result.scalars().all()
         processed = 0
         for article in articles:
             impacts = engine.calculate_sector_impact_from_news(article, db)
@@ -844,7 +879,7 @@ async def run_sector_impact_analysis(db: Session) -> int:
         return 0
 
 
-async def collect_social_posts(db: Session) -> int:
+async def collect_social_posts(db: AsyncSession) -> int:
     """Collect social media posts (Telegram)."""
     from src.collectors.social import SocialMediaCollector
     from src.config import settings

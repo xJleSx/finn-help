@@ -13,7 +13,9 @@ from src.cli.output import console
 from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.config import personal
-from src.db.connection import get_session
+from sqlalchemy import select
+
+from src.db.connection import get_async_session
 from src.db.models import Instrument, Price
 from src.llm.router import llm
 
@@ -23,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True) -> tuple[dict[str, Any] | None, str]:
-    db = get_session()
-    try:
-        inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+    async with get_async_session() as db:
+        result = await db.execute(select(Instrument).filter_by(ticker=ticker.upper()))
+        inst = result.scalars().first()
         if not inst:
             return None, f"Инструмент {ticker} не найден"
         fused = analysis_service._analyze_single_sync(db, inst, ticker.upper(), with_ml=with_ml)
@@ -34,8 +36,6 @@ async def run_analysis(ticker: str, with_llm: bool = True, with_ml: bool = True)
         else:
             advice = ""
         return fused, advice
-    finally:
-        db.close()
 
 
 @app.command()
@@ -47,14 +47,17 @@ def analyze(
     """Проанализировать инструмент"""
 
     async def _run() -> None:
-        db = get_session()
-        try:
-            inst = db.query(Instrument).filter_by(ticker=ticker.upper()).first()
+        async with get_async_session() as db:
+            result = await db.execute(select(Instrument).filter_by(ticker=ticker.upper()))
+            inst = result.scalars().first()
             if not inst:
                 console.print(f"[red]✗[/red] Инструмент {ticker} не найден")
                 return
 
-            prices_q = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
+            price_result = await db.execute(
+                select(Price).filter_by(instrument_id=inst.id).order_by(Price.date)
+            )
+            prices_q = price_result.scalars().all()
             if not prices_q:
                 console.print(f"[red]✗[/red] Нет данных для {ticker}")
                 return
@@ -119,9 +122,6 @@ def analyze(
 
             if advice:
                 console.print(f"\n[bold]🤖 Совет:[/bold]\n{advice}")
-
-        finally:
-            db.close()
 
     asyncio.run(_run())
 
