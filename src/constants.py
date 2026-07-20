@@ -1,5 +1,12 @@
 from typing import Any
 
+MIN_PRICE_ROWS = 50
+MIN_INDICATOR_ROWS = 2
+MIN_TRAIN_PRICES = 60
+MIN_PLAN_ROWS = 20
+ANALYSIS_CONCURRENCY = 10
+TRADE_PLAN_ATR_MULTIPLIER = 0.02
+
 KNOWN_DIVIDEND_STOCKS: dict[str, str] = {
     "SBER": "dividend",
     "GAZP": "dividend",

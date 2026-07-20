@@ -19,6 +19,14 @@ from src.analysis.ml_coordinator import MLCoordinator, ml_coordinator
 from src.analysis.multi_timeframe import MultiTimeframeAnalyzer
 from src.analysis.technical import TechnicalAnalyzer
 from src.analysis.volatility import VolatilityRegimeDetector
+from src.constants import (
+    ANALYSIS_CONCURRENCY,
+    MIN_INDICATOR_ROWS,
+    MIN_PLAN_ROWS,
+    MIN_PRICE_ROWS,
+    MIN_TRAIN_PRICES,
+    TRADE_PLAN_ATR_MULTIPLIER,
+)
 from src.db.models import (
     Dividend,
     FundamentalMetric,
@@ -38,25 +46,35 @@ logger = logging.getLogger(__name__)
 class AnalysisService:
     """Central analysis orchestrator.
 
-    Architecture reference:
-      - docs/ARCHITECTURE.md — analysis pipeline
-      - docs/FinAdvisor_Technical_Documentation.docx — full analysis flow spec
-      - docs/adr/ADR-001-package-decomposition.md — module decomposition rationale
+    Accepts injectable dependencies for testability.
+    Falls back to module-level singletons when none provided.
     """
 
-    def __init__(self) -> None:
-        self.analyzer = TechnicalAnalyzer()
-        self.fundamental = FundamentalAnalyzer()
-        self.fusion = SignalFusionEngine()
-        self.volatility = VolatilityRegimeDetector()
-        self.mtf = MultiTimeframeAnalyzer()
-        self.loader: DataLoader = data_loader
-        self.ml: MLCoordinator = ml_coordinator
-        self.events: EventFeatureBuilder = event_features
+    def __init__(
+        self,
+        analyzer: TechnicalAnalyzer | None = None,
+        fundamental: FundamentalAnalyzer | None = None,
+        fusion: SignalFusionEngine | None = None,
+        volatility: VolatilityRegimeDetector | None = None,
+        mtf: MultiTimeframeAnalyzer | None = None,
+        loader: DataLoader | None = None,
+        ml: MLCoordinator | None = None,
+        events: EventFeatureBuilder | None = None,
+    ) -> None:
+        self.analyzer = analyzer or TechnicalAnalyzer()
+        self.fundamental = fundamental or FundamentalAnalyzer()
+        self.fusion = fusion or SignalFusionEngine()
+        self.volatility = volatility or VolatilityRegimeDetector()
+        self.mtf = mtf or MultiTimeframeAnalyzer()
+        self.loader = loader or data_loader
+        self.ml = ml or ml_coordinator
+        self.events = events or event_features
+        self._semaphore = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 
     # ── Backward-compat proxies ──────────────────────────────────────
 
     def _price_df(self, prices: Sequence[Price]) -> pd.DataFrame:
+        """Convert Price ORM rows to DataFrame with date-indexed close."""
         return self.ml.price_df(list(prices))
 
     def _indicator_df(self, rows: Sequence[Indicator]) -> pd.DataFrame:
@@ -78,15 +96,20 @@ class AnalysisService:
         ticker: str = "",
         events: list[MarketEvent] | None = None,
     ) -> dict[str, Any] | None:
-        return await self.ml.compute_ml(
-            df=df,
-            ind_df=ind_df,
-            ticker=ticker,
-            events=events,
-            event_builder=self.events,
-        )
+        try:
+            return await self.ml.compute_ml(
+                df=df,
+                ind_df=ind_df,
+                ticker=ticker,
+                events=events,
+                event_builder=self.events,
+            )
+        except Exception:
+            logger.warning("ML computation failed for %s, skipping", ticker, exc_info=True)
+            return None
 
     async def _load_geo(self, db: AsyncSession) -> dict[str, Any]:
+        """Load geo-political risk from events."""
         return await self.loader.load_geo(db)
 
     def _compute_geo_from_events_sync(self, db: Any) -> float | None:
@@ -131,14 +154,9 @@ class AnalysisService:
     def _load_bond_offering_sync(self, db: Any, instrument_id: int) -> dict[str, Any] | None:
         return self.loader.load_bond_offering_sync(db, instrument_id)
 
-    async def _load_fundamental_metrics(self, db: AsyncSession, instrument_id: int) -> dict[str, Any] | None:
-        return await self.loader.load_fundamental_metrics(db, instrument_id)
-
-    def _load_fundamental_metrics_sync(self, db: Any, instrument_id: int) -> dict[str, Any] | None:
-        return self.loader.load_fundamental_metrics_sync(db, instrument_id)
-
     @staticmethod
     def _augment_with_sector_avg(db: Any, fund_metrics: dict[str, Any] | None, inst: Instrument) -> dict[str, Any] | None:
+        """Delegate to DataLoader for sector-average augmentation."""
         return DataLoader.augment_with_sector_avg(db, fund_metrics, inst)
 
     # ── Core orchestration ───────────────────────────────────────────
@@ -147,13 +165,13 @@ class AnalysisService:
         return self.events.build_features(events, dates)
 
     def _build_trade_plan(self, df: pd.DataFrame, ind_df: pd.DataFrame, tech_signal: dict[str, Any]) -> dict[str, Any] | None:
-        if df.empty or len(df) < 20 or ind_df.empty:
+        if df.empty or len(df) < MIN_PLAN_ROWS or ind_df.empty:
             return None
         latest = df.iloc[-1]
         ind_latest = ind_df.iloc[-1]
         close = float(latest["close"])
         sma20 = float(ind_latest.get("sma_20") or close)
-        atr = float(ind_latest.get("atr") or close * 0.02)
+        atr = float(ind_latest.get("atr") or close * TRADE_PLAN_ATR_MULTIPLIER)
         if atr <= 0 or close <= 0:
             return None
         side: Literal["buy", "sell"] = "buy"
@@ -180,6 +198,10 @@ class AnalysisService:
         financial_report: dict[str, Any] | None = None,
         bond_offering: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Execute fused analysis pipeline for a single instrument.
+
+        All data dependencies are expected to be pre-loaded and passed in.
+        """
         tech_signal = self.analyzer.generate_signal(ind_df)
         div_df = self._dividend_df(divs)
         if inst.instrument_type == "bond" and bond_offering:
@@ -219,16 +241,22 @@ class AnalysisService:
         return fused
 
     async def analyze_single(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> dict[str, Any]:
+        """Full analysis pipeline for one instrument.
+
+        Loads all data (prices, indicators, fundamentals, geo, macro,
+        sentiment, events, trends), optionally computes ML predictions,
+        then fuses everything into a single signal dict.
+        """
         price_result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
         prices = price_result.scalars().all()
-        if len(prices) < 50:
-            raise ValueError(f"Not enough price data for {ticker}")
+        if len(prices) < MIN_PRICE_ROWS:
+            raise ValueError(f"Not enough price data for {ticker} ({len(prices)} < {MIN_PRICE_ROWS})")
         df = self._price_df(prices)
 
         ind_result = await db.execute(select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date))
         ind_rows = ind_result.scalars().all()
-        if len(ind_rows) < 2:
-            raise ValueError(f"Not enough indicator data for {ticker}")
+        if len(ind_rows) < MIN_INDICATOR_ROWS:
+            raise ValueError(f"Not enough indicator data for {ticker} ({len(ind_rows)} < {MIN_INDICATOR_ROWS})")
         ind_df = self._indicator_df(ind_rows)
         ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
 
@@ -237,32 +265,7 @@ class AnalysisService:
 
         fund_metrics = await self.loader.load_fundamental_metrics(db, int(inst.id))
         if fund_metrics and inst.sector:
-            avg_pe = (
-                await db.execute(
-                    select(func.avg(FundamentalMetric.pe_ratio))
-                    .join(Instrument, Instrument.id == FundamentalMetric.instrument_id)
-                    .where(
-                        Instrument.sector == inst.sector,
-                        FundamentalMetric.pe_ratio.isnot(None),
-                        FundamentalMetric.pe_ratio > 0,
-                    )
-                )
-            ).scalar()
-            if avg_pe is not None:
-                fund_metrics["sector_avg_pe"] = round(float(avg_pe), 2)
-            avg_pb = (
-                await db.execute(
-                    select(func.avg(FundamentalMetric.pb_ratio))
-                    .join(Instrument, Instrument.id == FundamentalMetric.instrument_id)
-                    .where(
-                        Instrument.sector == inst.sector,
-                        FundamentalMetric.pb_ratio.isnot(None),
-                        FundamentalMetric.pb_ratio > 0,
-                    )
-                )
-            ).scalar()
-            if avg_pb is not None:
-                fund_metrics["sector_avg_pb"] = round(float(avg_pb), 2)
+            fund_metrics = await self._augment_sector_avgs(db, inst, fund_metrics)
 
         geo_score = (await self.loader.load_geo(db)).get("score", 0.0)
         macro_context = await self.loader.load_macro(db)
@@ -279,33 +282,46 @@ class AnalysisService:
         return await loop.run_in_executor(
             None,
             lambda: self._analyze_core(
-                df=df,
-                ind_df=ind_df,
-                inst=inst,
-                ticker=ticker,
-                fund_metrics=fund_metrics,
-                divs=divs,
-                geo_score=geo_score,
-                macro_context=macro_context,
-                sentiment=sentiment,
-                event_context=event_context,
-                market_events=market_events,
-                trends=trends,
-                ml=ml,
-                financial_report=financial_report,
+                df=df, ind_df=ind_df, inst=inst, ticker=ticker,
+                fund_metrics=fund_metrics, divs=divs, geo_score=geo_score,
+                macro_context=macro_context, sentiment=sentiment,
+                event_context=event_context, market_events=market_events,
+                trends=trends, ml=ml, financial_report=financial_report,
                 bond_offering=bond_offering,
             ),
         )
 
+    async def _augment_sector_avgs(self, db: AsyncSession, inst: Instrument, fund_metrics: dict[str, Any]) -> dict[str, Any]:
+        """Augment fundamental metrics with sector-average PE and PB."""
+        avg_pe = (
+            await db.execute(
+                select(func.avg(FundamentalMetric.pe_ratio))
+                .join(Instrument, Instrument.id == FundamentalMetric.instrument_id)
+                .where(Instrument.sector == inst.sector, FundamentalMetric.pe_ratio.isnot(None), FundamentalMetric.pe_ratio > 0)
+            )
+        ).scalar()
+        if avg_pe is not None:
+            fund_metrics["sector_avg_pe"] = round(float(avg_pe), 2)
+        avg_pb = (
+            await db.execute(
+                select(func.avg(FundamentalMetric.pb_ratio))
+                .join(Instrument, Instrument.id == FundamentalMetric.instrument_id)
+                .where(Instrument.sector == inst.sector, FundamentalMetric.pb_ratio.isnot(None), FundamentalMetric.pb_ratio > 0)
+            )
+        ).scalar()
+        if avg_pb is not None:
+            fund_metrics["sector_avg_pb"] = round(float(avg_pb), 2)
+        return fund_metrics
+
     async def analyze_all(self, db: AsyncSession, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict[str, Any]]:
+        """Analyze all (or filtered) instruments concurrently with bounded concurrency."""
         q = select(Instrument)
         if updated_ids is not None:
             q = q.where(Instrument.id.in_(updated_ids))
         result = await db.execute(q)
         instruments = result.scalars().all()
 
-        signals: list[dict[str, Any]] = []
-        for inst in instruments:
+        async def _process(inst: Instrument) -> dict[str, Any] | None:
             cached_result = await db.execute(
                 select(Signal).where(
                     Signal.instrument_id == inst.id,
@@ -316,45 +332,43 @@ class AnalysisService:
             if cached and cached.fused_json:
                 fused_json = cached.fused_json
                 if isinstance(fused_json, dict):
-                    signals.append(fused_json)
-                continue
-
+                    return fused_json
             try:
-                fused = await self.analyze_single(db, inst, str(inst.ticker), with_ml=with_ml)
+                async with self._semaphore:
+                    fused = await self.analyze_single(db, inst, str(inst.ticker), with_ml=with_ml)
                 await self.fusion.save_signal(db, int(inst.id), fused)
-                signals.append(fused)
+                return fused
             except ValueError:
-                continue
-        return signals
+                return None
+
+        tasks = [_process(inst) for inst in instruments]
+        results = await asyncio.gather(*tasks)
+        return [r for r in results if r is not None]
 
     async def analyze_with_advice(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> tuple[dict[str, Any], str]:
+        """Analyze a single instrument and get LLM-generated advice."""
         fused = await self.analyze_single(db, inst, ticker, with_ml=with_ml)
         advice = await llm.advise(fused)
         return fused, advice
 
     def _analyze_single_sync(self, db: Any, inst: Any, ticker: str, with_ml: bool = True) -> dict[str, Any]:
         prices = db.query(Price).filter_by(instrument_id=inst.id).order_by(Price.date).all()
-        if len(prices) < 50:
+        if len(prices) < MIN_PRICE_ROWS:
             raise ValueError(f"Not enough price data for {ticker}")
         df = self._price_df(prices)
-
         ind_rows = db.query(Indicator).filter_by(instrument_id=inst.id).order_by(Indicator.date).all()
-        if len(ind_rows) < 2:
+        if len(ind_rows) < MIN_INDICATOR_ROWS:
             raise ValueError(f"Not enough indicator data for {ticker}")
         ind_df = self._indicator_df(ind_rows)
         ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
-
         divs = db.query(Dividend).filter_by(instrument_id=inst.id).all()
         fund_metrics = self.loader.load_fundamental_metrics_sync(db, inst.id)
         fund_metrics = self.loader.augment_with_sector_avg(db, fund_metrics, inst)
-
         geo_val = self.events.compute_geo_from_events_sync(db)
         if geo_val is None:
             geo_row = db.query(GeoRiskScore).order_by(GeoRiskScore.date.desc()).first()
             geo_val = geo_row.score if geo_row else 0.0
-
         from src.collectors.macro import MacroCollector
-
         macro_context = MacroCollector.latest_values(db)
         sentiment = self.loader.load_sentiment_sync(db, ticker)
         market_events_sync = self.events.load_all_events_sync(db)
@@ -362,50 +376,36 @@ class AnalysisService:
         trends = self.loader.load_trends_sync(db, inst.id)
         financial_report = self.loader.load_latest_report_sync(db, inst.id)
         bond_offering = self.loader.load_bond_offering_sync(db, inst.id)
-
         ml: dict[str, Any] | None = None
         if with_ml:
-            ml = self.ml.compute_ml_sync(
-                df=df,
-                ind_df=ind_df,
-                ticker=ticker,
-                events=market_events_sync,
-                event_builder=self.events,
-            )
-
+            try:
+                ml = self.ml.compute_ml_sync(
+                    df=df, ind_df=ind_df, ticker=ticker,
+                    events=market_events_sync, event_builder=self.events,
+                )
+            except Exception:
+                logger.warning("Sync ML failed for %s, skipping", ticker, exc_info=True)
         return self._analyze_core(
-            df=df,
-            ind_df=ind_df,
-            inst=inst,
-            ticker=ticker,
-            fund_metrics=fund_metrics,
-            divs=divs,
-            geo_score=geo_val,
-            macro_context=macro_context,
-            sentiment=sentiment,
-            event_context=event_context,
-            trends=trends,
-            ml=ml,
-            financial_report=financial_report,
-            bond_offering=bond_offering,
+            df=df, ind_df=ind_df, inst=inst, ticker=ticker,
+            fund_metrics=fund_metrics, divs=divs, geo_score=geo_val,
+            macro_context=macro_context, sentiment=sentiment,
+            event_context=event_context, trends=trends, ml=ml,
+            financial_report=financial_report, bond_offering=bond_offering,
         )
 
     def analyze_all_sync(self, db: Any, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict[str, Any]]:
+        """Synchronous variant of analyze_all for Celery workers."""
         instruments = db.query(Instrument)
         if updated_ids is not None:
             instruments = instruments.filter(Instrument.id.in_(updated_ids))
         instruments = instruments.all()
-
         inst_ids = [inst.id for inst in instruments]
         cached_signals: dict[int, Any] = {}
         if inst_ids:
             try:
                 today_signals = (
                     db.query(Signal)
-                    .filter(
-                        Signal.instrument_id.in_(inst_ids),
-                        func.date(Signal.date) == date.today(),
-                    )
+                    .filter(Signal.instrument_id.in_(inst_ids), func.date(Signal.date) == date.today())
                     .all()
                 )
                 for sig in today_signals:
@@ -414,7 +414,6 @@ class AnalysisService:
             except Exception:
                 logger.warning("Failed to fetch cached signals, skipping all")
                 return []
-
         signals: list[dict[str, Any]] = []
         for inst in instruments:
             cached = cached_signals.get(inst.id)
@@ -423,7 +422,6 @@ class AnalysisService:
                 if isinstance(fused_json, dict):
                     signals.append(fused_json)
                 continue
-
             try:
                 fused = self._analyze_single_sync(db, inst, str(inst.ticker), with_ml=with_ml)
                 self.fusion.save_signal_sync(db, inst.id, fused)
@@ -437,21 +435,17 @@ class AnalysisService:
 
     def load_ticker_context(self, db: Any, ticker: str) -> str:
         from src.analysis.context import ticker_context_builder
-
         return ticker_context_builder.build(db, ticker)
 
     def train_models(self, db: Any, ticker: str | None = None) -> dict[str, bool]:
         import time
-
         _train_start = time.monotonic()
         from sqlalchemy import select as sa_select
-
         q = sa_select(Instrument)
         if ticker:
             q = q.where(Instrument.ticker == ticker.upper())
         result = db.execute(q)
         instruments = result.scalars().all()
-
         inst_ids = [inst.id for inst in instruments]
         all_prices = db.query(Price).filter(Price.instrument_id.in_(inst_ids)).order_by(Price.date).all()
         price_map: dict[int, list[Any]] = {}
@@ -461,23 +455,20 @@ class AnalysisService:
         ind_map: dict[int, list[Any]] = {}
         for ind in all_indicators:
             ind_map.setdefault(ind.instrument_id, []).append(ind)
-
         all_results: dict[str, bool] = {}
         for inst in instruments:
             sym = str(inst.ticker or "")
             prices = price_map.get(inst.id, [])
-            if len(prices) < 60:
+            if len(prices) < MIN_TRAIN_PRICES:
                 logger.info("Skipping %s: only %d prices", sym, len(prices))
                 continue
             df = self._price_df(prices)
-
             ind_rows = ind_map.get(inst.id, [])
             if len(ind_rows) < 2:
                 logger.info("Skipping %s: no indicators", sym)
                 continue
             ind_df = self._indicator_df(ind_rows)
             ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
-
             all_events = self.events.load_all_events_sync(db)
             anomaly_mask = None
             train_df = ind_df.copy()
@@ -490,13 +481,10 @@ class AnalysisService:
                 if "is_anomaly" in train_df.columns:
                     anomaly_mask = train_df["is_anomaly"].fillna(False).to_numpy(dtype=bool)
                     train_df = train_df.drop(columns=["is_anomaly"])
-
             ensemble = self._get_ensemble(sym)
             ensemble_ok = ensemble.train_all(train_df, anomaly_mask=anomaly_mask)
-
             prophet = self._get_prophet(sym)
             prophet_ok = prophet.train(df)
-
             all_results[sym] = all(ensemble_ok.values()) and prophet_ok
             logger.info(
                 "Model training for %s: ensemble=%s prophet=%s",
