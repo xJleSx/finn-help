@@ -382,7 +382,6 @@ class SignalFusionEngine:
             bond_risk = bond_signal.get("risk", 0.5)
             weighted_score = bond_score * weights["fundamental"] * 2 + weighted_score * 0.5
             reasons.extend(bond_signal.get("reasons", []))
-            risk_override = bond_risk
             if fundamental:
                 fundamental["risk"] = max(fundamental.get("risk", 0.5), bond_risk)
             else:

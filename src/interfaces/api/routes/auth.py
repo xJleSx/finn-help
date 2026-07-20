@@ -9,8 +9,10 @@ from src.db.models import User
 from src.interfaces.api.auth import (
     blacklist_refresh_token,
     create_token,
+    create_oauth_token,
     decode_refresh_token,
     is_refresh_token_blacklisted,
+    oauth_login,
     require_user,
 )
 from src.interfaces.api.dependencies import get_auth_service
@@ -52,6 +54,10 @@ class LoginBody(BaseModel):
 
 
 class TotpCodeBody(BaseModel):
+    code: str
+
+
+class OAuthBody(BaseModel):
     code: str
 
 
@@ -154,3 +160,13 @@ async def disable_totp(
     svc=Depends(get_auth_service),
 ) -> dict[str, Any]:
     return await svc.disable_totp(user)
+
+
+@router.post("/oauth/{provider}")
+@limiter.limit("10/minute")
+async def oauth(
+    request: Request,
+    provider: str,
+    body: OAuthBody,
+) -> dict[str, Any]:
+    return oauth_login(provider, body.code)

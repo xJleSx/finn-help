@@ -56,7 +56,12 @@ class Settings(BaseSettings):
     enable_trading: bool = False
     max_trades_per_day: int = 5
     metrics_token: str = ""
+    vk_api_token: str = ""
+    vk_api_version: str = "5.199"
+    vk_group_ids: str = "26196417,2676,30574849"
+    llm_social_enabled: bool = False
 
+    mlflow_tracking_uri: str = ""
     use_mock_data: bool = False
 
     tax_capital_gains_rate: float = 0.13

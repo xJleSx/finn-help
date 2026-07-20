@@ -1,0 +1,88 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: finn
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-staging_dev_password}
+      POSTGRES_DB: finn
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - finn_postgres_staging:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - finn_redis_staging:/data
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    environment:
+      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-staging_dev_password}@db:5432/finn
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=DEBUG
+      - CORS_ORIGINS=http://localhost:3000
+      - JWT_SECRET=${JWT_SECRET:-staging_jwt_secret_change_me}
+      - FINN_ENV=staging
+      - ENABLE_TRADING=false
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A src.tasks worker --loglevel=DEBUG --concurrency=${CELERY_CONCURRENCY:-2}
+    stop_grace_period: 60s
+    stop_signal: SIGTERM
+    environment:
+      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-staging_dev_password}@db:5432/finn
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - FINN_ENV=staging
+    volumes:
+      - finn_data_staging:/app/data
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A src.tasks beat --loglevel=DEBUG --scheduler celery.beat.PersistentScheduler
+    stop_grace_period: 30s
+    environment:
+      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-staging_dev_password}@db:5432/finn
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - FINN_ENV=staging
+    volumes:
+      - finn_data_staging:/app/data
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+
+volumes:
+  finn_postgres_staging:
+  finn_redis_staging:
+  finn_data_staging:

@@ -9,6 +9,7 @@ from src.llm.prompts.question import (
     QUESTION_USER_TEMPLATE,
     build_question_message,
 )
+from src.llm.prompts.registry import get_prompt, get_system_prompt, list_prompts, reload
 from src.llm.prompts.report import (
     REPORT_FEW_SHOT,
     REPORT_SYSTEM_PROMPT,
@@ -28,4 +29,8 @@ __all__ = [
     "QUESTION_SYSTEM_PROMPT",
     "QUESTION_USER_TEMPLATE",
     "build_question_message",
+    "get_prompt",
+    "get_system_prompt",
+    "list_prompts",
+    "reload",
 ]

@@ -95,7 +95,6 @@ def generate_bond_coupon_alerts(db: Any, days_ahead: int = 14) -> list[dict[str,
 
 def generate_bond_rating_alerts(db: Any) -> list[dict[str, Any]]:
     """Alerts for low credit ratings on bonds."""
-    today = date.today()
     low_ratings = ("BB+", "BB", "BB-", "B+", "B", "CCC", "CC", "C", "D", "NR")
     rows = (
         db.query(BondOffering, Instrument.ticker)

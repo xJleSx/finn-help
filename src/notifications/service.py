@@ -22,6 +22,7 @@ from src.notifications import (
     RebalanceAlert,
     SignalNotification,
 )
+from src.notifications.preferences import FrequencyController, NotificationPreferencesEngine
 
 logger = structlog.get_logger(__name__)
 
@@ -65,8 +66,29 @@ def format_daily_summary_text(n: DailySummaryNotification) -> str:
 class NotificationService:
     VALID_NOTIFY_TYPES = frozenset({"signal", "daily", "geo", "dividend", "trade"})
 
-    def __init__(self, db: AsyncSession | None = None) -> None:
+    def __init__(self, db: AsyncSession | None = None, prefs_engine: NotificationPreferencesEngine | None = None) -> None:
         self._db = db
+        self._prefs_engine = prefs_engine
+
+    @property
+    def prefs_engine(self) -> NotificationPreferencesEngine | None:
+        return self._prefs_engine
+
+    def _check_notification_allowed(self, user_id: int, notif_type: str, ticker: str | None = None) -> bool:
+        if self._prefs_engine is None:
+            return True
+        prefs = self._prefs_engine.get_user_preferences(user_id)
+        return self._prefs_engine.frequency.allow_notification(
+            user_id=user_id,
+            notif_type=notif_type,
+            ticker=ticker,
+            max_daily=prefs.get("max_daily", 50),
+            quiet_hours=prefs.get("quiet_hours"),
+        )
+
+    def _record_notification_sent(self, user_id: int, notif_type: str, ticker: str | None = None) -> None:
+        if self._prefs_engine is not None:
+            self._prefs_engine.frequency.record_notification(user_id, notif_type, ticker)
 
     def _get_sync_db(self) -> Session:
         return get_session()
@@ -175,7 +197,10 @@ class NotificationService:
 
     # --- Notification persistence ---
 
-    def save_notification(self, user_id: int, notif_type: str, message: str, title: str | None = None, data: dict[str, Any] | None = None) -> None:
+    def save_notification(self, user_id: int, notif_type: str, message: str, title: str | None = None, data: dict[str, Any] | None = None) -> bool:
+        if not self._check_notification_allowed(user_id, notif_type, title):
+            logger.info("notification_blocked_by_prefs", user_id=user_id, type=notif_type)
+            return False
         db = self._get_sync_db()
         try:
             n = Notification(
@@ -187,11 +212,19 @@ class NotificationService:
             )
             db.add(n)
             db.commit()
+            self._record_notification_sent(user_id, notif_type, title)
+            return True
         except Exception as e:
             logger.error("save_notification_failed", user_id=user_id, error=str(e))
             db.rollback()
+            return False
         finally:
             db.close()
+
+    def get_preferred_channels(self, user_id: int) -> list[str]:
+        if self._prefs_engine is None:
+            return ["telegram", "email", "web"]
+        return self._prefs_engine.get_preferred_channels(user_id)
 
     def was_signal_sent_today(self, ticker: str, notif_type: str = "signal") -> bool:
         db = self._get_sync_db()

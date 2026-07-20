@@ -9,6 +9,7 @@ from rich.table import Table
 
 from src.analysis.personal_backtest import run_personal_backtest
 from src.analysis.service import analysis_service
+from src.cli.output import console
 from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.config import personal
@@ -16,7 +17,7 @@ from src.db.connection import get_session
 from src.db.models import Instrument, Price
 from src.llm.router import llm
 
-from . import app, console, paper_app
+from . import app, paper_app
 
 logger = logging.getLogger(__name__)
 

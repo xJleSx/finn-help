@@ -12,7 +12,7 @@ from src.core.context import (
     set_request_id,
 )
 from src.core.resilience import CircuitBreakerOpenError, get_circuit_breaker
-from src.trading.brokers.tbank import TBankClient
+from src.trading.brokers.registry import create_broker_client, get_default_broker
 from src.trading.compliance.aml import check_order_aml
 from src.trading.compliance.limits import (
     check_position_limit,
@@ -25,6 +25,18 @@ from src.trading.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+_BROKER_TOKEN_ATTRS: dict[str, str] = {
+    "tbank": "tinkoff_token",
+    "bcs": "bcs_refresh_token",
+}
+
+
+def _get_broker_token(broker_name: str) -> str:
+    attr = _BROKER_TOKEN_ATTRS.get(broker_name.lower())
+    if attr and hasattr(settings, attr):
+        return str(getattr(settings, attr) or "")
+    return ""
 
 
 async def _notify_trade(record: "OrderRecord", reason: str = "") -> None:
@@ -188,6 +200,7 @@ async def execute_order(
     time_in_force: str = "day",
     is_short: bool = False,
     skip_risk_checks: bool = False,
+    broker_name: Optional[str] = None,
 ) -> OrderRecord:
     global _mode
     effective_mode = mode_override if mode_override is not None else _mode
@@ -277,9 +290,11 @@ async def execute_order(
             record.db_id = save_order(record)
             await _notify_trade(record, reason)
             return record
-        if not settings.tinkoff_token:
+        broker = broker_name or get_default_broker()
+        broker_token = _get_broker_token(broker)
+        if not broker_token:
             record.status = "failed"
-            logger.error("No TINKOFF_TOKEN set — cannot execute AUTO mode order")
+            logger.error("No token configured for broker '%s' — cannot execute AUTO mode order", broker)
             _execution_log.append(record)
             record.db_id = save_order(record)
             await _notify_trade(record, reason)
@@ -323,13 +338,14 @@ async def execute_order(
             if delay > 0:
                 await asyncio.sleep(delay / 1000)
 
-            use_sandbox = settings.tinkoff_sandbox
             requested_price = record.price
 
-            orders_cb = get_circuit_breaker("tbank_orders")
+            cb_name = f"{broker}_orders"
+            orders_cb = get_circuit_breaker(cb_name)
             if orders_cb.is_open:
                 logger.warning(
-                    "tbank_orders circuit breaker OPEN — falling back to DRY_RUN for %s %s",
+                    "%s circuit breaker OPEN — falling back to DRY_RUN for %s %s",
+                    cb_name,
                     direction,
                     ticker,
                 )
@@ -341,17 +357,17 @@ async def execute_order(
                 await _notify_trade(record, reason=f"CB_OPEN_FALLBACK {reason}")
                 return record
 
-            async with TBankClient(use_sandbox=use_sandbox) as client:
+            async with create_broker_client(broker) as client:
                 accounts = await client.get_accounts()
                 if not accounts:
                     record.status = "failed"
-                    logger.warning("No accounts found")
+                    logger.warning("No accounts found for broker %s", broker)
                     _execution_log.append(record)
                     record.db_id = save_order(record)
                     await _notify_trade(record, reason)
                     return record
 
-                account_id = str(accounts[0].get("id", ""))
+                account_id = accounts[0].id if hasattr(accounts[0], "id") else str(accounts[0].get("id", ""))
 
                 try:
                     mapped_direction = (
@@ -377,12 +393,12 @@ async def execute_order(
                     await _notify_trade(record, reason=f"CB_OPEN_FALLBACK {reason}")
                     return record
 
-                _order_id = result.get("order_id")
+                _order_id = result.order_id or result.get("order_id")
                 record.order_id = str(_order_id) if _order_id is not None else None
-                record.status = str(result.get("status", "unknown"))
-                executed_lots = cast(int, result.get("executed_quantity", 0))
+                record.status = str(result.status or result.get("status", "unknown"))
+                executed_lots = int(result.executed_quantity or result.get("executed_quantity", 0))
                 executed_shares = executed_lots * lot_size
-                executed_price = result.get("executed_price")
+                executed_price = result.executed_price or result.get("executed_price")
                 if executed_price is not None:
                     record.price = cast(float, executed_price)
                     record.executed_price = record.price

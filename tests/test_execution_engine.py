@@ -31,6 +31,16 @@ def reset_engine():
     yield
 
 
+@pytest.fixture(autouse=True, scope="module")
+def enable_trading():
+    from src.config import settings
+
+    original = settings.enable_trading
+    settings.enable_trading = True
+    yield
+    settings.enable_trading = original
+
+
 @pytest.mark.asyncio
 async def test_set_and_get_mode():
     await set_mode(TradeMode.DRY_RUN)
@@ -93,23 +103,27 @@ async def test_execute_auto_no_token(mock_settings):
 
 @pytest.mark.asyncio
 @patch("src.trading.execution.engine.settings")
-@patch("src.trading.execution.engine.TBankClient")
-async def test_execute_auto_success(mock_tbank, mock_settings):
+@patch("src.trading.execution.engine.create_broker_client")
+@patch("src.trading.risk.manager.get_risk_manager")
+async def test_execute_auto_success(mock_get_rm, mock_create_client, mock_settings):
     mock_settings.tinkoff_token = "test_token"
     mock_settings.tinkoff_sandbox = True
-    mock_settings.enable_trading = True
+
+    mock_rm = MagicMock()
+    mock_rm.can_trade = AsyncMock(return_value=(True, ""))
+    mock_get_rm.return_value = mock_rm
 
     mock_client = AsyncMock()
-    mock_client.get_accounts = AsyncMock(return_value=[{"id": "acc_1"}])
+    mock_client.get_accounts = AsyncMock(return_value=[MagicMock(id="acc_1")])
     mock_client.place_order = AsyncMock(
-        return_value={
-            "order_id": "ord_123",
-            "status": "filled",
-            "executed_quantity": 5,
-            "executed_price": 248.0,
-        }
+        return_value=MagicMock(
+            order_id="ord_123",
+            status="filled",
+            executed_quantity=5,
+            executed_price=248.0,
+        )
     )
-    mock_tbank.return_value.__aenter__.return_value = mock_client
+    mock_create_client.return_value.__aenter__.return_value = mock_client
 
     import src.trading.execution.engine as eng
 
@@ -161,11 +175,16 @@ async def test_execute_auto_trading_disabled(mock_settings):
 
 @pytest.mark.asyncio
 @patch("src.trading.execution.engine.settings")
-@patch("src.trading.execution.engine.TBankClient")
-async def test_execute_auto_no_figi(mock_tbank, mock_settings):
+@patch("src.trading.execution.engine.create_broker_client")
+@patch("src.trading.risk.manager.get_risk_manager")
+async def test_execute_auto_no_figi(mock_get_rm, mock_create_client, mock_settings):
     mock_settings.enable_trading = True
     mock_settings.tinkoff_token = "test_token"
     mock_settings.tinkoff_sandbox = True
+
+    mock_rm = MagicMock()
+    mock_rm.can_trade = AsyncMock(return_value=(True, ""))
+    mock_get_rm.return_value = mock_rm
 
     import src.trading.execution.engine as eng
 
@@ -195,11 +214,16 @@ async def test_execute_auto_no_figi(mock_tbank, mock_settings):
 
 @pytest.mark.asyncio
 @patch("src.trading.execution.engine.settings")
-@patch("src.trading.execution.engine.TBankClient")
-async def test_execute_auto_quantity_less_than_lot(mock_tbank, mock_settings):
+@patch("src.trading.execution.engine.create_broker_client")
+@patch("src.trading.risk.manager.get_risk_manager")
+async def test_execute_auto_quantity_less_than_lot(mock_get_rm, mock_create_client, mock_settings):
     mock_settings.enable_trading = True
     mock_settings.tinkoff_token = "test_token"
     mock_settings.tinkoff_sandbox = True
+
+    mock_rm = MagicMock()
+    mock_rm.can_trade = AsyncMock(return_value=(True, ""))
+    mock_get_rm.return_value = mock_rm
 
     import src.trading.execution.engine as eng
 
@@ -312,15 +336,20 @@ async def test_get_log():
 
 @pytest.mark.asyncio
 @patch("src.trading.execution.engine.settings")
-@patch("src.trading.execution.engine.TBankClient")
-async def test_execute_auto_no_accounts(mock_tbank, mock_settings):
+@patch("src.trading.execution.engine.create_broker_client")
+@patch("src.trading.risk.manager.get_risk_manager")
+async def test_execute_auto_no_accounts(mock_get_rm, mock_create_client, mock_settings):
     mock_settings.enable_trading = True
     mock_settings.tinkoff_token = "test_token"
     mock_settings.tinkoff_sandbox = True
 
+    mock_rm = MagicMock()
+    mock_rm.can_trade = AsyncMock(return_value=(True, ""))
+    mock_get_rm.return_value = mock_rm
+
     mock_client = AsyncMock()
     mock_client.get_accounts = AsyncMock(return_value=[])
-    mock_tbank.return_value.__aenter__.return_value = mock_client
+    mock_create_client.return_value.__aenter__.return_value = mock_client
 
     import src.trading.execution.engine as eng
 
@@ -355,15 +384,20 @@ async def test_execute_auto_no_accounts(mock_tbank, mock_settings):
 
 @pytest.mark.asyncio
 @patch("src.trading.execution.engine.settings")
-@patch("src.trading.execution.engine.TBankClient")
-async def test_execute_auto_exception(mock_tbank, mock_settings):
+@patch("src.trading.execution.engine.create_broker_client")
+@patch("src.trading.risk.manager.get_risk_manager")
+async def test_execute_auto_exception(mock_get_rm, mock_create_client, mock_settings):
     mock_settings.enable_trading = True
     mock_settings.tinkoff_token = "test_token"
     mock_settings.tinkoff_sandbox = True
 
+    mock_rm = MagicMock()
+    mock_rm.can_trade = AsyncMock(return_value=(True, ""))
+    mock_get_rm.return_value = mock_rm
+
     mock_client = AsyncMock()
     mock_client.get_accounts = AsyncMock(side_effect=Exception("API error"))
-    mock_tbank.return_value.__aenter__.return_value = mock_client
+    mock_create_client.return_value.__aenter__.return_value = mock_client
 
     import src.trading.execution.engine as eng
 

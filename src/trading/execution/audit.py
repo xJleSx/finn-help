@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from sqlalchemy import inspect
+from sqlalchemy.exc import OperationalError
+
 from src.core.context import context_extra
 from src.db.connection import get_session
 from src.db.models import ComplianceEvent, OrderFill
@@ -80,7 +83,7 @@ def audit_log_order(entry: dict[str, object]) -> None:
 def save_order(order: "OrderRecord") -> int:
     db = get_session()
     try:
-        o = OrderModel(
+        kw = dict(
             ticker=order.ticker,
             direction=order.direction,
             quantity=order.quantity,
@@ -98,8 +101,16 @@ def save_order(order: "OrderRecord") -> int:
             commission=order.commission,
             created_at=order.created_at,
         )
-        db.add(o)
-        db.commit()
+        try:
+            o = OrderModel(**kw)
+            db.add(o)
+            db.commit()
+        except OperationalError:
+            db.rollback()
+            kw.pop("time_in_force", None)
+            o = OrderModel(**kw)
+            db.add(o)
+            db.commit()
         logger.info(
             "order_saved",
             ticker=order.ticker,

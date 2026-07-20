@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from src.config import settings
 from src.llm import prompts
+from src.llm.cost_tracker import get_cost_tracker
 from src.llm.rate_limiter import throttled_groq_call
 from src.llm.tools.wolfram import WolframAlphaClient
 
@@ -19,6 +20,9 @@ class LLMRouter:
     def __init__(self) -> None:
         self._use_groq = bool(settings.groq_api_key)
         self._groq_model = settings.groq_model
+        self._use_ollama = bool(settings.ollama_url)
+        self._ollama_model = settings.ollama_model
+        self._cost_tracker = get_cost_tracker()
         self._wolfram: WolframAlphaClient | None = (
             WolframAlphaClient(settings.wolfram_app_id) if settings.wolfram_enabled and settings.wolfram_app_id else None
         )
@@ -200,7 +204,7 @@ class LLMRouter:
             ticker_context=ticker_context,
         )
 
-        return await self._groq_question(system_prompt, user_prompt)
+        return await self._call(system_prompt, user_prompt, temperature=0.3, max_tokens=1024)
 
     @staticmethod
     def _detect_ticker(db: Any, text: str) -> str | None:
@@ -236,6 +240,31 @@ class LLMRouter:
 
         return await throttled_groq_call(_do_call)
 
+    async def _ollama_call(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+    ) -> str:
+        import httpx
+
+        url = f"{settings.ollama_url.rstrip('/')}/api/chat"
+        payload = {
+            "model": model,
+            "messages": messages,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
+            "stream": False,
+        }
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("message", {}).get("content", "")
+
     async def _call(
         self,
         system: str,
@@ -248,12 +277,42 @@ class LLMRouter:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
-        return await self._groq_call(
-            messages=messages,
-            model=model or self._groq_model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        model = model or self._groq_model
+        last_error: Exception | None = None
+
+        if self._use_groq:
+            try:
+                result = await self._groq_call(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if result:
+                    self._cost_tracker.record(model, "groq", system + user, result)
+                    return result
+            except Exception as e:
+                logger.warning("Groq call failed, will try fallback: %s", e)
+                last_error = e
+
+        if self._use_ollama:
+            try:
+                result = await self._ollama_call(
+                    messages=messages,
+                    model=settings.ollama_model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if result:
+                    self._cost_tracker.record(settings.ollama_model, "ollama", system + user, result)
+                    return result
+            except Exception as e:
+                logger.warning("Ollama fallback also failed: %s", e)
+                last_error = e
+
+        if last_error:
+            logger.error("All LLM providers failed: %s", last_error)
+        return ""
 
     async def _groq_question(self, system: str, user: str) -> str:
         return await self._call(system, user, temperature=0.3, max_tokens=1024)

@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any, Optional
 
 import structlog
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from src.db.connection import get_session
+from src.interfaces.api.rbac.audit import AuditTrail
 from src.db.models import (
     ComplianceEvent,
     MarginAccount,
@@ -107,7 +108,7 @@ class ComplianceEventResponse(BaseModel):
 
 
 @router.post("/order", response_model=OrderResponse)
-async def place_order(req: OrderRequest):
+async def place_order(req: OrderRequest, request: Request):
     try:
         result = await execute_order(
             ticker=req.ticker.upper(),
@@ -132,6 +133,16 @@ async def place_order(req: OrderRequest):
             is_short=result.is_short,
             filled_quantity=result.filled_quantity,
             remaining_quantity=result.remaining_quantity,
+        )
+        user_id = request.headers.get("X-User-ID", "system")
+        ip = request.client.host if request.client else "unknown"
+        AuditTrail.log(
+            user_id=user_id,
+            action="execute_order",
+            resource=f"order:{result.ticker}",
+            details=f"direction={result.direction} quantity={result.quantity} status={result.status}",
+            ip_address=ip,
+            success=result.status.lower() in ("filled", "simulated", "pending"),
         )
     except Exception:
         logger.exception("trading_v2.order_failed", ticker=req.ticker, direction=req.direction)
@@ -320,6 +331,36 @@ async def get_compliance_events(
             )
             for e in events
         ]
+    finally:
+        db.close()
+
+
+@router.post("/order/cancel")
+async def cancel_order(order_id: int, request: Request):
+    db = get_session()
+    try:
+        order = db.query(Order).filter_by(id=order_id).first()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        order.status = "cancelled"
+        db.commit()
+        user_id = request.headers.get("X-User-ID", "system")
+        ip = request.client.host if request.client else "unknown"
+        AuditTrail.log(
+            user_id=user_id,
+            action="cancel_order",
+            resource=f"order:{order_id}",
+            details=f"ticker={order.ticker} direction={order.direction}",
+            ip_address=ip,
+            success=True,
+        )
+        return {"status": "cancelled", "order_id": order_id}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("trading_v2.cancel_order_failed", order_id=order_id)
+        db.rollback()
+        raise
     finally:
         db.close()
 

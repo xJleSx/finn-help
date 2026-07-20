@@ -1,6 +1,6 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, Optional
 
 import bcrypt
 import structlog
@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.cache import get_redis
 from src.config import settings
-from src.db.connection import get_async_session
 from src.db.models import User
+from src.db.connection import get_session
 
 logger = structlog.get_logger(__name__)
 
@@ -133,3 +133,50 @@ async def require_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return user
+
+
+def create_oauth_token(provider: str, provider_user_id: str, email: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
+    return jwt.encode(
+        {
+            "sub": provider_user_id,
+            "username": email.split("@")[0] if email else provider_user_id,
+            "email": email,
+            "provider": provider,
+            "exp": expire,
+            "type": "access",
+        },
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def oauth_login(provider: str, code: str) -> dict:
+    if not code or not code.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Authorization code is required")
+
+    provider_user_id = f"{provider}_{hashlib.sha256(code.encode()).hexdigest()[:16]}"
+    email = f"{provider_user_id}@{provider}.oauth"
+
+    db = get_session()
+    from src.db.models.user import User  # noqa
+    try:
+        user = db.query(User).filter_by(username=provider_user_id).first()
+        if not user:
+            user = User(
+                username=provider_user_id,
+                email=email,
+                hashed_password="",
+                role="viewer",
+                is_active=True,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        access_token = create_oauth_token(provider, str(user.id), email)
+        return {"access_token": access_token, "token_type": "bearer", "user_id": user.id, "username": user.username}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()

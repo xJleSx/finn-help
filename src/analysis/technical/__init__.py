@@ -1,6 +1,8 @@
 import logging
 from typing import Any
 
+from src.analysis.technical.advanced import AdvancedTechnicalAnalyzer as AdvancedTechnicalAnalyzer
+
 import numpy as np
 import pandas as pd
 

@@ -32,10 +32,7 @@ def _timecode(period: int = 30) -> int:
 
 def _valid_window(secret: str, code: str, window: int = 1, period: int = 30) -> bool:
     tc = _timecode(period)
-    for i in range(-window, window + 1):
-        if hmac.compare_digest(_hotp(secret, tc + i), code):
-            return True
-    return False
+    return any(hmac.compare_digest(_hotp(secret, tc + i), code) for i in range(-window, window + 1))
 
 
 def verify_totp(secret: str, code: str) -> bool:

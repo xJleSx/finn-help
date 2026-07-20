@@ -83,6 +83,25 @@ class BondOfferingCollector(BaseCollector):
                 with contextlib.suppress(ValueError, TypeError):
                     result["duration_years"] = float(duration)
 
+        # Calculate YTM if not provided by MOEX
+        if "yield_to_maturity" not in result and result.get("coupon_rate") and result.get("maturity_date") and result.get("current_price_pct"):
+            try:
+                from src.analysis.bonds_math import ytm_solver as _ytm_solver
+
+                years_to_mat = (result["maturity_date"] - date.today()).days / 365.25 if result.get("maturity_date") else 0
+                if years_to_mat > 0:
+                    ytm_calc = _ytm_solver(
+                        price_pct=result["current_price_pct"],
+                        coupon_rate=result["coupon_rate"],
+                        years_to_maturity=years_to_mat,
+                        nominal=result.get("nominal_price") or 100,
+                        frequency=2,
+                    )
+                    if ytm_calc is not None:
+                        result["yield_to_maturity"] = ytm_calc
+            except Exception as e:
+                logger.debug("YTM solver failed for %s: %s", ticker, e)
+
         # Calculate duration if not provided by MOEX
         if "duration_years" not in result and result.get("maturity_date") and result.get("yield_to_maturity"):
             result["duration_years"] = _estimate_duration(

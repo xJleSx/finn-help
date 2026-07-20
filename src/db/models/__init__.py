@@ -47,6 +47,7 @@ from src.db.models.portfolio import (
     TradeLog,
     Transaction,
 )
+from src.db.models.audit import AuditLog
 from src.db.models.risk import (
     CompanyRiskHistory,
     GeopoliticalRiskHistory,
@@ -134,4 +135,5 @@ __all__ = [
     "MarketEvent",
     "ModelFeedback",
     "DailyReport",
+    "AuditLog",
 ]

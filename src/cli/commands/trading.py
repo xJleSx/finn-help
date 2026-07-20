@@ -3,10 +3,11 @@ import logging
 import typer
 from rich.table import Table
 
+from src.cli.output import console
 from src.db.connection import get_session
 from src.db.models import Instrument, Portfolio
 
-from . import app, console, paper_app
+from . import app, paper_app
 
 logger = logging.getLogger(__name__)
 

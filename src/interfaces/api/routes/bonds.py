@@ -220,20 +220,54 @@ async def get_bond_metrics(ticker: str, db: AsyncSession = Depends(get_db)) -> d
     market_price = nominal * current_price_pct / 100.0
 
     duration = offering.duration_years
-    modified_duration = duration * 0.95 if duration else None
+    ytm = offering.yield_to_maturity
+    modified_duration = None
+    convexity = None
+    if duration and ytm:
+        from src.analysis.bonds_math import compute_convexity as _convexity
+        from src.analysis.bonds_math import compute_modified_duration as _mod_dur
 
-    result = await db.execute(
-        select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()).limit(1)
-    )
-    last_price_row = result.scalar_one_or_none()
+        modified_duration = _mod_dur(duration, ytm)
+        years_to_maturity = offering.maturity_years or (duration if duration > 0 else 1)
+        convexity = _convexity(
+            coupon_rate=offering.coupon_rate or 0,
+            ytm=ytm,
+            years_to_maturity=years_to_maturity,
+            nominal=nominal,
+            price=current_price_pct if current_price_pct > 0 else None,
+        )
+
+    accrued_interest = None
+    if offering.coupon_rate and offering.coupon_rate > 0 and offering.coupon_period_days:
+        try:
+
+            from src.analysis.bonds_math import compute_accrued_interest as _accrued
+
+            schedule = await db.execute(
+                select(BondCouponSchedule)
+                .where(BondCouponSchedule.instrument_id == inst.id)
+                .order_by(BondCouponSchedule.coupon_date.desc())
+                .limit(1)
+            )
+            last_coupon = schedule.scalar_one_or_none()
+            if last_coupon and last_coupon.coupon_date:
+                accrued_interest = _accrued(
+                    coupon_rate=offering.coupon_rate,
+                    nominal=nominal,
+                    last_coupon_date=last_coupon.coupon_date,
+                    coupon_period_days=offering.coupon_period_days or 182,
+                )
+        except Exception as _exc:
+            logger.debug("Failed to compute accrued interest: %s", _exc)
 
     return {
-        "yieldToMaturity": offering.yield_to_maturity,
+        "yieldToMaturity": ytm,
         "currentYield": offering.coupon_rate,
         "duration": round(duration, 2) if duration else None,
         "modifiedDuration": round(modified_duration, 2) if modified_duration else None,
+        "convexity": round(convexity, 4) if convexity else None,
         "coupon": None,
-        "accruedInterest": None,
+        "accruedInterest": accrued_interest,
         "purchasePrice": None,
         "marketPrice": round(market_price, 2) if market_price else None,
         "profit": None,
@@ -409,7 +443,6 @@ async def get_bond_price_history(
     prices = result.scalars().all()
 
     if prices:
-        nominal = offering.nominal_price or inst.nominal or 1000
         price_data = [
             {"time": p.date.isoformat(), "value": round(float(p.close) if p.close else 0, 2)}
             for p in prices if p.close

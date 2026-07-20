@@ -298,6 +298,7 @@ class BondMetricsResponse(BaseModel):
     currentYield: float | None = Field(None, description="Current yield %")
     duration: float | None = Field(None, description="Macaulay duration years")
     modifiedDuration: float | None = Field(None, description="Modified duration years")
+    convexity: float | None = Field(None, description="Convexity")
     coupon: float | None = Field(None, description="Coupon value in RUB")
     accruedInterest: float | None = Field(None, description="Accrued interest (НКД) in RUB")
     purchasePrice: float | None = Field(None, description="Average purchase price in RUB")

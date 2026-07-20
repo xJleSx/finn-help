@@ -15,8 +15,16 @@ from slowapi.errors import RateLimitExceeded
 from src.config import settings
 from src.core.executor import get_executor, shutdown_executor
 from src.core.logging import setup_logging
+from src.core.observability import AsyncTraceMiddleware, setup_metrics, setup_tracing
 from src.core.sentry import setup_sentry
 from src.interfaces.api.rate_limiter import limiter
+from src.interfaces.api.rbac.models import (
+    ROLE_PERMISSIONS,
+    Permission,
+    Role,
+    get_current_user_role,
+    require_permission,
+)
 from src.interfaces.api.routes.alert_preferences import router as alert_prefs_router
 from src.interfaces.api.routes.analysis import router as analysis_router
 from src.interfaces.api.routes.auth import router as auth_router
@@ -46,9 +54,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from src.core.container import wire
 
     wire()
-    from src.core.tracing import setup_tracing
-
     setup_tracing("finn-help")
+    setup_metrics("finn-help")
     from src.db.connection import close_db, init_db
 
     try:
@@ -119,6 +126,7 @@ else:
 if allow_creds and "*" in origins:
     logger.warning("CORS: cannot use credentials with wildcard origins, disabling credentials")
     allow_creds = False
+app.add_middleware(AsyncTraceMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -165,6 +173,60 @@ async def prometheus_middleware(request: Request, call_next: Any) -> Response:
         response = await call_next(request)
     HTTP_REQUESTS.labels(method=request.method, endpoint=request.url.path, status=response.status_code).inc()
     return response
+
+
+RBAC_PROTECTED_PATHS: dict[str, Permission] = {
+    "/api/trading": Permission.TRADE_EXECUTE,
+    "/api/portfolio": Permission.VIEW_PORTFOLIO,
+    "/api/instruments": Permission.VIEW_INSTRUMENTS,
+    "/api/analysis": Permission.VIEW_ANALYSIS,
+    "/api/alerts": Permission.MANAGE_ALERTS,
+}
+
+
+@app.middleware("http")
+async def rbac_middleware(request: Request, call_next):
+    path = request.url.path
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    for prefix, perm in RBAC_PROTECTED_PATHS.items():
+        if path.startswith(prefix):
+            try:
+                role = get_current_user_role(request)
+                require_permission(perm)
+            except HTTPException as exc:
+                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+            break
+    return await call_next(request)
+
+
+RBAC_PROTECTED_PATHS: dict[str, Permission] = {
+    "/api/trading": Permission.TRADE_EXECUTE,
+    "/api/portfolio": Permission.VIEW_PORTFOLIO,
+    "/api/instruments": Permission.VIEW_INSTRUMENTS,
+    "/api/analysis": Permission.VIEW_ANALYSIS,
+    "/api/alerts": Permission.MANAGE_ALERTS,
+}
+
+
+@app.middleware("http")
+async def rbac_middleware(request: Request, call_next):
+    path = request.url.path
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    for prefix, perm in RBAC_PROTECTED_PATHS.items():
+        if path.startswith(prefix):
+            try:
+                role = get_current_user_role(request)
+                if perm not in ROLE_PERMISSIONS.get(role, set()):
+                    return JSONResponse(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        content={"detail": f"Missing required permission: {perm.value}"},
+                    )
+            except HTTPException as exc:
+                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+            break
+    return await call_next(request)
 
 
 app.include_router(auth_router)

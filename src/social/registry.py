@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -19,16 +21,23 @@ class SocialRegistry:
         return self._sources.get(name)
 
     def get_active(self) -> list[SocialDataSource]:
-        cfg: dict[str, Any] = personal.get("social_sources", {})  # type: ignore[assignment]
+        cfg: dict[str, Any] = personal.get("social_sources", {})
         return [s for name, s in self._sources.items() if cfg.get(name, {}).get("enabled", False)]
 
     def build_from_config(self) -> None:
-        cfg: dict[str, Any] = personal.get("social_sources", {})  # type: ignore[assignment]
+        cfg: dict[str, Any] = personal.get("social_sources", {})
         pulse_cfg = cfg.get("pulse", {})
         if pulse_cfg.get("enabled") and pulse_cfg.get("authors"):
             from src.social.pulse import PulseAdapter
 
             self.register(PulseAdapter(authors=pulse_cfg["authors"]))
+
+        vk_cfg = cfg.get("vk", {})
+        if vk_cfg.get("enabled"):
+            group_ids = vk_cfg.get("group_ids")
+            from src.social.vk import VKAdapter
+
+            self.register(VKAdapter(group_ids=group_ids))
 
 
 registry = SocialRegistry()

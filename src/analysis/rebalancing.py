@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+import numpy as np
+import pandas as pd
+
+from src.analysis.portfolio.black_litterman import BlackLittermanAllocator, MarketView
 from src.db.models import BondOffering, Instrument, Portfolio, Price, Signal
 from src.notifications import RebalanceAlert
 
@@ -380,6 +384,67 @@ class RebalancingEngine:
             trades.append(trade)
 
         return trades
+
+    def black_litterman_rebalance(
+        self,
+        db: Any,
+        user_id: int = 0,
+        views: list[MarketView] | None = None,
+        optimizer_method: str = "max_sharpe",
+        tau: float = 0.05,
+    ) -> RebalancePlan:
+        positions = db.query(Portfolio).filter_by(user_id=user_id).all()
+        if not positions or not views:
+            return self.generate_plan(db, user_id)
+
+        inst_ids = list({pos.instrument_id for pos in positions if pos.instrument_id})
+        instr_rows = db.query(Instrument).filter(Instrument.id.in_(inst_ids)).all() if inst_ids else []
+        tickers = [str(r.ticker) for r in instr_rows]
+        if not tickers:
+            return self.generate_plan(db, user_id)
+
+        price_rows = (
+            db.query(Price)
+            .filter(Price.instrument_id.in_(inst_ids))
+            .order_by(Price.instrument_id, Price.date.desc())
+            .all()
+        )
+        price_map: dict[int, float] = {}
+        for r in price_rows:
+            if r.instrument_id not in price_map and r.close:
+                price_map[r.instrument_id] = float(r.close)
+
+        total_value = 0.0
+        pos_values: dict[str, float] = {}
+        instr_map = {r.id: str(r.ticker) for r in instr_rows}
+        for pos in positions:
+            if not pos.instrument_id:
+                continue
+            ticker = instr_map.get(pos.instrument_id)
+            price = price_map.get(pos.instrument_id, 0)
+            if not ticker or price <= 0:
+                continue
+            val = price * float(pos.quantity)
+            pos_values[ticker] = val
+            total_value += val
+
+        if total_value <= 0:
+            return self.generate_plan(db, user_id)
+
+        market_weights = {t: v / total_value for t, v in pos_values.items()}
+        n = len(tickers)
+        cov = np.eye(n) * 0.04
+        np.fill_diagonal(cov, 0.04)
+        cov_df = pd.DataFrame(cov, index=tickers, columns=tickers)
+
+        allocator = BlackLittermanAllocator(market_weights, cov_df, tau=tau)
+        result = allocator.allocate(views, optimizer_method=optimizer_method)
+        raw_weights = result["weights"]
+        target_weights = {k: max(v, 0.0) for k, v in raw_weights.items()}
+        tw_sum = sum(target_weights.values())
+        if tw_sum > 0:
+            target_weights = {k: v / tw_sum for k, v in target_weights.items()}
+        return self.generate_plan(db, user_id, target_weights)
 
     def format_plan(self, plan: RebalancePlan) -> str:
         if not plan.actions:

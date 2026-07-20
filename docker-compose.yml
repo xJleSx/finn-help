@@ -51,6 +51,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
     environment:
       - DATABASE_URL=postgresql://finn:${DB_PASSWORD:?DB_PASSWORD is required}@pgbouncer:5432/finn
       - REDIS_URL=redis://redis:6379/0
@@ -119,6 +121,55 @@ services:
       redis:
         condition: service_healthy
 
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - finn_prometheus:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - ./deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - finn_grafana:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.14.3
+    ports:
+      - "127.0.0.1:5000:5000"
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql://finn:${DB_PASSWORD:?DB_PASSWORD is required}@pgbouncer:5432/finn
+      --default-artifact-root /mlflow/artifacts
+      --artifacts-destination /mlflow/artifacts
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    volumes:
+      - finn_mlflow:/mlflow
+    depends_on:
+      pgbouncer:
+        condition: service_started
+
   web:
     build:
       context: ./web
@@ -142,3 +193,6 @@ volumes:
   finn_postgres:
   finn_redis:
   finn_data:
+  finn_prometheus:
+  finn_grafana:
+  finn_mlflow:

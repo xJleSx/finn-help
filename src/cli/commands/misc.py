@@ -3,9 +3,10 @@ import logging
 
 import typer
 
+from src.cli.output import console
 from src.db.connection import init_db
 
-from . import app, console, paper_app
+from . import app, paper_app  # noqa: PLC0415 — app/paper_app defined in __init__ before submodule imports
 
 logger = logging.getLogger(__name__)
 

@@ -23,7 +23,6 @@ def analyze_bond(
     risk_score = 0.0
 
     ytm = bond_offering.get("yield_to_maturity")
-    coupon_rate = bond_offering.get("coupon_rate")
     credit_rating = bond_offering.get("credit_rating")
     duration = bond_offering.get("duration_years")
     coupon_type = bond_offering.get("coupon_type", "fixed")

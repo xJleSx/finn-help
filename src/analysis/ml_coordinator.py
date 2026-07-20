@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.analysis.events import EventFeatureBuilder, event_features
+from src.config import settings
 from src.core.executor import get_executor
 from src.db.models import Indicator, Instrument, MarketEvent, Price
 
@@ -28,6 +29,9 @@ try:
     import mlflow
 
     _MLFLOW_AVAILABLE = True
+    _mlflow_uri = getattr(settings, "mlflow_tracking_uri", None)
+    if _mlflow_uri:
+        mlflow.set_tracking_uri(_mlflow_uri)
 except ImportError:
     _MLFLOW_AVAILABLE = False
 
