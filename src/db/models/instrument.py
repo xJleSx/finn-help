@@ -159,7 +159,10 @@ class FundamentalMetric(Base):
 
     instrument = relationship("Instrument", backref="fundamental_metrics")
 
-    __table_args__ = (Index("ix_fundamental_metrics_instr_date", "instrument_id", "date"),)
+    __table_args__ = (
+        Index("ix_fundamental_metrics_instr_date", "instrument_id", "date"),
+        UniqueConstraint("instrument_id", "date", name="uq_fundamental_metrics_instr_date"),
+    )
 
 
 class FinancialReport(Base):
