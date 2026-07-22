@@ -42,11 +42,18 @@ def _first(v1: Any, v2: Any) -> Any:
     return v1 if v1 is not None else v2
 
 
+ETF_BOARDS = ["etf", "etf_tqtd"]
+
 async def _fetch_prices_for_instrument(db: AsyncSession, inst: Instrument, from_date: str, moex: MOEXCollector) -> int:
-    board: str = {"stock": "stock", "bond": "bond", "etf": "etf"}.get(str(inst.instrument_type), "shares")
-    history = await moex.get_history(str(inst.ticker), from_date=from_date, board=board)
+    itype = str(inst.instrument_type)
+    boards = ETF_BOARDS if itype == "etf" else [{"stock": "stock", "bond": "bond"}.get(itype, "shares")]
+    history: list[dict] = []
+    for board in boards:
+        history = await moex.get_history(str(inst.ticker), from_date=from_date, board=board)
+        if history:
+            break
     if not history:
-        logger.debug("No price history for %s (board=%s, from=%s)", inst.ticker, board, from_date)
+        logger.debug("No price history for %s (boards=%s, from=%s)", inst.ticker, boards, from_date)
         return 0
 
     nominal: float | None = None

@@ -20,6 +20,7 @@ MOCK_DATA_ENABLED = settings.use_mock_data
 BOARD_MAP = {
     "stock": "/history/engines/stock/markets/shares/boards/TQBR/securities/{ticker}.json",
     "etf": "/history/engines/stock/markets/shares/boards/TQTF/securities/{ticker}.json",
+    "etf_tqtd": "/history/engines/stock/markets/shares/boards/TQTD/securities/{ticker}.json",
     "bond": "/history/engines/stock/markets/bonds/boards/TQCB/securities/{ticker}.json",
     "shares": "/history/engines/stock/markets/shares/securities/{ticker}.json",
 }
