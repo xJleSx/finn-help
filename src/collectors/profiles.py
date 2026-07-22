@@ -71,7 +71,12 @@ class SmartLabProfileCollector(BaseCollector):
         return profile
 
     def fetch_profile(self, ticker: str) -> dict[str, Any]:
-        return asyncio.run(self._fetch_profile_async(ticker))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self._fetch_profile_async(ticker))
+        finally:
+            loop.close()
 
     @staticmethod
     def _parse_int(value: str) -> Optional[int]:

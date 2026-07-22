@@ -34,14 +34,16 @@ def compute_margin_requirements(
     borrowed = existing_loan
     req.loan_amount = borrowed
     req.portfolio_value = total_value
-    req.leverage = (total_value + borrowed) / total_value if total_value > 0 else 1.0
-    if total_value > 0:
+    equity = total_value - borrowed
+    req.leverage = total_value / equity if equity > 0 else float("inf")
+    if total_value > 0 and equity > 0:
         margin_deficit = borrowed + req.initial_margin - total_value
-        req.free_cash = max(0.0, total_value - borrowed - req.initial_margin)
-        req.margin_used_pct = (borrowed + req.initial_margin) / total_value if total_value > 0 else 0
+        req.free_cash = max(0.0, equity - req.initial_margin)
+        req.margin_used_pct = req.initial_margin / equity if equity > 0 else 1.0
         if margin_deficit > 0:
             if is_short:
-                req.margin_call_price = (position_value * (1 + SHORT_MAINTENANCE_MARGIN_PCT) - borrowed) / (_quantity := 1)
+                price_per_share = position_value / 1
+                req.margin_call_price = price_per_share * (1 + SHORT_MAINTENANCE_MARGIN_PCT) + (borrowed / 1)
             else:
                 req.margin_call_price = position_value * (1 - MARGIN_CALL_PCT)
             req.liquidation_price = position_value * (1 - LIQUIDATION_PCT)
@@ -66,16 +68,18 @@ def compute_portfolio_margin(
     req.maintenance_margin = long_maintenance + short_maintenance
     req.loan_amount = max(0.0, gross_long + req.initial_margin - cash_balance)
     if req.portfolio_value > 0:
-        req.leverage = (req.portfolio_value + req.loan_amount) / req.portfolio_value
+        equity = req.portfolio_value - req.loan_amount
+        req.leverage = req.portfolio_value / equity if equity > 0 else float("inf")
     req.free_cash = max(0.0, cash_balance - req.loan_amount - req.maintenance_margin)
     req.margin_used_pct = (req.initial_margin + req.loan_amount) / req.portfolio_value if req.portfolio_value > 0 else 0
-    if cash_balance < req.maintenance_margin:
+    equity = req.portfolio_value - req.loan_amount
+    if equity < req.maintenance_margin:
         req.margin_status = "margin_call"
-    elif cash_balance < req.initial_margin:
+    elif equity < req.initial_margin:
         req.margin_status = "warning"
     else:
         req.margin_status = "safe"
-    if cash_balance <= 0 and req.loan_amount > 0:
+    if equity <= 0 and req.loan_amount > 0:
         req.margin_status = "liquidation"
     return req
 
@@ -89,7 +93,8 @@ def compute_leverage_info(
     info = LeverageInfo()
     info.portfolio_value = portfolio_value
     info.total_loan = total_loan
-    info.leverage_ratio = (portfolio_value + total_loan) / portfolio_value if portfolio_value > 0 else 1.0
+    equity = portfolio_value - total_loan
+    info.leverage_ratio = portfolio_value / equity if equity > 0 else float("inf")
     info.used_margin = margin_used
     info.free_margin = max(0.0, cash_balance - margin_used)
     info.margin_call_level = portfolio_value * MARGIN_CALL_PCT

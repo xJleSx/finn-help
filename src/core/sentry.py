@@ -26,7 +26,7 @@ def setup_sentry() -> None:
         )
         logger.info("Sentry initialized for environment: %s", settings.sentry_environment)
     except Exception as e:
-        logger.warning("Failed to initialize Sentry: %s", e)
+        logger.error("Failed to initialize Sentry: %s", e, exc_info=True)
 
 
 def sentry_set_user_context(user_id: int, username: str = "", portfolio_id: int | None = None) -> None:
@@ -40,7 +40,7 @@ def sentry_set_user_context(user_id: int, username: str = "", portfolio_id: int 
         if extra:
             sentry_sdk.set_context("finadvisor", extra)
     except Exception as e:
-        logger.warning("Failed to set Sentry user context: %s", e)
+        logger.error("Failed to set Sentry user context: %s", e, exc_info=True)
 
 
 def sentry_set_extra(key: str, value: object) -> None:
@@ -49,4 +49,4 @@ def sentry_set_extra(key: str, value: object) -> None:
 
         sentry_sdk.set_extra(key, value)
     except Exception as e:
-        logger.warning("Failed to set Sentry extra %s: %s", key, e)
+        logger.error("Failed to set Sentry extra %s: %s", key, e, exc_info=True)

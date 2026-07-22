@@ -17,6 +17,14 @@ from src.db.connection import get_session
 
 logger = structlog.get_logger(__name__)
 
+
+class AuthError(Exception):
+    """Custom exception for authentication errors, separate from HTTPException."""
+    def __init__(self, detail: str = "Authentication failed", status_code: int = status.HTTP_401_UNAUTHORIZED):
+        self.detail = detail
+        self.status_code = status_code
+        super().__init__(detail)
+
 if not settings.jwt_secret:
     raise RuntimeError(
         "JWT_SECRET is not configured. Set JWT_SECRET in .env or environment variables. "
@@ -27,6 +35,10 @@ SECRET_KEY = settings.jwt_secret
 
 _refresh_secret = settings.jwt_refresh_secret
 if not _refresh_secret:
+    logger.warning(
+        "REFRESH_SECRET not set — falling back to JWT_SECRET + '_refresh'. "
+        "Set REFRESH_SECRET in .env for production."
+    )
     _refresh_secret = settings.jwt_secret + "_refresh"
 REFRESH_SECRET_KEY = _refresh_secret
 ALGORITHM = "HS256"
@@ -69,19 +81,22 @@ def create_refresh_token(user_id: int, username: str) -> str:
 
 def decode_token(token: str) -> dict[str, Any]:
     try:
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "access":
+            raise AuthError("Invalid token type")
+        return payload
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        raise AuthError("Invalid token")
 
 
 def decode_refresh_token(token: str) -> dict[str, Any]:
     try:
         payload = jwt.decode(token, REFRESH_SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("type") != "refresh":
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+            raise AuthError("Invalid token type")
         return payload
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        raise AuthError("Invalid refresh token")
 
 
 def blacklist_refresh_token(token: str) -> None:
@@ -123,7 +138,7 @@ async def get_current_user(
             return None
         result = await db.execute(select(User).where(User.id == user_id, User.is_active))
         return result.scalar_one_or_none()
-    except (JWTError, ValueError, TypeError):
+    except (JWTError, ValueError, TypeError, AuthError):
         return None
 
 
@@ -152,6 +167,7 @@ def create_oauth_token(provider: str, provider_user_id: str, email: str) -> str:
 
 
 def oauth_login(provider: str, code: str) -> dict:
+    # TODO: use async session / DI instead of sync get_session()
     if not code or not code.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Authorization code is required")
 

@@ -36,22 +36,22 @@ class ADWINDetector:
         if n < 5:
             return False
 
+        total = sum(self._window)
+        left_sum = 0.0
+
         for cut in range(1, n):
-            left = list(self._window)[:cut]
-            right = list(self._window)[cut:]
-            n0 = len(left)
-            n1 = len(right)
-            if n0 == 0 or n1 == 0:
-                continue
-            mean0 = sum(left) / n0
-            mean1 = sum(right) / n1
+            left_sum += self._window[cut - 1]
+            n0 = cut
+            n1 = n - cut
+            mean0 = left_sum / n0
+            mean1 = (total - left_sum) / n1
             diff = abs(mean0 - mean1)
 
             m = 1.0 / (1.0 / n0 + 1.0 / n1)
-            eps = math.sqrt(1.0 / (2.0 * m) * math.log(4.0 * n / self.delta))
+            eps = math.sqrt(math.log(4.0 / self.delta) / (2.0 * m))
 
             if diff > eps:
-                self._window = deque(right)
+                self._window = deque([self._window[i] for i in range(cut, n)])
                 return True
 
         return False

@@ -6,7 +6,7 @@ from src.config import settings
 
 
 def setup_logging() -> None:
-    log_level = settings.log_level.upper() if hasattr(settings, "log_level") else "INFO"
+    log_level = settings.log_level.upper()
     structlog.configure(
         processors=[
             structlog.stdlib.filter_by_level,

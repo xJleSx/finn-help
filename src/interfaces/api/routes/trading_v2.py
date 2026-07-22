@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any, Optional
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from src.db.connection import get_session
+from src.interfaces.api.auth import decode_token
 from src.interfaces.api.rbac.audit import AuditTrail
 from src.db.models import (
     ComplianceEvent,
@@ -29,6 +30,17 @@ from src.trading.tax.reporter import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/trading/v2", tags=["trading_v2"])
+
+
+def _get_user_id(request: Request) -> int:
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and len(auth) > 7:
+        try:
+            payload = decode_token(auth[7:])
+            return int(payload.get("sub", 0))
+        except Exception:
+            pass
+    return 0
 
 
 class OrderRequest(BaseModel):
@@ -120,6 +132,16 @@ async def place_order(req: OrderRequest, request: Request):
             time_in_force=req.time_in_force.lower(),
             is_short=req.is_short,
         )
+        user_id = _get_user_id(request)
+        ip = request.client.host if request.client else "unknown"
+        AuditTrail.log(
+            user_id=str(user_id),
+            action="execute_order",
+            resource=f"order:{result.ticker}",
+            details=f"direction={result.direction} quantity={result.quantity} status={result.status}",
+            ip_address=ip,
+            success=result.status.lower() in ("filled", "simulated", "pending"),
+        )
         return OrderResponse(
             status=result.status,
             order_id=result.order_id,
@@ -133,16 +155,6 @@ async def place_order(req: OrderRequest, request: Request):
             is_short=result.is_short,
             filled_quantity=result.filled_quantity,
             remaining_quantity=result.remaining_quantity,
-        )
-        user_id = request.headers.get("X-User-ID", "system")
-        ip = request.client.host if request.client else "unknown"
-        AuditTrail.log(
-            user_id=user_id,
-            action="execute_order",
-            resource=f"order:{result.ticker}",
-            details=f"direction={result.direction} quantity={result.quantity} status={result.status}",
-            ip_address=ip,
-            success=result.status.lower() in ("filled", "simulated", "pending"),
         )
     except Exception:
         logger.exception("trading_v2.order_failed", ticker=req.ticker, direction=req.direction)
@@ -344,10 +356,10 @@ async def cancel_order(order_id: int, request: Request):
             raise HTTPException(status_code=404, detail="Order not found")
         order.status = "cancelled"
         db.commit()
-        user_id = request.headers.get("X-User-ID", "system")
+        user_id = _get_user_id(request)
         ip = request.client.host if request.client else "unknown"
         AuditTrail.log(
-            user_id=user_id,
+            user_id=str(user_id),
             action="cancel_order",
             resource=f"order:{order_id}",
             details=f"ticker={order.ticker} direction={order.direction}",

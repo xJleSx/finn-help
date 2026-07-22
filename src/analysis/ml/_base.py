@@ -259,6 +259,25 @@ class BaseMLClassifier(PersistMixin, ABC):
         self.save(metrics=save_metrics, params=save_params if save_params else None)
         return True
 
+    def _model_age_seconds(self) -> float | None:
+        try:
+            from src.model_registry import _load_registry
+            registry = _load_registry()
+            name = self.model_name
+            if name not in registry:
+                return None
+            version = registry[name].get("latest")
+            if not version:
+                return None
+            meta = next((v for v in registry[name]["versions"] if v["version"] == version), None)
+            if not meta or "created_at" not in meta:
+                return None
+            from datetime import datetime, timezone
+            created = datetime.fromisoformat(meta["created_at"])
+            return (datetime.now(timezone.utc) - created).total_seconds()
+        except Exception:
+            return None
+
     def predict(self, df: pd.DataFrame, anomaly_mask: np.ndarray | None = None) -> dict[str, Any]:
         if df.empty or len(df) < settings.ml_min_predict_rows:
             return {"action": "NEUTRAL", "confidence": 0.0, "signal_score": 0.0}
@@ -273,6 +292,13 @@ class BaseMLClassifier(PersistMixin, ABC):
         if model is None:
             with contextlib.suppress(ValueError, FileNotFoundError):
                 model = self.load()
+
+        if model is not None:
+            age = self._model_age_seconds()
+            if age is not None and age > 3600:
+                logger.info("%s model age %.0fs > 3600s, rejecting stale model", self.model_name, age)
+                model = None
+                self._model = None
 
         if model is None:
             result = self._train_on_the_fly(df, features, anomaly_mask=anomaly_mask)

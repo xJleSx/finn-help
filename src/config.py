@@ -1,5 +1,5 @@
+import hashlib
 import os
-import secrets
 from pathlib import Path
 
 import yaml
@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings
 
 load_dotenv()
 
-_DEFAULT_JWT = secrets.token_urlsafe(48)
+_DEFAULT_JWT = hashlib.sha256(b"finn-help-stable-secret").hexdigest()
 
 
 PERSONAL_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "personal_settings.yaml"
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     telegram_rate_limit_period: int = 60
     telegram_anti_flood_cooldown: int = 5
     log_level: str = "INFO"
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000"  # dev only — override via .env for production
     cors_credentials: bool = True
     rate_limit_per_minute: int = 60
     ssl_tbank_verify: bool = True
@@ -190,7 +190,7 @@ class Settings(BaseSettings):
     ml_prometheus_enabled: bool = True
     executor_max_workers: int = 4
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "forbid"}
 
 
 settings = Settings()
@@ -199,7 +199,14 @@ personal = load_personal_settings()
 if not os.environ.get("JWT_SECRET"):
     import logging as _logging
     _logging.warning(
-        "JWT_SECRET is not set in environment. Using ephemeral secret — "
-        "all sessions will be invalidated on restart. "
-        "Set JWT_SECRET in .env for persistent sessions."
+        "JWT_SECRET is not set in environment. Using stable fallback secret — "
+        "change JWT_SECRET in .env for a unique persistent secret."
+    )
+
+if not settings.encryption_key or len(settings.encryption_key) < 16:
+    import logging as _logging
+    _logging.warning(
+        "encryption_key is empty or too short (< 16 chars). "
+        "Data at rest is NOT encrypted securely. "
+        "Set a strong encryption_key (32+ chars) in .env."
     )

@@ -363,3 +363,8 @@ def save_model_with_device(
             v["device"] = device
     _save_registry(registry)
     return version
+
+
+async def async_prune_models(max_versions: int = 5) -> dict[str, int]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: prune_models(max_versions=max_versions))

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,10 +47,31 @@ def _rotate_if_needed(file_path: Path) -> None:
                 if not rotated.exists():
                     break
                 index += 1
-            file_path.rename(rotated)
+            shutil.move(str(file_path), str(rotated))
             logger.info("audit_rotated", src=str(file_path), dst=str(rotated))
     except OSError as e:
         logger.error("audit_rotation_failed: %s", e)
+
+
+def _read_last_entry_hash(file_path: Path) -> str:
+    try:
+        with open(file_path, "rb") as f:
+            f.seek(-2, os.SEEK_END)
+            while f.read(1) != b"\n":
+                f.seek(-2, os.SEEK_CUR)
+            last_line = f.readline().decode("utf-8").strip()
+        if last_line:
+            last_entry = json.loads(last_line)
+            return last_entry.get("_hash", "")
+    except (OSError, json.JSONDecodeError, IndexError):
+        pass
+    return ""
+
+
+def _hash_entry(entry: dict[str, Any]) -> str:
+    clean = {k: v for k, v in entry.items() if k not in ("_hash", "_prev_hash")}
+    raw = json.dumps(clean, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _build_audit_entry(entry: dict[str, Any]) -> dict[str, Any]:
@@ -62,6 +85,12 @@ def _build_audit_entry(entry: dict[str, Any]) -> dict[str, Any]:
     entry.update(context_extra())
     if "order_id" not in entry and "id" in entry:
         entry["order_id"] = entry["id"]
+    file_path = _audit_log_file()
+    if file_path.exists():
+        entry["_prev_hash"] = _read_last_entry_hash(file_path)
+    else:
+        entry["_prev_hash"] = ""
+    entry["_hash"] = _hash_entry(entry)
     return entry
 
 
@@ -78,6 +107,53 @@ def audit_log_order(entry: dict[str, object]) -> None:
         logger.info("audit.order", **entry)
     except Exception as e:
         logger.error("Failed to write audit log", error=str(e))
+
+
+def _verify_single_file(file_path: Path, prev_hash: str) -> tuple[list[dict[str, Any]], str]:
+    results: list[dict[str, Any]] = []
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError as e:
+                results.append({"line": line_no, "valid": False, "error": f"JSON decode: {e}"})
+                continue
+            entry_hash = entry.get("_hash", "")
+            entry_prev = entry.get("_prev_hash", "")
+            computed = _hash_entry(entry)
+            if computed != entry_hash:
+                results.append({"line": line_no, "valid": False, "error": "hash mismatch", "expected": computed, "got": entry_hash})
+                continue
+            if entry_prev != prev_hash:
+                results.append({"line": line_no, "valid": False, "error": "chain broken", "expected_prev": prev_hash, "got": entry_prev})
+                continue
+            results.append({"line": line_no, "valid": True, "event": entry.get("event", ""), "event_id": entry.get("_event_id", "")})
+            prev_hash = entry_hash
+    return results, prev_hash
+
+
+def verify_audit_chain(file_path: Path | None = None) -> list[dict[str, Any]]:
+    if file_path is None:
+        file_path = _audit_log_file()
+    if not file_path.exists():
+        return [{"valid": True, "entries": 0, "error": "file not found"}]
+
+    results: list[dict[str, Any]] = []
+    prev_hash = ""
+    # Walk all rotated audit files in addition to the current one
+    base_stem = file_path.stem
+    parent_dir = file_path.parent
+    all_audit_files = sorted(
+        [p for p in parent_dir.glob(f"{base_stem}*.jsonl") if p.suffix == ".jsonl"],
+        key=lambda p: p.stat().st_mtime,
+    )
+    for af in all_audit_files:
+        file_results, prev_hash = _verify_single_file(af, prev_hash)
+        results.extend(file_results)
+    return results
 
 
 def save_order(order: "OrderRecord") -> int:

@@ -7,7 +7,6 @@ from typing import Any, cast
 
 import httpx
 
-from src.core.executor import get_executor
 from src.social.base import RawPost, SocialDataSource
 from src.social.utils import async_retry, clean_text, extract_tickers
 
@@ -66,7 +65,7 @@ class PulseAdapter(SocialDataSource):
 
     def __init__(self, authors: list[str]) -> None:
         self._authors = authors
-        self._http = httpx.Client(
+        self._http = httpx.AsyncClient(
             headers={"User-Agent": USER_AGENT},
             timeout=30,
         )
@@ -100,10 +99,9 @@ class PulseAdapter(SocialDataSource):
         self._last_request_time = time.monotonic()
 
     async def _fetch_profile_page(self, nick: str) -> str | None:
-        loop = asyncio.get_event_loop()
         url = PROFILE_URL.format(nick)
         try:
-            resp = await loop.run_in_executor(get_executor(), lambda: self._http.get(url, follow_redirects=True))
+            resp = await self._http.get(url, follow_redirects=True)
             resp.raise_for_status()
             return resp.text
         except httpx.HTTPStatusError as e:
@@ -181,4 +179,4 @@ class PulseAdapter(SocialDataSource):
         )
 
     async def close(self) -> None:
-        self._http.close()
+        await self._http.aclose()

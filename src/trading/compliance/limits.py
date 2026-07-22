@@ -52,16 +52,30 @@ def check_sector_limit(ticker: str, sector: str, position_value: float, portfoli
     db = get_session()
     try:
         from sqlalchemy import func
+        from src.db.models import Instrument, Price
 
-        from src.db.models import Instrument
-
-        sector_positions = (
-            db.query(func.sum(Portfolio.quantity * Instrument.id))
+        latest_price = (
+            db.query(
+                Price.instrument_id,
+                Price.close,
+                func.row_number()
+                .over(partition_by=Price.instrument_id, order_by=Price.date.desc())
+                .label("rn"),
+            )
+            .subquery()
+        )
+        sector_value = (
+            db.query(func.coalesce(func.sum(Portfolio.quantity * latest_price.c.close), 0))
             .join(Instrument, Portfolio.instrument_id == Instrument.id)
+            .join(
+                latest_price,
+                (latest_price.c.instrument_id == Instrument.id)
+                & (latest_price.c.rn == 1),
+            )
             .filter(Instrument.sector == sector)
             .scalar()
-        ) or 0
-        current_sector_value = float(sector_positions)
+        ) or 0.0
+        current_sector_value = float(sector_value)
         new_sector_value = current_sector_value + position_value
         sector_pct = new_sector_value / portfolio_value
         sector_limit = SECTOR_LIMITS.get(sector, SECTOR_LIMIT_PCT)

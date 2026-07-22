@@ -79,7 +79,8 @@ def _retry_failed_receipts() -> None:
         logger.info("Retrying %d failed receipts", len(pending))
         for receipt in pending:
             try:
-                if receipt.channel == "email" and receipt.title:
+                to_email = getattr(receipt, "to_email", None)
+                if receipt.channel == "email" and receipt.title and to_email:
                     from src.notifications.channels import EmailPushChannel, PushMessage
 
                     channel = EmailPushChannel(db=db)
@@ -90,7 +91,7 @@ def _retry_failed_receipts() -> None:
                         priority=0,
                         alert_type=receipt.notification_type or "general",
                     )
-                    success = channel.send("", msg)
+                    success = channel.send(to_email, msg)
                     if success:
                         mgr.mark_sent(receipt.id)
                     else:
@@ -222,7 +223,7 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
 
                             ns = NotificationService()
                             for uid, cid in ns.get_subscribers("daily"):
-                                target = cid or uid
+                                target = f"chat:{cid}" if cid else f"user:{uid}"
                                 try:
                                     await bot_app.bot.send_message(chat_id=target, text=report.report_text, parse_mode="HTML")
                                 except Exception as e:
@@ -295,3 +296,10 @@ def stop() -> None:
     global _running
     _running = False
     logger.info("Scheduler stopping")
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.call_later(2, lambda: None)
+    except RuntimeError:
+        pass

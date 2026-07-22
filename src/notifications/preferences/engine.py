@@ -126,7 +126,9 @@ class NotificationPreferencesEngine:
     def get_user_preferences(self, user_id: int) -> dict[str, Any]:
         prefs = dict(DEFAULT_PREFS)
 
-        rows = self._db.query(UserSetting).all()
+        rows = self._db.query(UserSetting).limit(1000).all()
+        if self._db.query(UserSetting).count() > 1000:
+            logger.warning("More than 1000 UserSetting rows exist — consider adding user_id filter")
         for row in rows:
             if row.key.startswith(f"notify_prefs_{user_id}_"):
                 key = row.key.replace(f"notify_prefs_{user_id}_", "")

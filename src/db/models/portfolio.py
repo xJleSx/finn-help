@@ -39,7 +39,7 @@ class Transaction(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
-    tx_type = Column("type", String(4), nullable=False)
+    transaction_type = Column("type", String(4), nullable=False)
     quantity = Column(Float, nullable=False)
     price = Column(Float, nullable=False)
     date = Column(DateTime, default=func.now())

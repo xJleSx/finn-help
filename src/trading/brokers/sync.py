@@ -5,7 +5,8 @@ from typing import Any
 from sqlalchemy import select
 
 from src.config import personal, settings
-from src.db.connection import get_async_session
+from src.core.credential_store import get_broker_token
+from src.db.connection import get_async_session, session_scope
 from src.db.models import Instrument
 from src.db.models import Portfolio as PortModel
 from src.db.models import Price as PriceModel
@@ -16,14 +17,22 @@ logger = logging.getLogger(__name__)
 
 
 async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> dict[str, Any]:
-    if not settings.tinkoff_token:
+    token: str = ""
+    try:
+        with session_scope() as db:
+            token = get_broker_token(user_id, "tbank", db) or ""
+    except Exception as e:
+        logger.debug("DB token lookup failed: %s", e)
+    if not token:
+        token = settings.tinkoff_token
+    if not token:
         return {"status": "no_token", "positions_synced": 0}
 
     use_sandbox = settings.tinkoff_sandbox
     stats: dict[str, Any] = {"status": "ok", "positions_synced": 0, "errors": []}
 
     try:
-        client = TBankClient(use_sandbox=use_sandbox)
+        client = TBankClient(token=token, use_sandbox=use_sandbox)
     except RuntimeError as e:
         logger.warning("TBank init failed: %s", e)
         return {"status": "sdk_missing", "positions_synced": 0}
@@ -121,13 +130,16 @@ async def sync_portfolio_from_broker(account_id: str = "", user_id: int = 0) -> 
                 stats["errors"].append(str(e))
                 logger.warning("Sync error for position: %s", e)
 
-        result = await db.execute(
-            select(PortModel).where(
-                PortModel.user_id == user_id,
-                PortModel.instrument_id.notin_(synced_instrument_ids),
+        if not synced_instrument_ids:
+            orphaned = []
+        else:
+            result = await db.execute(
+                select(PortModel).where(
+                    PortModel.user_id == user_id,
+                    PortModel.instrument_id.notin_(synced_instrument_ids),
+                )
             )
-        )
-        orphaned = result.scalars().all()
+            orphaned = result.scalars().all()
         sync_cfg = personal.get("sync", {})
         auto_remove = bool(sync_cfg.get("auto_remove_orphans", False)) if isinstance(sync_cfg, dict) else False
 

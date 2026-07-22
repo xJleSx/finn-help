@@ -77,8 +77,6 @@ class SmartAlertEngine:
         return bool(op(float(latest.confidence), rule.threshold))
 
     def _check_scheduled(self, rule: SmartAlertRule) -> bool:
-        if rule.last_triggered is None:
-            return True
         if rule.schedule is None:
             return False
         parts = rule.schedule.split(":")
@@ -89,9 +87,12 @@ class SmartAlertEngine:
             if len(parts) < 2:
                 return False
             target_hour, target_min = map(int, parts[1].split("."))
-            if now.hour != target_hour or now.minute != target_min:
+            scheduled_today = now.replace(hour=target_hour, minute=target_min, second=0, microsecond=0)
+            if now < scheduled_today:
                 return False
-            return rule.last_triggered.hour != target_hour or rule.last_triggered.minute != target_min or rule.last_triggered.date() != now.date()
+            if rule.last_triggered is not None and rule.last_triggered >= scheduled_today:
+                return False
+            return True
 
         if interval == "weekly":
             if len(parts) < 3:
@@ -100,16 +101,15 @@ class SmartAlertEngine:
             target_hour, target_min = map(int, parts[2].split("."))
             if now.strftime("%A").lower() != target_day:
                 return False
-            if now.hour != target_hour or now.minute != target_min:
+            scheduled_this_week = now.replace(hour=target_hour, minute=target_min, second=0, microsecond=0)
+            if now < scheduled_this_week:
                 return False
-            return (
-                rule.last_triggered.hour != target_hour
-                or rule.last_triggered.minute != target_min
-                or rule.last_triggered.isocalendar()[1] != now.isocalendar()[1]
-            )
+            if rule.last_triggered is not None and rule.last_triggered >= scheduled_this_week:
+                return False
+            return True
 
         if interval == "hourly":
-            if now.hour != rule.last_triggered.hour:
+            if rule.last_triggered is None:
                 return True
             return (now - rule.last_triggered).total_seconds() >= 3600
 

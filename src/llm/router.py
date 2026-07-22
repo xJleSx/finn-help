@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 from typing import Any, cast
 
 from src.config import settings
+from src.core.resilience import CircuitBreakerOpenError, get_circuit_breaker
 from src.llm import prompts
 from src.llm.cost_tracker import get_cost_tracker
 from src.llm.rate_limiter import throttled_groq_call
@@ -14,6 +16,7 @@ from src.llm.tools.wolfram import WolframAlphaClient
 logger = logging.getLogger(__name__)
 
 LLM_TEMPERATURE = 0.15
+PROMPT_CACHE_MAX = 128
 
 
 class LLMRouter:
@@ -23,9 +26,22 @@ class LLMRouter:
         self._use_ollama = bool(settings.ollama_url)
         self._ollama_model = settings.ollama_model
         self._cost_tracker = get_cost_tracker()
+        self._groq_cb = get_circuit_breaker("llm_groq")
+        self._ollama_cb = get_circuit_breaker("llm_ollama")
+        self._prompt_cache: dict[str, str] = {}
+        self._prompt_cache_order: list[str] = []
         self._wolfram: WolframAlphaClient | None = (
             WolframAlphaClient(settings.wolfram_app_id) if settings.wolfram_enabled and settings.wolfram_app_id else None
         )
+        if self._use_groq and not settings.groq_api_key:
+            logger.warning("GROQ_API_KEY is empty — Groq LLM calls will fail")
+        if self._use_groq:
+            try:
+                from groq import AsyncGroq
+                _test_client = AsyncGroq(api_key=settings.groq_api_key)
+                logger.info("Groq API key configured for model %s", self._groq_model)
+            except Exception as e:
+                logger.warning("Groq client init failed: %s", e)
 
     async def advise(self, signal: dict[str, object], user_id: str | int | None = None) -> str:
         self._enrich_with_risk_profile(signal, user_id=user_id)
@@ -273,6 +289,12 @@ class LLMRouter:
         max_tokens: int = 768,
         model: str | None = None,
     ) -> str:
+        cache_key = hashlib.sha256((system + user + str(temperature)).encode()).hexdigest()
+        cached = self._prompt_cache.get(cache_key)
+        if cached is not None:
+            logger.debug("Prompt cache hit (%s)", cache_key[:8])
+            return cached
+
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -282,7 +304,8 @@ class LLMRouter:
 
         if self._use_groq:
             try:
-                result = await self._groq_call(
+                result = await self._groq_cb.call(
+                    self._groq_call,
                     messages=messages,
                     model=model,
                     temperature=temperature,
@@ -290,14 +313,19 @@ class LLMRouter:
                 )
                 if result:
                     self._cost_tracker.record(model, "groq", system + user, result)
+                    self._cache_prompt(cache_key, result)
                     return result
+            except CircuitBreakerOpenError:
+                logger.warning("Groq circuit breaker OPEN — skipping to fallback")
+                last_error = CircuitBreakerOpenError("groq")
             except Exception as e:
                 logger.warning("Groq call failed, will try fallback: %s", e)
                 last_error = e
 
         if self._use_ollama:
             try:
-                result = await self._ollama_call(
+                result = await self._ollama_cb.call(
+                    self._ollama_call,
                     messages=messages,
                     model=settings.ollama_model,
                     temperature=temperature,
@@ -305,7 +333,11 @@ class LLMRouter:
                 )
                 if result:
                     self._cost_tracker.record(settings.ollama_model, "ollama", system + user, result)
+                    self._cache_prompt(cache_key, result)
                     return result
+            except CircuitBreakerOpenError:
+                logger.warning("Ollama circuit breaker OPEN")
+                last_error = last_error or CircuitBreakerOpenError("ollama")
             except Exception as e:
                 logger.warning("Ollama fallback also failed: %s", e)
                 last_error = e
@@ -313,6 +345,13 @@ class LLMRouter:
         if last_error:
             logger.error("All LLM providers failed: %s", last_error)
         return ""
+
+    def _cache_prompt(self, key: str, value: str) -> None:
+        if len(self._prompt_cache) >= PROMPT_CACHE_MAX:
+            oldest = self._prompt_cache_order.pop(0)
+            self._prompt_cache.pop(oldest, None)
+        self._prompt_cache[key] = value
+        self._prompt_cache_order.append(key)
 
     async def _groq_question(self, system: str, user: str) -> str:
         return await self._call(system, user, temperature=0.3, max_tokens=1024)
@@ -462,16 +501,7 @@ class LLMRouter:
         return cleaned
 
     async def ask(self, prompt: str, system_prompt: str = "You are a helpful assistant.") -> str:
-        try:
-            return await self._groq_call(
-                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-                model=settings.groq_model,
-                temperature=0.1,
-                max_tokens=64,
-            )
-        except Exception as e:
-            logger.warning("ask() failed: %s", e)
-            return ""
+        return await self._call(system_prompt, prompt, temperature=0.1, max_tokens=64)
 
     async def analyze_social(self, prompt: str) -> str:
         return await self._groq_social(prompt)

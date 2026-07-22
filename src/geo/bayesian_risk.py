@@ -127,12 +127,15 @@ class BayesianGeoRisk:
         today = date.today()
         for country, state in self._countries.items():
             risk = state.alpha / (state.alpha + state.beta)
-            existing = self._db.execute(select(GeoRiskScore).where(GeoRiskScore.date == today)).scalar_one_or_none()
+            existing = self._db.execute(
+                select(GeoRiskScore).where(GeoRiskScore.date == today, GeoRiskScore.country == country)
+            ).scalar_one_or_none()
             if existing:
                 existing.score = risk
             else:
                 row = GeoRiskScore(
                     date=today,
+                    country=country,
                     score=risk,
                     components_json={"country": country, "alpha": state.alpha, "beta": state.beta},
                 )

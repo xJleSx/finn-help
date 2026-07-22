@@ -4,21 +4,33 @@ import asyncio
 import logging
 import signal
 import sys
+import threading
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
 _shutdown_tasks: list[Callable[[], Any]] = []
+_hooks_lock = threading.Lock()
 
 
 def register_shutdown_hook(fn: Callable[[], Any]) -> None:
-    _shutdown_tasks.append(fn)
+    with _hooks_lock:
+        _shutdown_tasks.append(fn)
 
 
 def _run_hooks() -> None:
-    for fn in _shutdown_tasks:
+    with _hooks_lock:
+        tasks = list(_shutdown_tasks)
+    for fn in tasks:
         try:
-            fn()
+            if asyncio.iscoroutinefunction(fn):
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.ensure_future(fn())
+                except RuntimeError:
+                    logger.warning("No running loop for async shutdown hook %s", fn.__name__)
+            else:
+                fn()
         except Exception as e:
             logger.warning("Shutdown hook %s failed: %s", fn.__name__, e)
 
@@ -28,7 +40,11 @@ def _signal_handler(sig: int, _frame: Any) -> None:
     logger.info("Received %s, shutting down...", sig_name)
     _run_hooks()
     logger.info("Shutdown complete")
-    sys.exit(0)
+    try:
+        loop = asyncio.get_running_loop()
+        loop.call_soon_threadsafe(loop.stop)
+    except RuntimeError:
+        sys.exit(0)
 
 
 def setup_signal_handlers() -> None:

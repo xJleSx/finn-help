@@ -244,10 +244,10 @@ class SocialMediaCollector(BaseCollector):
                 if not db.query(NewsInstrument).filter_by(news_id=n.id, instrument_id=inst_id).first():
                     db.add(NewsInstrument(news_id=n.id, instrument_id=inst_id))
 
-            db.commit()
+        db.commit()
 
     @staticmethod
     def _build_instrument_map(db: Any) -> dict[str, int]:
         from src.db.models import Instrument
 
-        return {r.ticker.upper(): r.id for r in db.query(Instrument).all()}
+        return {r.ticker.upper(): r.id for r in db.query(Instrument).limit(5000).yield_per(1000).all()}

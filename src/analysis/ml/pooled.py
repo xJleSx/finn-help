@@ -14,6 +14,10 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _standardize(x: np.ndarray, mean: float, std: float) -> np.ndarray:
+    return np.where(std > 0, (x - mean) / std, 0)
+
+
 class PooledMLClassifier:
     """Single model trained on pooled data from multiple tickers.
 

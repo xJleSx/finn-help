@@ -8,7 +8,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import settings
+from src.config import personal, settings
 from src.db.connection import get_session
 from src.db.models import Order as OrderModel
 from src.db.models import UserSetting
@@ -133,7 +133,7 @@ async def market_hours_check() -> bool:
 
     if 6.83 <= time_decimal <= 15.83:
         return True
-    if 16.0 <= time_decimal <= 18.0:
+    if 16.0 <= time_decimal <= 20.833:
         return True
 
     logger.debug("Outside market hours (UTC %.2f)", time_decimal)
@@ -158,7 +158,7 @@ async def _check_var(db: AsyncSession | None = None) -> tuple[bool, str]:
                 vals = [r[0] for r in prices if r[0] is not None]
                 if len(vals) < 20:
                     continue
-                rets = [(vals[i] - vals[i + 1]) / vals[i + 1] for i in range(len(vals) - 1)]
+                rets = [(vals[i + 1] - vals[i]) / vals[i] for i in range(len(vals) - 1)]
                 all_returns.extend(rets)
             if len(all_returns) < 20:
                 return True, "ok"
@@ -556,7 +556,7 @@ async def run_execution_loop(interval: int = 300) -> None:
 
     await asyncio.to_thread(_load_daily_counters)
     _load_risk_params()
-    await async_start_day(1_000_000)
+    await async_start_day(personal.get("day_start_balance", 1_000_000))
 
     rebalance_interval = 3600 * 6
     last_rebalance = 0.0

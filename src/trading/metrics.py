@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -204,17 +205,16 @@ def compute_metrics(
         rw_dd = float(np.min((rw_cum - rw_peak) / rw_peak))
         roll_dd.append(rw_dd)
 
-    # Monthly returns
+    # Monthly returns using calendar month grouping
     monthly: dict[str, list[float]] = {}
     if n_days > 0:
-        trading_days_per_month = annual_factor / 12
-        n_months = max(1, int(n_days / trading_days_per_month))
-        for m in range(n_months):
-            start = int(m * trading_days_per_month)
-            end = min(int((m + 1) * trading_days_per_month), len(returns))
-            if end > start:
-                m_ret = float(np.prod(1 + returns[start:end]) - 1)
-                monthly[str(m + 1)] = [m_ret]
+        dates = pd.date_range(end=pd.Timestamp.now(), periods=len(returns), freq="B")
+        returns_series = pd.Series(returns, index=dates)
+        monthly_groups = returns_series.groupby(pd.Grouper(freq="ME"))
+        for period, group in monthly_groups:
+            if not group.empty:
+                m_ret = float(np.prod(1 + group.values) - 1)
+                monthly[period.strftime("%Y-%m")] = [m_ret]
 
     omega_num = float(np.sum(returns[returns > 0] - risk_free_rate / annual_factor))
     omega_den = float(abs(np.sum(returns[returns < 0] - risk_free_rate / annual_factor)))

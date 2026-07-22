@@ -282,6 +282,7 @@ def _causal_analysis_sync(ticker: str, target_ticker: str | None) -> dict[str, A
 async def causal_analysis(
     ticker: str,
     target: str | None = Query(None, alias="target"),
+    user: User = Depends(require_user),
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     try:

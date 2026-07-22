@@ -113,13 +113,13 @@ def build_dashboard() -> Layout:
     return layout
 
 
-def run_dashboard(refresh_interval: int = 5) -> None:
+async def run_dashboard(refresh_interval: int = 5) -> None:
     with Live(build_dashboard(), refresh_per_second=1 / refresh_interval, screen=True) as live:
-        import time
+        import asyncio
 
         try:
             while True:
                 live.update(build_dashboard())
-                time.sleep(refresh_interval)
+                await asyncio.sleep(refresh_interval)
         except KeyboardInterrupt:
             console.print("\n[yellow]Dashboard closed.[/yellow]")

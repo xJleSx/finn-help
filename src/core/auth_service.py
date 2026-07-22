@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Optional
 
+import hmac
+
 import structlog
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
 from src.core.totp import (
     generate_recovery_codes,
     generate_secret,
@@ -20,12 +24,34 @@ from src.interfaces.api.auth import create_refresh_token, create_token, hash_pas
 
 logger = structlog.get_logger(__name__)
 
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+_MAX_LOGIN_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 300
+
+
+def _check_login_rate_limit(key: str) -> None:
+    now = datetime.now(timezone.utc).timestamp()
+    attempts = _LOGIN_ATTEMPTS.setdefault(key, [])
+    attempts[:] = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
+    if len(attempts) >= _MAX_LOGIN_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+    attempts.append(now)
+
+
+def _validate_password(password: str) -> None:
+    if len(password) < settings.password_min_length:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must be at least {settings.password_min_length} characters long",
+        )
+
 
 class AuthService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
     async def register(self, username: str, password: str, email: str | None = None, risk_profile: str = "balanced") -> dict[str, Any]:
+        _validate_password(password)
         filters = [User.username == username]
         if email is not None:
             filters.append(User.email == email)
@@ -52,6 +78,7 @@ class AuthService:
         }
 
     async def login(self, username: str, password: str, totp_code: Optional[str] = None) -> dict[str, Any]:
+        _check_login_rate_limit(username)
         result = await self.db.execute(select(User).where(User.username == username))
         user = result.scalar_one_or_none()
         if not user or not verify_password(password, str(user.hashed_password)):
@@ -64,8 +91,11 @@ class AuthService:
             if verify_totp(secret, totp_code):
                 pass
             elif user.recovery_codes and verify_recovery_code(totp_code, user.recovery_codes):
-                user.recovery_codes = [c for c in user.recovery_codes if c != hash_recovery_code(totp_code)]
-                await self.db.commit()
+                hashed = hash_recovery_code(totp_code)
+                matched = [c for c in user.recovery_codes if hmac.compare_digest(c, hashed)]
+                if matched:
+                    user.recovery_codes = [c if c != matched[0] else f"USED:{c}" for c in user.recovery_codes]
+                    await self.db.commit()
             else:
                 raise HTTPException(401, "Invalid TOTP code")
 

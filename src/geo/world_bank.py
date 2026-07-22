@@ -51,8 +51,11 @@ class WorldBankCollector:
         results: list[dict[str, Any]] = []
         client = self._client or httpx.AsyncClient(timeout=15.0)
         try:
+            api_key = "demo"
+            if api_key == "demo":
+                logger.warning("Using demo API key for NewsAPI — requests will be rate-limited")
             for keyword in sanctions_keywords:
-                url = f"https://newsapi.org/v2/everything?q={keyword}&pageSize=5&apiKey=demo"
+                url = f"https://newsapi.org/v2/everything?q={keyword}&pageSize=5&apiKey={api_key}"
                 resp = await client.get(url)
                 if resp.status_code == 200:
                     data = resp.json()

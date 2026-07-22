@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date
@@ -15,6 +16,10 @@ from src.notifications import RebalanceAlert
 logger = logging.getLogger(__name__)
 
 DEFAULT_COMMISSION_RATE = 0.0005
+DEFAULT_SLIPPAGE_RATE = 0.001
+TAX_RATE_LONG_TERM = 0.13
+TAX_RATE_SHORT_TERM = 0.13
+HOLDING_PERIOD_DAYS_LONG_TERM = 365
 
 
 @dataclass
@@ -45,10 +50,14 @@ class RebalancingEngine:
         max_sector_pct: float = 0.35,
         max_position_pct: float = 0.15,
         rebalance_threshold: float = 0.05,
+        commission_rate: float = DEFAULT_COMMISSION_RATE,
+        slippage_rate: float = DEFAULT_SLIPPAGE_RATE,
     ) -> None:
         self.max_sector_pct = max_sector_pct
         self.max_position_pct = max_position_pct
         self.rebalance_threshold = rebalance_threshold
+        self.commission_rate = commission_rate
+        self.slippage_rate = slippage_rate
 
     def analyze_portfolio(
         self,
@@ -309,11 +318,20 @@ class RebalancingEngine:
                     )
 
         sector_breaks = self._check_sector_limits(analysis)
-        commission_rate = DEFAULT_COMMISSION_RATE
-        estimated_commission = round(total_turnover * commission_rate, 2)
+
+        estimated_commission = round(total_turnover * self.commission_rate, 2)
+        estimated_slippage = round(total_turnover * self.slippage_rate, 2)
+
+        tax_rate = TAX_RATE_LONG_TERM
+        estimated_tax = round(total_turnover * tax_rate * 0.3, 2)
+
+        for a in actions:
+            a.estimated_cost += round(a.estimated_cost * (self.commission_rate + self.slippage_rate), 2)
 
         if alerts:
             logger.info("Generated %d rebalance alerts", len(alerts))
+        if self.commission_rate == 0 and total_turnover > 0:
+            logger.info("Commission rate is 0, turnover=%.2f", total_turnover)
 
         return RebalancePlan(
             actions=actions,
@@ -635,6 +653,29 @@ def duration_match_portfolio(
 
     candidates.sort(key=lambda x: x["score"], reverse=True)
     return candidates[:10]
+
+
+async def async_analyze_portfolio(
+    user_id: int = 0,
+    target_weights: dict[str, float] | None = None,
+    max_sector_pct: float = 0.35,
+    max_position_pct: float = 0.15,
+    rebalance_threshold: float = 0.05,
+    commission_rate: float = DEFAULT_COMMISSION_RATE,
+    slippage_rate: float = DEFAULT_SLIPPAGE_RATE,
+) -> list[dict[str, Any]]:
+    from src.db.connection import get_session
+    loop = asyncio.get_running_loop()
+    engine = RebalancingEngine(
+        max_sector_pct=max_sector_pct,
+        max_position_pct=max_position_pct,
+        rebalance_threshold=rebalance_threshold,
+        commission_rate=commission_rate,
+        slippage_rate=slippage_rate,
+    )
+    return await loop.run_in_executor(
+        None, engine.analyze_portfolio, get_session(), user_id, target_weights
+    )
 
 
 rebalancing_engine = RebalancingEngine()

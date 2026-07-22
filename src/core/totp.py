@@ -48,8 +48,8 @@ def generate_recovery_codes(count: int = 8) -> list[str]:
 
     codes: list[str] = []
     for _ in range(count):
-        code = secrets.token_hex(4).upper()
-        codes.append(f"{code[:4]}-{code[4:]}")
+        code = secrets.token_hex(8).upper()
+        codes.append(f"{code[:4]}-{code[4:8]}-{code[8:12]}-{code[12:]}")
     return codes
 
 

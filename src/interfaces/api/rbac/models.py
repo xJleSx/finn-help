@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Callable
+from typing import Callable, Optional
 from fastapi import HTTPException, Request, status
+from sqlalchemy import select
+from src.db.models import User
 from src.interfaces.api.auth import decode_token
 
 
@@ -67,7 +69,7 @@ def require_permission(permission: Permission) -> Callable[[Request], None]:
     return dependency
 
 
-def get_current_user_role(request: Request) -> Role:
+def get_current_user_role(request: Request, db_session: Optional[object] = None) -> Role:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -75,6 +77,17 @@ def get_current_user_role(request: Request) -> Role:
     payload = decode_token(token)
     role_str = payload.get("role", "viewer")
     try:
-        return Role(role_str)
+        role = Role(role_str)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Unknown role: {role_str}")
+
+    if role == Role.ADMIN and db_session is not None:
+        user_id = int(payload.get("sub", 0))
+        if user_id:
+            user = db_session.execute(select(User).where(User.id == user_id, User.is_active)).scalar_one_or_none()
+            if not user:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+            if user.role != Role.ADMIN.value:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Stale admin role — DB role has changed")
+
+    return role

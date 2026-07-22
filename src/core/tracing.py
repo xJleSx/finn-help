@@ -36,10 +36,11 @@ def setup_tracing(service_name: str = "finn-help", otlp_endpoint: str | None = N
 
 
 def get_tracer():
-    global _tracer
-    if _tracer is None:
-        _tracer = trace.get_tracer(__name__) if _OTEL_AVAILABLE else None
-    return _tracer
+    if _tracer is not None:
+        return _tracer
+    if _OTEL_AVAILABLE:
+        return trace.get_tracer(__name__)
+    return None
 
 
 def trace_call(span_name: str | None = None) -> Callable:

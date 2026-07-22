@@ -1,26 +1,64 @@
 site_name: FinAdvisor
-site_description: AI financial advisor for MOEX markets
-site_url: https://example.com/finn-help
-repo_url: https://github.com/xJleSx/finn-help
+# TODO: set site_url to the production URL when deploying
+site_url: ""
+site_description: Quantitative trading & investment analytics platform
+# TODO: replace with actual repo URL
+repo_url: https://github.com/your-org/finn-help
+edit_uri: edit/main/docs/
 
 theme:
   name: material
   features:
     - navigation.tabs
     - navigation.sections
-    - toc.integrate
+    - navigation.expand
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
 
-nav:
-  - Home: README.md
-  - Architecture: docs/ARCHITECTURE.md
-  - ADR:
-    - Package Decomposition: docs/adr/ADR-001-package-decomposition.md
-    - Deduplication: docs/adr/ADR-002-deduplication-metrics.md
-    - Dependency Injection: docs/adr/ADR-003-dependency-injection.md
-    - Collector Unification: docs/adr/ADR-004-collector-unification.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            show_root_heading: true
+            show_category_heading: true
+            docstring_style: numpy
 
 markdown_extensions:
   - admonition
-  - codehilite
-  - toc:
-      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+
+nav:
+  - Overview: index.md
+  - Getting Started: getting-started.md
+  - Configuration: configuration.md
+  - Architecture: architecture.md
+  - API Reference: api/
+  - Modules:
+      - Analysis: modules/analysis.md
+      - Collectors: modules/collectors.md
+      - Trading: modules/trading.md
+      - Alerts: modules/alerts.md
+      - LLM: modules/llm.md
+      - Scheduler: modules/scheduler.md
+  - Deployment: deployment.md
+  - Development: development.md

@@ -5,16 +5,17 @@ from typing import Any
 
 from sqlalchemy import delete, select
 
-from src.alerts.generators import generate_all_alerts, store_alerts
-from src.analysis.rebalancing import RebalancingEngine
-from src.analysis.service import analysis_service
-from src.core.executor import get_executor
-from src.db.connection import get_async_session, get_session
+from src.alerts.generators import async_generate_all_alerts, async_store_alerts
+from src.analysis.fundamental.base import async_refresh_sector_benchmarks
+from src.analysis.rebalancing import async_analyze_portfolio
+from src.db.connection import get_async_session
 from src.db.models import Signal as SignalModel
+from src.model_registry import async_prune_models
 from src.scheduler.collectors import (
+    async_collect_company_profiles,
+    async_compute_indicators,
     collect_alternative_data,
     collect_bond_offerings,
-    collect_company_profiles,
     collect_corporate_events,
     collect_dividends,
     collect_financial_reports,
@@ -25,7 +26,6 @@ from src.scheduler.collectors import (
     collect_social_posts,
     collect_social_sentiment,
     compute_geo_risk,
-    compute_indicators,
     generate_signals,
     run_news_summarizer,
     run_sector_impact_analysis,
@@ -55,14 +55,18 @@ async def _process_in_batches(items: list[Any], processor: Any, batch_size: int 
 
 
 async def daily_update() -> None:
+    """Run the daily update cycle — prices, dividends, news, signals.
+
+    When updated_ids is None, signals are regenerated for all instruments.
+    Pass a list of instrument IDs to only generate signals for changed instruments.
+    """
     logger.info("Starting daily update cycle...")
     async with get_async_session() as db:
         try:
-            loop = asyncio.get_running_loop()
             updated_ids = await collect_prices(db)
             await collect_dividends(db)
             await collect_fundamental(db)
-            await loop.run_in_executor(get_executor(), lambda: compute_indicators(get_session(), instrument_ids=updated_ids))
+            await async_compute_indicators(instrument_ids=updated_ids)
             news_list = await collect_news(db)
             await compute_geo_risk(db, news_list)
             await collect_macro(db)
@@ -77,7 +81,13 @@ async def daily_update() -> None:
             await run_sector_impact_analysis(db)
             await collect_bond_offerings(db)
 
-            sync_result = await sync_portfolio_from_broker(user_id=1)
+            await async_refresh_sector_benchmarks()
+
+            from src.config import personal
+            sync_cfg = personal.get("sync", {})
+            default_user_id = sync_cfg.get("default_user_id") if isinstance(sync_cfg, dict) else None
+            sync_user_id = int(default_user_id) if default_user_id else 1
+            sync_result = await sync_portfolio_from_broker(user_id=sync_user_id)
             if sync_result.get("positions_synced", 0) > 0 or sync_result.get("removed", 0) > 0:
                 logger.info(
                     "Portfolio synced: %d positions, %d removed",
@@ -106,25 +116,22 @@ async def _delete_today_signals(db: Any) -> None:
 async def weekly_update() -> None:
     """Weekly tasks: financial reports, bond offerings, company profiles, corporate events, alerts, rebalance."""
     logger.info("Starting weekly update cycle...")
-    loop = asyncio.get_running_loop()
     async with get_async_session() as db:
         try:
             await collect_financial_reports(db)
-            await loop.run_in_executor(get_executor(), lambda: collect_company_profiles(get_session()))
+            await async_collect_company_profiles()
             await collect_corporate_events(db)
 
-            await loop.run_in_executor(
-                get_executor(),
-                lambda: analysis_service.train_models(get_session()),
-            )
+            from src.analysis.service import analysis_service
 
-            rebalancer = RebalancingEngine()
-            plan = await loop.run_in_executor(get_executor(), lambda: rebalancer.analyze_portfolio(get_session(), user_id=0))
+            await analysis_service.train_models_async()
+
+            plan = await async_analyze_portfolio(user_id=0)
             if plan:
                 logger.info("Rebalance plan: %d actions", len(plan))
 
-            alerts = await loop.run_in_executor(get_executor(), lambda: generate_all_alerts(get_session()))
-            stored = await loop.run_in_executor(get_executor(), lambda: store_alerts(get_session(), alerts))
+            alerts = await async_generate_all_alerts()
+            stored = await async_store_alerts(alerts)
             if stored:
                 logger.info("Alerts generated: %d new", stored)
 
@@ -134,9 +141,7 @@ async def weekly_update() -> None:
 
     # Periodic model cleanup — runs even if weekly cycle partially fails
     try:
-        from src.model_registry import prune_models as _prune_registry
-
-        result = await loop.run_in_executor(get_executor(), _prune_registry)
+        result = await async_prune_models()
         if result["registry_pruned"] or result["orphan_files_removed"]:
             logger.info("prune_models: %s", result)
     except Exception as e:

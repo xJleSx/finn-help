@@ -38,6 +38,21 @@ REGIONAL_MULTIPLIERS: dict[str, float] = {
     "latin_america": 0.9,
 }
 
+
+def _load_regional_multipliers() -> dict[str, float]:
+    try:
+        from src.config import personal
+        cfg = personal.get("geo_risk", {})
+        if isinstance(cfg, dict):
+            overrides = cfg.get("regional_multipliers", {})
+            if overrides:
+                merged = dict(REGIONAL_MULTIPLIERS)
+                merged.update(overrides)
+                return merged
+    except Exception as e:
+        logger.debug("No personal geo_risk config: %s", e)
+    return dict(REGIONAL_MULTIPLIERS)
+
 REGION_KEYWORDS: dict[str, list[str]] = {
     "russia": ["россия", "russian", "рф", "кремль", "москва", "moscow", "putin", "путин"],
     "china": ["china", "chinese", "китай", "пекин", "beijing", "xi jinping", "си"],
@@ -65,18 +80,20 @@ EVENT_PATTERNS: list[dict[str, Any]] = [
 ]
 
 # Sector sensitivity to geopolitical subcategories
+from src.constants import SECTOR_NAME_MAP
+
 SECTOR_GEO_SENSITIVITY: dict[str, dict[str, float]] = {
-    "Нефть": {"sanctions": 1.4, "conflict": 1.3, "trade_war": 1.2, "diplomacy": 0.8},
-    "Металлы": {"sanctions": 1.3, "conflict": 1.2, "trade_war": 1.3, "diplomacy": 0.8},
-    "Финансы": {"sanctions": 1.2, "conflict": 1.0, "trade_war": 1.1, "diplomacy": 0.9},
-    "IT": {"sanctions": 0.9, "conflict": 0.8, "trade_war": 1.2, "diplomacy": 0.7},
-    "Телеком": {"sanctions": 1.0, "conflict": 0.9, "trade_war": 0.9, "diplomacy": 0.7},
-    "Энергетика": {"sanctions": 1.1, "conflict": 1.3, "trade_war": 1.0, "diplomacy": 0.8},
-    "Транспорт": {"sanctions": 1.0, "conflict": 1.1, "trade_war": 1.1, "diplomacy": 0.8},
-    "Потребтовары": {"sanctions": 0.8, "conflict": 0.9, "trade_war": 1.3, "diplomacy": 0.7},
-    "Строительство": {"sanctions": 0.7, "conflict": 0.8, "trade_war": 0.8, "diplomacy": 0.6},
-    "Химия": {"sanctions": 1.1, "conflict": 1.0, "trade_war": 1.1, "diplomacy": 0.8},
-    "Машиностроение": {"sanctions": 1.2, "conflict": 1.1, "trade_war": 1.2, "diplomacy": 0.8},
+    "energy": {"sanctions": 1.4, "conflict": 1.3, "trade_war": 1.2, "diplomacy": 0.8},
+    "metals": {"sanctions": 1.3, "conflict": 1.2, "trade_war": 1.3, "diplomacy": 0.8},
+    "banking": {"sanctions": 1.2, "conflict": 1.0, "trade_war": 1.1, "diplomacy": 0.9},
+    "tech": {"sanctions": 0.9, "conflict": 0.8, "trade_war": 1.2, "diplomacy": 0.7},
+    "telecom": {"sanctions": 1.0, "conflict": 0.9, "trade_war": 0.9, "diplomacy": 0.7},
+    "utilities": {"sanctions": 1.1, "conflict": 1.3, "trade_war": 1.0, "diplomacy": 0.8},
+    "transport": {"sanctions": 1.0, "conflict": 1.1, "trade_war": 1.1, "diplomacy": 0.8},
+    "retail": {"sanctions": 0.8, "conflict": 0.9, "trade_war": 1.3, "diplomacy": 0.7},
+    "construction": {"sanctions": 0.7, "conflict": 0.8, "trade_war": 0.8, "diplomacy": 0.6},
+    "chemicals": {"sanctions": 1.1, "conflict": 1.0, "trade_war": 1.1, "diplomacy": 0.8},
+    "manufacturing": {"sanctions": 1.2, "conflict": 1.1, "trade_war": 1.2, "diplomacy": 0.8},
 }
 
 EWMA_ALPHA = 0.3  # smoothing factor for historical scores
@@ -104,7 +121,7 @@ class GeopoliticalRiskEngine:
 
     def __init__(self):
         self.weights = GEO_RISK_WEIGHTS
-        self.regional_multipliers = REGIONAL_MULTIPLIERS
+        self.regional_multipliers = _load_regional_multipliers()
         self.ewma_alpha = EWMA_ALPHA
 
     # ── Entity extraction ───────────────────────────────────────────────────
@@ -199,7 +216,8 @@ class GeopoliticalRiskEngine:
     # ── Sector impact ───────────────────────────────────────────────────────
 
     def sector_geo_multiplier(self, sector: str, subcategory_scores: dict[str, float]) -> dict[str, float]:
-        base = SECTOR_GEO_SENSITIVITY.get(sector, {})
+        mapped_sector = SECTOR_NAME_MAP.get(sector, sector)
+        base = SECTOR_GEO_SENSITIVITY.get(mapped_sector, {})
         impact: dict[str, float] = {}
         for subcat, score in subcategory_scores.items():
             sensitivity = base.get(subcat, 1.0)

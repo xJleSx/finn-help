@@ -2,7 +2,6 @@ import asyncio
 import logging
 from collections import deque
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any, Optional, cast
 
 from src.config import personal, settings
@@ -12,6 +11,8 @@ from src.core.context import (
     set_request_id,
 )
 from src.core.resilience import CircuitBreakerOpenError, get_circuit_breaker
+from src.core.credential_store import get_broker_token as _get_broker_token_db
+from src.db.connection import session_scope
 from src.trading.brokers.registry import create_broker_client, get_default_broker
 from src.trading.compliance.aml import check_order_aml
 from src.trading.compliance.limits import (
@@ -22,6 +23,7 @@ from src.trading.execution.audit import log_trade, save_order
 from src.trading.execution.stoploss import position_tracker
 from src.trading.types import (
     Direction,
+    TradeMode,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,14 @@ _BROKER_TOKEN_ATTRS: dict[str, str] = {
 }
 
 
-def _get_broker_token(broker_name: str) -> str:
+def _get_broker_token(broker_name: str, user_id: int = 0) -> str:
+    try:
+        with session_scope() as db:
+            token = _get_broker_token_db(user_id, broker_name, db)
+            if token:
+                return token
+    except Exception as e:
+        logger.debug("DB broker token lookup failed, falling back to env: %s", e)
     attr = _BROKER_TOKEN_ATTRS.get(broker_name.lower())
     if attr and hasattr(settings, attr):
         return str(getattr(settings, attr) or "")
@@ -54,12 +63,6 @@ async def _notify_trade(record: "OrderRecord", reason: str = "") -> None:
         )
     except Exception as exc:
         logger.exception("Failed to schedule trade broadcast: %s", exc)
-
-
-class TradeMode(Enum):
-    DRY_RUN = "dry_run"
-    MANUAL = "manual"
-    AUTO = "auto"
 
 
 class OrderRecord:
@@ -271,7 +274,9 @@ async def execute_order(
             order_type,
             time_in_force,
         )
-        if effective_direction in (Direction.BUY, Direction.COVER):
+        if effective_direction == Direction.COVER:
+            position_tracker.cover_short(ticker, quantity, record.price)
+        elif effective_direction == Direction.BUY:
             position_tracker.update(ticker, "BUY", quantity, record.price)
         elif effective_direction in (Direction.SELL, Direction.SHORT):
             position_tracker.update(ticker, "SELL", quantity, record.price)
@@ -300,6 +305,8 @@ async def execute_order(
             await _notify_trade(record, reason)
             return record
 
+        executed_shares = 0
+        slippage = 0.0
         try:
             from src.db.connection import get_session as _get_db
             from src.db.models import Instrument as _InstModel
@@ -351,7 +358,14 @@ async def execute_order(
                 )
                 record.status = "simulated"
                 record.order_id = f"dry_cb_{datetime.now(timezone.utc).timestamp()}"
-                position_tracker.update(ticker, direction, quantity, record.price)
+                if effective_direction == Direction.COVER:
+                    position_tracker.cover_short(ticker, quantity, record.price)
+                elif effective_direction == Direction.BUY:
+                    position_tracker.update(ticker, "BUY", quantity, record.price)
+                elif effective_direction in (Direction.SELL, Direction.SHORT):
+                    position_tracker.update(ticker, "SELL", quantity, record.price)
+                    if is_short:
+                        position_tracker.add_short(ticker, quantity, record.price)
                 _execution_log.append(record)
                 record.db_id = save_order(record)
                 await _notify_trade(record, reason=f"CB_OPEN_FALLBACK {reason}")
@@ -387,7 +401,14 @@ async def execute_order(
                     )
                     record.status = "simulated"
                     record.order_id = f"dry_cb_{datetime.now(timezone.utc).timestamp()}"
-                    position_tracker.update(ticker, direction, quantity, record.price)
+                    if effective_direction == Direction.COVER:
+                        position_tracker.cover_short(ticker, quantity, record.price)
+                    elif effective_direction == Direction.BUY:
+                        position_tracker.update(ticker, "BUY", quantity, record.price)
+                    elif effective_direction in (Direction.SELL, Direction.SHORT):
+                        position_tracker.update(ticker, "SELL", quantity, record.price)
+                        if is_short:
+                            position_tracker.add_short(ticker, quantity, record.price)
                     _execution_log.append(record)
                     record.db_id = save_order(record)
                     await _notify_trade(record, reason=f"CB_OPEN_FALLBACK {reason}")
@@ -452,17 +473,6 @@ async def execute_order(
                     tp_pct = max(tp_pct, sl_pct * rr_ratio)
                     position_tracker.set_sl_tp(ticker, sl_pct=sl_pct, tp_pct=tp_pct)
 
-                if slippage > 0 and record.db_id:
-                    log_trade(
-                        ticker=ticker,
-                        direction=direction,
-                        quantity=executed_shares,
-                        price=record.price,
-                        slippage=slippage,
-                        reason=record.reason,
-                        order_id=record.db_id,
-                    )
-
                 if record.status in ("filled", "partial"):
                     from src.db.connection import get_session as _upd_db
                     from src.db.models import Order as _OrdModel
@@ -475,15 +485,28 @@ async def execute_order(
                             o.remaining_quantity = record.remaining_quantity
                             o.is_short = is_short
                             _upd.commit()
+                    except Exception:
+                        logger.warning("Failed to update order %s in DB", record.db_id, exc_info=True)
                     finally:
                         _upd.close()
 
         except Exception as exc:
-            record.status = "failed"
+            if record.status not in ("filled", "partial"):
+                record.status = "failed"
             logger.error("Order failed: %s %d %s: %s", direction, quantity, ticker, exc, exc_info=True)
 
         _execution_log.append(record)
         record.db_id = save_order(record)
+        if slippage > 0 and executed_shares > 0 and record.db_id:
+            log_trade(
+                ticker=ticker,
+                direction=direction,
+                quantity=executed_shares,
+                price=record.price,
+                slippage=slippage,
+                reason=record.reason,
+                order_id=record.db_id,
+            )
         await _notify_trade(record, reason)
         return record
 

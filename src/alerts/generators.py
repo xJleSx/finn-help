@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -342,3 +343,31 @@ def generate_all_alerts(db: Any) -> list[dict[str, Any]]:
     alerts.extend(generate_corporate_event_alerts(db))
     alerts.extend(generate_signal_drop_alerts(db))
     return alerts
+
+
+async def async_generate_all_alerts() -> list[dict[str, Any]]:
+    from src.db.connection import get_session
+    loop = asyncio.get_running_loop()
+
+    def _run() -> list[dict[str, Any]]:
+        db = get_session()
+        try:
+            return generate_all_alerts(db)
+        finally:
+            db.close()
+
+    return await loop.run_in_executor(None, _run)
+
+
+async def async_store_alerts(alerts: list[dict[str, Any]]) -> int:
+    from src.db.connection import get_session
+    loop = asyncio.get_running_loop()
+
+    def _run() -> int:
+        db = get_session()
+        try:
+            return store_alerts(db, alerts)
+        finally:
+            db.close()
+
+    return await loop.run_in_executor(None, _run)

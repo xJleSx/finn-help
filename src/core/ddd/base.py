@@ -23,6 +23,9 @@ class ValueObject(abc.ABC):
 @dataclass
 class Entity(Generic[TId]):
     id: TId
+
+    def __hash__(self) -> int:
+        return hash((type(self).__name__, self.id))
     _domain_events: list[DomainEvent] = field(default_factory=list, repr=False)
 
     def add_domain_event(self, event: DomainEvent) -> None:
@@ -35,10 +38,10 @@ class Entity(Generic[TId]):
 
 
 class AggregateRoot(Entity[TId], abc.ABC):
-    def publish_events(self) -> None:
+    async def publish_events(self) -> None:
         bus = get_event_bus()
         for event in self.pop_events():
-            bus.publish_sync(event.event_type, event.data)
+            await bus.publish_sync(event.event_type, event.data)
 
 
 class Repository(Generic[TAggregate], abc.ABC):
@@ -56,6 +59,10 @@ class Repository(Generic[TAggregate], abc.ABC):
 
 
 class UnitOfWork(abc.ABC):
+    def __init__(self) -> None:
+        if type(self) is UnitOfWork:
+            raise TypeError("UnitOfWork must be subclassed; do not instantiate the base class directly")
+
     def __enter__(self) -> UnitOfWork:
         return self
 

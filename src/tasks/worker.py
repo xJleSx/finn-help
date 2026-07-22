@@ -9,4 +9,6 @@ Usage:
 from src.tasks import app
 
 if __name__ == "__main__":
-    app.start(argv=["celery", "worker", "-A", "src.tasks", "-l", "INFO", "--concurrency=2"])
+    import os
+    concurrency = os.environ.get("CELERY_WORKER_CONCURRENCY", "2")
+    app.start(argv=["celery", "worker", "-A", "src.tasks", "-l", "INFO", f"--concurrency={concurrency}"])

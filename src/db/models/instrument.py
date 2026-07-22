@@ -27,7 +27,7 @@ class Instrument(Base):
     full_name = Column(String(255), nullable=False)
     isin = Column(String(12))
     sector = Column(String(100))
-    instrument_type = Column(String(20), nullable=False, default="stock")
+    instrument_type = Column(String(20), nullable=False, default=None)
     lot_size = Column(Integer, default=1)
     currency = Column(String(3), default="RUB")
     exchange = Column(String(10), default="MOEX")

@@ -198,6 +198,16 @@ class SignalFusionEngine:
     ) -> dict[str, Any]:
         reasons: list[str] = []
         is_bond = instrument_type == "bond"
+        if not any([technical, fundamental, geo, ml_prediction, sentiment, mtf, macro_context, volatility_regime]):
+            return FusedSignal(
+                ticker=ticker,
+                instrument_type=instrument_type,
+                action="HOLD",
+                confidence=0.0,
+                weighted_score=0.0,
+                reasons=["No component data available"],
+                max_portfolio_pct=10,
+            ).model_dump(exclude_none=True)
 
         # ── 1. Initial weights ──────────────────────────────────────────
         weights = self._get_base_weights(instrument_type, user_id)

@@ -19,7 +19,7 @@ class News(Base):
     __tablename__ = "news"
 
     id = Column(Integer, primary_key=True)
-    url = Column(String(1024), unique=True)
+    url = Column(Text, unique=True)
     title = Column(String(512), nullable=False)
     summary = Column(Text)
     content_hash = Column(String(64))

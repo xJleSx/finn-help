@@ -36,6 +36,7 @@ class User(Base):
 class UserSetting(Base):
     __tablename__ = "user_settings"
 
+    # TODO: EAV anti-pattern — migrate to typed columns per setting
     key = Column(String(100), primary_key=True)
     value = Column(Text)
 

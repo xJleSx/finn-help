@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.db.models import Instrument, Portfolio, Price
-from src.interfaces.api.auth import get_current_user, get_db
+from src.db.models import Instrument, Portfolio, Price, User
+from src.interfaces.api.auth import get_db, require_user
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["portfolio-bonds"], prefix="/api/portfolio")
@@ -19,9 +19,9 @@ router = APIRouter(tags=["portfolio-bonds"], prefix="/api/portfolio")
 @router.get("/bonds")
 async def get_portfolio_bonds(
     db: AsyncSession = Depends(get_db),
-    user: Any = Depends(get_current_user),
+    user: User = Depends(require_user),
 ) -> dict[str, Any]:
-    user_id = user.id if hasattr(user, "id") else 0
+    user_id = user.id
 
     result = await db.execute(
         select(Portfolio)

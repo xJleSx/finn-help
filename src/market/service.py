@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any, Optional
 
+import asyncio
+
 import pandas as pd
 import structlog
 from fastapi import HTTPException
@@ -268,7 +270,7 @@ class MarketService:
         return await sector_analyzer.compute_sector_volatility_async(self.db, days=days)
 
     async def get_price_target_alerts(self) -> list[dict[str, Any]]:
-        alerts = self._notifications.check_price_targets()
+        alerts = await asyncio.to_thread(self._notifications.check_price_targets)
         return [
             {
                 "ticker": a.ticker,

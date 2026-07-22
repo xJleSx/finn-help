@@ -133,7 +133,15 @@ class PaperTradingEngine:
                 margin_loan=float(data.get("margin_loan", 0)),
                 leverage=float(data.get("leverage", 1.0)),
             )
-        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+            logger.warning("Corrupted or missing paper state file at %s: %s", self._state_path, e)
+            if os.path.exists(self._state_path):
+                backup_path = self._state_path + ".corrupt"
+                try:
+                    os.replace(self._state_path, backup_path)
+                    logger.warning("Backed up corrupt state to %s", backup_path)
+                except OSError as be:
+                    logger.warning("Failed to back up corrupt state: %s", be)
             self._state = PaperState(
                 balance=DEFAULT_INITIAL_CAPITAL,
                 initial_capital=DEFAULT_INITIAL_CAPITAL,
@@ -258,8 +266,7 @@ class PaperTradingEngine:
                     slippage = gross_value * (slip_bps / 10_000)
                     total_cost = gross_value + commission + slippage
                 cost_basis = quantity * short_pos.avg_price
-                proceeds = gross_value * -1
-                pnl = cost_basis - proceeds
+                pnl = cost_basis - gross_value
                 new_balance = balance_before + (cost_basis - gross_value - commission - slippage)
                 remaining = short_pos.quantity - quantity
                 if remaining < 1e-10:

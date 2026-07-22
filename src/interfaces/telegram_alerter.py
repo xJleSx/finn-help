@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.compliance import with_disclaimer
 from src.notifications.retry import ReceiptManager, retry_async
 from src.notifications.service import NotificationService
 from src.notifications.templates.renderer import AlertTemplateRenderer
@@ -49,7 +50,7 @@ class AlertNotifier:
 
     @retry_async(max_attempts=3, base_delay=2.0, backoff=2.0)
     async def _do_send_telegram(self, chat_id: int, text: str) -> None:
-        await self.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        await self.bot.send_message(chat_id=chat_id, text=with_disclaimer(text), parse_mode="HTML")
 
     async def send_digest(self, clusters: list[dict[str, Any]], chat_id: int) -> bool:
         if not clusters:

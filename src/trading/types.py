@@ -97,7 +97,7 @@ class TaxLot:
 @dataclass
 class TaxReport:
     year: int = 2026
-    total_realised_pnl: float = 0.0
+    total_realized_pnl: float = 0.0
     total_dividends: float = 0.0
     total_tax_due: float = 0.0
     tax_paid: float = 0.0

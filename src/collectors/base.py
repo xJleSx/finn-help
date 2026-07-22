@@ -2,8 +2,9 @@
 
 import asyncio
 import logging
+import random
 from abc import ABC
-from typing import Any, Optional, Self
+from typing import Any, Callable, Optional, Self
 
 import httpx
 from tenacity import (
@@ -31,7 +32,8 @@ class BaseCollector(ABC):
     MAX_RETRIES: int = 3
     RETRY_DELAY: float = 2.0
     TIMEOUT: float = 30.0
-    RATE_LIMIT: float = 10.0  # max requests per second (MOEX ISS default)
+    RATE_LIMIT: float = 10.0
+    JITTER: float = 0.5
 
     def __init__(self) -> None:
         self._client: Optional[httpx.AsyncClient] = None
@@ -51,6 +53,38 @@ class BaseCollector(ABC):
         async with self._rate_limiter:
             return await client.get(url, params=params)
 
+    async def _with_retry(self, do_fetch: Callable, retry_exceptions: tuple = (httpx.HTTPStatusError, httpx.RequestError)) -> Any:
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(self.MAX_RETRIES),
+            wait=wait_exponential(multiplier=self.RETRY_DELAY, max=30.0),
+            retry=retry_if_exception_type(retry_exceptions),
+            before=before_log(logger, logging.DEBUG),
+            reraise=True,
+        ):
+            with attempt:
+                try:
+                    return await self._circuit_breaker.call(do_fetch)
+                except CircuitBreakerOpenError:
+                    if attempt.retry_state.attempt_number < self.MAX_RETRIES:
+                        delay = self.RETRY_DELAY * (2 ** (attempt.retry_state.attempt_number - 1))
+                        jitter = random.uniform(0, self.JITTER)
+                        logger.warning(
+                            "circuit_breaker.open.%s attempt %d/%d, retrying in %.1fs",
+                            self.__class__.__name__,
+                            attempt.retry_state.attempt_number,
+                            self.MAX_RETRIES,
+                            delay + jitter,
+                        )
+                        await asyncio.sleep(delay + jitter)
+                        raise
+                    logger.error(
+                        "circuit_breaker.open.%s exhausted after %d attempts",
+                        self.__class__.__name__,
+                        self.MAX_RETRIES,
+                    )
+                    raise
+        return None
+
     async def _fetch_json(self, url: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         async def _do_fetch() -> dict[str, Any]:
             resp = await self._rate_limited_fetch(url, params)
@@ -60,35 +94,7 @@ class BaseCollector(ABC):
                 raise ValueError(f"Expected dict response, got {type(data).__name__}")
             return data
 
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(self.MAX_RETRIES),
-            wait=wait_exponential(multiplier=self.RETRY_DELAY, max=30.0),
-            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError, ValueError)),
-            before=before_log(logger, logging.DEBUG),
-            reraise=True,
-        ):
-            with attempt:
-                try:
-                    return await self._circuit_breaker.call(_do_fetch)
-                except CircuitBreakerOpenError:
-                    if attempt.retry_state.attempt_number < self.MAX_RETRIES:
-                        delay = self.RETRY_DELAY * (2 ** (attempt.retry_state.attempt_number - 1))
-                        logger.warning(
-                            "circuit_breaker.open.%s attempt %d/%d, retrying in %.1fs",
-                            self.__class__.__name__,
-                            attempt.retry_state.attempt_number,
-                            self.MAX_RETRIES,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-                        raise
-                    logger.error(
-                        "circuit_breaker.open.%s exhausted after %d attempts",
-                        self.__class__.__name__,
-                        self.MAX_RETRIES,
-                    )
-                    raise
-        return None
+        return await self._with_retry(_do_fetch, (httpx.HTTPStatusError, httpx.RequestError, ValueError))
 
     async def _fetch_text(self, url: str, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None) -> str:
         async def _do_fetch() -> str:
@@ -98,35 +104,7 @@ class BaseCollector(ABC):
             resp.raise_for_status()
             return resp.text
 
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(self.MAX_RETRIES),
-            wait=wait_exponential(multiplier=self.RETRY_DELAY, max=30.0),
-            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
-            before=before_log(logger, logging.DEBUG),
-            reraise=True,
-        ):
-            with attempt:
-                try:
-                    return await self._circuit_breaker.call(_do_fetch)
-                except CircuitBreakerOpenError:
-                    if attempt.retry_state.attempt_number < self.MAX_RETRIES:
-                        delay = self.RETRY_DELAY * (2 ** (attempt.retry_state.attempt_number - 1))
-                        logger.warning(
-                            "circuit_breaker.open.%s attempt %d/%d, retrying in %.1fs",
-                            self.__class__.__name__,
-                            attempt.retry_state.attempt_number,
-                            self.MAX_RETRIES,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-                        raise
-                    logger.error(
-                        "circuit_breaker.open.%s exhausted after %d attempts",
-                        self.__class__.__name__,
-                        self.MAX_RETRIES,
-                    )
-                    raise
-        return None
+        return await self._with_retry(_do_fetch)
 
     async def _fetch_json_or_list(
         self, url: str, params: Optional[dict[str, Any]] = None, headers: Optional[dict[str, str]] = None
@@ -138,35 +116,7 @@ class BaseCollector(ABC):
             resp.raise_for_status()
             return resp.json()
 
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(self.MAX_RETRIES),
-            wait=wait_exponential(multiplier=self.RETRY_DELAY, max=30.0),
-            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
-            before=before_log(logger, logging.DEBUG),
-            reraise=True,
-        ):
-            with attempt:
-                try:
-                    return await self._circuit_breaker.call(_do_fetch)
-                except CircuitBreakerOpenError:
-                    if attempt.retry_state.attempt_number < self.MAX_RETRIES:
-                        delay = self.RETRY_DELAY * (2 ** (attempt.retry_state.attempt_number - 1))
-                        logger.warning(
-                            "circuit_breaker.open.%s attempt %d/%d, retrying in %.1fs",
-                            self.__class__.__name__,
-                            attempt.retry_state.attempt_number,
-                            self.MAX_RETRIES,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-                        raise
-                    logger.error(
-                        "circuit_breaker.open.%s exhausted after %d attempts",
-                        self.__class__.__name__,
-                        self.MAX_RETRIES,
-                    )
-                    raise
-        return None
+        return await self._with_retry(_do_fetch)
 
     async def _paginate(
         self,

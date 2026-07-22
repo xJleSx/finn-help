@@ -208,7 +208,7 @@ class AnalysisService:
             key_rate = macro_context.get("key_rate") if macro_context else None
             fund = self.fundamental.analyze_bond(bond_offering, key_rate=key_rate)
         else:
-            fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics)
+            fund = self.fundamental.analyze(df, div_df, metrics=fund_metrics, sector=inst.sector or "Прочее")
         geo = {"score": geo_score}
         volatility_regime = self.volatility.detect(df, ind_df)
         risk_metrics = compute_risk_metrics(df["close"].tolist())
@@ -495,6 +495,11 @@ class AnalysisService:
         elapsed = time.monotonic() - _train_start
         logger.info("Model training completed in %.2fs for %d instruments", elapsed, len(all_results))
         return all_results
+
+    async def train_models_async(self, ticker: str | None = None) -> dict[str, bool]:
+        loop = asyncio.get_running_loop()
+        from src.db.connection import get_session
+        return await loop.run_in_executor(None, lambda: self.train_models(get_session(), ticker=ticker))
 
 
 analysis_service = AnalysisService()

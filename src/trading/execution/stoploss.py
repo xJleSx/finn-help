@@ -114,6 +114,12 @@ class PositionTracker:
             if tp_pct is not None:
                 self._positions[ticker]["tp"] = float(self._positions[ticker]["avg_price"]) * (1 + abs(tp_pct))
             self._persist_sl_tp(ticker)
+        if ticker in self._short_positions:
+            if sl_pct is not None:
+                self._short_positions[ticker]["sl"] = float(self._short_positions[ticker]["avg_price"]) * (1 + abs(sl_pct))
+            if tp_pct is not None:
+                self._short_positions[ticker]["tp"] = float(self._short_positions[ticker]["avg_price"]) * (1 - abs(tp_pct))
+            self._persist_sl_tp(ticker)
 
     def _persist_sl_tp(self, ticker: str) -> None:
         pos = self._positions.get(ticker)

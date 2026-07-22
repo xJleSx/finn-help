@@ -27,14 +27,14 @@ class SocialDataSource(ABC):
     async def fetch_author_stats(self, author_nick: str) -> dict[str, Any] | None: ...
 
     def normalize(self, raw: dict[str, Any]) -> RawPost:
-        return RawPost(
-            source=self.source_name,
-            external_id=str(raw.get("id", "")),
-            author_nick=str(raw.get("author", {}).get("nick", "")),
-            author_id=str(raw.get("author", {}).get("id")),
-            text=str(raw.get("text", "")),
-            published_at=raw.get("published_at"),
-            url=raw.get("url"),
-            tickers=[],
-            raw=raw,
-        )
+        result = super().normalize(raw)
+        result.source = self.source_name
+        result.external_id = str(raw.get("id", ""))
+        result.author_nick = str(raw.get("author", {}).get("nick", ""))
+        result.author_id = str(raw.get("author", {}).get("id"))
+        result.text = str(raw.get("text", ""))
+        result.published_at = raw.get("published_at")
+        result.url = raw.get("url")
+        result.tickers = []
+        result.raw = raw
+        return result

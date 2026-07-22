@@ -199,12 +199,27 @@ def _parse_date(value: Any) -> Optional[date]:
     return None
 
 
-def _estimate_duration(maturity_date: date, ytm: Optional[float]) -> Optional[float]:
+def _estimate_duration(maturity_date: date, ytm: Optional[float], amortizing_schedule: Optional[list[dict[str, Any]]] = None) -> Optional[float]:
     if not ytm or ytm <= 0:
         return None
     today = date.today()
     if maturity_date <= today:
         return 0.0
+    # TODO: support amortizing bonds with varying notional
+    if amortizing_schedule:
+        # For amortizing bonds, compute weighted average duration across principal repayments
+        total_weight = 0.0
+        weighted = 0.0
+        for payment in amortizing_schedule:
+            pmt_date = payment.get("date")
+            pmt_amount = payment.get("amount", 0)
+            if pmt_date and pmt_amount:
+                days = (pmt_date - today).days
+                if days > 0:
+                    years = days / 365.25
+                    w = pmt_amount * years
+                    total_weight += pmt_amount
+                    weighted += w * (1 - 1 / (1 + ytm / 100) ** years) / (1 - 1 / (1 + ytm / 100)) if ytm != 0 else years
+        return round(weighted / total_weight, 2) if total_weight > 0 else None
     years_to_maturity = (maturity_date - today).days / 365.25
-    # Simple Macaulay approximation for bullet bonds
     return round(years_to_maturity * (1 - 1 / (1 + ytm / 100) ** years_to_maturity) / (1 - 1 / (1 + ytm / 100)), 2)

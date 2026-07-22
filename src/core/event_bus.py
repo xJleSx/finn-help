@@ -39,15 +39,19 @@ class EventBus:
 
     async def publish(self, event: DomainEvent) -> None:
         logger.debug("Publishing event: %s", event.event_type)
-        tasks = []
+        handler_tasks: list[tuple[Handler, Coroutine[Any, Any, None]]] = []
         for handler in self._handlers.get(event.event_type, []):
-            tasks.append(handler(event))
+            handler_tasks.append((handler, handler(event)))
         for handler in self._wildcard_handlers:
-            tasks.append(handler(event))
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            handler_tasks.append((handler, handler(event)))
+        if handler_tasks:
+            results = await asyncio.gather(*[coro for _, coro in handler_tasks], return_exceptions=True)
+            for (handler, _), result in zip(handler_tasks, results):
+                if isinstance(result, Exception):
+                    logger.exception("Handler %s failed for event %s: %s", handler, event.event_type, result)
 
-    async def publish_sync(self, event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+    async def publish_async(self, event_type: str, data: Optional[dict[str, Any]] = None) -> None:
+        """Publish a domain event (awaits all handlers asynchronously)."""
         await self.publish(DomainEvent(event_type=event_type, data=data or {}))
 
 

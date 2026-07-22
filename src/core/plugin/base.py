@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import importlib
 import inspect
 import logging
@@ -46,7 +47,10 @@ class Hook:
         results = []
         for priority, handler in self.handlers:
             try:
-                result = await handler(*args, **kwargs)
+                if asyncio.iscoroutinefunction(handler):
+                    result = await handler(*args, **kwargs)
+                else:
+                    result = handler(*args, **kwargs)
                 results.append(result)
             except Exception:
                 logger.exception("Async hook handler %s failed", handler.__name__)
@@ -55,9 +59,9 @@ class Hook:
 
 def hook(name: str, priority: HookPriority = HookPriority.NORMAL) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        if not hasattr(func, "_hooks"):
-            func._hooks = []
-        func._hooks.append((name, priority))
+        hooks = getattr(func, "_hooks", [])
+        hooks.append((name, priority))
+        func._hooks = hooks
         return func
     return decorator
 
@@ -150,7 +154,9 @@ class PluginManager:
                 for name, obj in inspect.getmembers(mod, inspect.isclass):
                     if (issubclass(obj, PluginBase) and obj is not PluginBase
                             and not inspect.isabstract(obj)):
-                        logger.info("Discovered plugin class %s in %s", name, full_name)
+                        plugin_instance = obj()
+                        self.register_plugin(plugin_instance)
+                        logger.info("Discovered and registered plugin %s from %s", name, full_name)
             except Exception:
                 logger.exception("Failed to load plugin module %s", modname)
 

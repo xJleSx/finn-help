@@ -101,7 +101,7 @@ def compute_position_size(
     else:
         max_risk_amount = capital * risk_per_trade_pct / 100
 
-    if stop_loss_pct and stop_loss_pct < 0:
+    if stop_loss_pct is not None and stop_loss_pct > 0:
         risk_per_share = price * abs(stop_loss_pct) / 100
         shares = int(max_risk_amount / risk_per_share) if risk_per_share > 0 else 0
     else:
@@ -120,14 +120,14 @@ def compute_position_size(
 def compute_vol_adjusted_size(
     account_value: float,
     risk_per_trade: float,
-    atr: float,
+    risk_per_share: float,
     entry_price: float,
     atr_multiplier: float = 2.0,
 ) -> int:
-    if atr <= 0 or entry_price <= 0 or account_value <= 0 or risk_per_trade <= 0:
+    if risk_per_share <= 0 or entry_price <= 0 or account_value <= 0 or risk_per_trade <= 0:
         return 0
     risk_amount = account_value * risk_per_trade
-    position_value = risk_amount / (atr * atr_multiplier)
+    position_value = risk_amount / (risk_per_share * atr_multiplier)
     shares = int(position_value / entry_price)
     return max(shares, 0)
 
@@ -469,7 +469,7 @@ class RiskManager:
                 if inst:
                     prices_list = [float(p.close) for p in db.query(Price).filter_by(instrument_id=int(inst.id)).order_by(Price.date.desc()).limit(20).all() if p.close]
                     if prices_list:
-                        avg_vol = float(np.mean(prices_list)) * 1000
+                        avg_vol = float(np.mean(prices_list)) * 1000  # placeholder: price as proxy for volume
                         pos = compute_liquidity_constrained_size(pos, avg_vol)
             finally:
                 db.close()

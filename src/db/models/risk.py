@@ -19,11 +19,14 @@ class GeoRiskScore(Base):
     __tablename__ = "geo_risk_scores"
 
     id = Column(Integer, primary_key=True)
-    date = Column(Date, unique=True, nullable=False)
+    date = Column(Date, nullable=False)
+    country = Column(String(100), default="global")
     score = Column(Float, nullable=False)
     components_json = Column(JSON)
     sources_json = Column(JSON)
     created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (UniqueConstraint("date", "country", name="uq_geo_risk_date_country"),)
 
 
 # Phase 3: Sector Risk History

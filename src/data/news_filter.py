@@ -8,6 +8,7 @@ Filters out spam, press releases, and low-quality news using:
 
 import logging
 import re
+from collections import defaultdict
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,6 @@ SCAM_KEYWORDS = {
     "хайп-проект",
     "памм",
     "памм-счет",
-    "доверительный управляющий",
     "очистим кредитную историю",
     "закредитованность",
     "рефинансирование",
@@ -332,8 +332,8 @@ Return JSON with 'type' (news/spam/press_release/opinion/scam) and 'confidence' 
         llm_classification = self.classify_with_llm(title, summary)
 
         is_relevant = True
-        article_type = "news"
-        type_confidence = 0.0
+        article_type: str = "news"
+        type_confidence: float = 0.0
 
         if scam["is_scam"]:
             is_relevant = False

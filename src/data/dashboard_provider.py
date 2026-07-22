@@ -190,6 +190,8 @@ class DashboardDataProvider:
                 },
             }
 
+        from src.data.company_risk_aggregator import BASE_WEIGHTS
+
         return {
             "ticker": ticker,
             "sector": instrument.sector,
@@ -201,12 +203,7 @@ class DashboardDataProvider:
                 "macro_risk": risk.macro_risk or 0.0,
                 "company_specific_risk": risk.company_specific_risk or 0.0,
             },
-            "weights": {
-                "sector_risk": 0.30,
-                "geopolitical_risk": 0.30,
-                "macro_risk": 0.20,
-                "company_specific_risk": 0.20,
-            },
+            "weights": dict(BASE_WEIGHTS),
         }
 
     def get_geopolitical_risk_gauge(self, db_session: Any) -> dict[str, Any]:

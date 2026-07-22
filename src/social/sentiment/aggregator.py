@@ -84,7 +84,7 @@ class SocialAggregator:
         db = get_session()
         try:
             cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-            rows: list[SentimentSignal] = db.query(SentimentSignal).filter(SentimentSignal.created_at >= cutoff).all()
+            rows: list[SentimentSignal] = db.query(SentimentSignal).filter(SentimentSignal.created_at >= cutoff).limit(1000).all()
             if not rows:
                 return []
 

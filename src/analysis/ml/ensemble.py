@@ -320,6 +320,10 @@ class EnsemblePredictor:
             logger.debug("Not enough models for OOF stacking (%d active)", active_models)
             return
 
+        if len(oof_probs) == 0 or any(len(p) == 0 for p in oof_probs):
+            logger.debug("Empty OOF predictions, skipping meta-learner training")
+            return
+
         meta_x = np.column_stack(oof_probs)
 
         try:
@@ -376,17 +380,9 @@ class EnsemblePredictor:
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
         features = prepare_features(df)
-        y_raw, mask = build_labels(df["close"], lookahead=lookahead, threshold=threshold)
-        n = min(len(features), len(y_raw))
-        aligned = features.iloc[:n].copy()
-        mask = mask[:n]
-        y_raw = y_raw[:n]
-        if mask.sum() < 30:
+        n = min(len(features), len(df))
+        aligned = features.iloc[:n].values
+        if len(aligned) < 30:
             return {"oos_accuracy": 0.5, "folds_completed": 0}
 
-        x = aligned[mask].values
-        y = y_raw[mask].astype(int)
-        if len(x) < 30:
-            return {"oos_accuracy": 0.5, "folds_completed": 0}
-
-        return walk_forward_validate(model, x, y, n_splits=3)
+        return walk_forward_validate(model, aligned, close_series=df["close"], lookahead=lookahead, threshold=threshold, n_splits=3)

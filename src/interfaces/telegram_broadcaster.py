@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from sqlalchemy import func
 
+from src.compliance import with_disclaimer
 from src.config import settings
 from src.db.connection import get_session
 from src.db.models import Instrument
@@ -48,10 +49,11 @@ async def broadcast_signal(n: Any) -> None:
 
     ns = NotificationService()
     text = format_signal_text(n)
+    text_with_disclaimer = with_disclaimer(html_escape(text))
     subscribers = await _ns_get_subscribers(ns, "signal")
     for uid, cid in subscribers:
         try:
-            await app.bot.send_message(chat_id=uid, text=html_escape(text), parse_mode="HTML")
+            await app.bot.send_message(chat_id=uid, text=text_with_disclaimer, parse_mode="HTML")
             await _ns_save_notification(ns, uid, "signal", text, title=n.ticker)
         except Exception as e:
             logger.warning(f"Failed to send signal to {uid}: {e}")
@@ -120,6 +122,7 @@ async def broadcast_trade(
         text += f"\n🆔 Заявка: <code>{html_escape(order_id[:12])}...</code>"
     if portfolio_value is not None:
         text += f"\n💵 Портфель: {portfolio_value:,.0f} ₽"
+    text = with_disclaimer(text)
 
     ns = NotificationService()
     for uid, cid in ns.get_subscribers("trade"):

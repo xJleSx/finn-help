@@ -79,9 +79,11 @@ def compute_entry_zone(close: float, sma20: float, atr: float) -> EntryZone:
     )
 
 
-def compute_support_resistance(df: pd.DataFrame, lookback: int = 60) -> tuple[float | None, float | None]:
+def compute_support_resistance(df: pd.DataFrame, lookback: int = 60, current_idx: int | None = None) -> tuple[float | None, float | None]:
     if df.empty or len(df) < 10:
         return None, None
+    if current_idx is not None:
+        df = df.iloc[:current_idx + 1]
     recent = df.tail(lookback).copy()
     close = recent["close"].values
     low = recent["low"].values if "low" in recent.columns else close
@@ -150,9 +152,14 @@ def build_trade_plan(
     side: Literal["buy", "sell"] = "buy",
     profile: Profile = "balanced",
     confidence: Optional[float] = None,
+    current_idx: int | None = None,
 ) -> TradePlan:
     entry_zone = compute_entry_zone(close, sma20, atr)
-    support, resistance = compute_support_resistance(df)
+    if current_idx is None and "close" in df.columns:
+        matches = df.index[df["close"] == close].tolist()
+        if matches:
+            current_idx = matches[-1]
+    support, resistance = compute_support_resistance(df, current_idx=current_idx)
     entry_price = close
 
     if side == "buy":

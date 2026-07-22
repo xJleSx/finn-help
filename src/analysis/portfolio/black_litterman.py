@@ -65,7 +65,6 @@ def _build_view_matrices(
             Omega[i, i] = 1e12
         elif c < 1.0:
             Omega[i, i] = Omega[i, i] * (1.0 / c - 1.0) + 1e-10
-    Omega = np.diag(np.diag(Omega))
     return P, Q, Omega
 
 

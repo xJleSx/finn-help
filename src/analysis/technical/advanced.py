@@ -28,7 +28,7 @@ class AdvancedTechnicalAnalyzer:
         kijun_sen = (high.rolling(kijun_period).max() + low.rolling(kijun_period).min()) / 2
         senkou_span_a = ((tenkan_sen + kijun_sen) / 2).shift(displacement)
         senkou_span_b = ((high.rolling(senkou_b_period).max() + low.rolling(senkou_b_period).min()) / 2).shift(displacement)
-        chikou_span = close.shift(-displacement)
+        chikou_span = close.shift(displacement)
 
         df["tenkan_sen"] = tenkan_sen
         df["kijun_sen"] = kijun_sen

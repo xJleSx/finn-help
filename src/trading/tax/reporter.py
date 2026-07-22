@@ -21,7 +21,8 @@ BROKER_COMMISSION_PCT: float = 0.0004
 
 
 def compute_tax_lots(trades: list[dict[str, Any]]) -> list[TaxLot]:
-    buy_queue: list[dict[str, Any]] = []
+    long_queue: list[dict[str, Any]] = []
+    short_queue: list[dict[str, Any]] = []
     lots: list[TaxLot] = []
     for t in sorted(trades, key=lambda x: x.get("date", "")):
         ticker = t.get("ticker", "")
@@ -30,8 +31,8 @@ def compute_tax_lots(trades: list[dict[str, Any]]) -> list[TaxLot]:
         price = float(t.get("price", 0))
         date_str = str(t.get("date", ""))
         commission = float(t.get("commission", 0))
-        if direction in ("BUY", "COVER"):
-            buy_queue.append(
+        if direction == "BUY":
+            long_queue.append(
                 {
                     "ticker": ticker,
                     "quantity": qty,
@@ -40,18 +41,28 @@ def compute_tax_lots(trades: list[dict[str, Any]]) -> list[TaxLot]:
                     "commission": commission,
                 }
             )
-        elif direction in ("SELL", "SHORT"):
+        elif direction == "SHORT":
+            short_queue.append(
+                {
+                    "ticker": ticker,
+                    "quantity": qty,
+                    "price": price,
+                    "date": date_str,
+                    "commission": commission,
+                }
+            )
+        elif direction == "SELL":
             remaining = qty
             trade_commission = commission
             total_lot_qty_for_trade = qty
-            while remaining > 0 and buy_queue:
-                lot = buy_queue[0]
+            while remaining > 0 and long_queue:
+                lot = long_queue[0]
                 used = min(remaining, lot["quantity"])
                 buy_price = lot["price"]
                 buy_date = lot["date"]
                 lot["quantity"] -= used
                 if lot["quantity"] <= 0:
-                    buy_queue.pop(0)
+                    long_queue.pop(0)
                 lot_commission = trade_commission * (used / total_lot_qty_for_trade)
                 pnl = (price - buy_price) * used - lot_commission
                 holding_days = 0
@@ -71,6 +82,47 @@ def compute_tax_lots(trades: list[dict[str, Any]]) -> list[TaxLot]:
                     quantity=used,
                     buy_price=buy_price,
                     buy_date=buy_date,
+                    sell_price=price,
+                    sell_date=date_str,
+                    pnl=round(pnl, 2),
+                    tax_rate=tax_rate,
+                    tax_amount=round(tax_amount, 2),
+                    holding_days=holding_days,
+                    is_short_term=is_short_term,
+                )
+                lots.append(lot_rec)
+                remaining -= used
+        elif direction == "COVER":
+            remaining = qty
+            trade_commission = commission
+            total_lot_qty_for_trade = qty
+            while remaining > 0 and short_queue:
+                lot = short_queue[0]
+                used = min(remaining, lot["quantity"])
+                short_price = lot["price"]
+                short_date = lot["date"]
+                lot["quantity"] -= used
+                if lot["quantity"] <= 0:
+                    short_queue.pop(0)
+                lot_commission = trade_commission * (used / total_lot_qty_for_trade)
+                pnl = (short_price - price) * used - lot_commission
+                holding_days = 0
+                if short_date and date_str:
+                    try:
+                        bd = datetime.fromisoformat(short_date)
+                        sd = datetime.fromisoformat(date_str)
+                        holding_days = (sd - bd).days
+                    except (ValueError, TypeError):
+                        pass
+                is_short_term = holding_days < LONG_TERM_HOLDING_DAYS
+                tax_rate = LONG_TERM_TAX_RATE if not is_short_term else CAPITAL_GAINS_TAX_RATE
+                tax_amount = max(0.0, pnl * tax_rate) if pnl > 0 else 0.0
+                lot_rec = TaxLot(
+                    id=f"{ticker}_{date_str}_{len(lots)}",
+                    ticker=ticker,
+                    quantity=used,
+                    buy_price=short_price,
+                    buy_date=short_date,
                     sell_price=price,
                     sell_date=date_str,
                     pnl=round(pnl, 2),
@@ -103,17 +155,36 @@ def compute_dividend_tax(dividends: list[dict[str, Any]], tax_rate: float = DIVI
     return result
 
 
+def _apply_loss_harvesting(lots: list[TaxLot]) -> list[TaxLot]:
+    """Offset winning lots with losing lots across the portfolio."""
+    wins = sorted([l for l in lots if l.pnl > 0], key=lambda x: x.pnl, reverse=True)
+    losses = sorted([l for l in lots if l.pnl <= 0], key=lambda x: x.pnl)
+    if not wins or not losses:
+        return lots
+    total_loss = abs(sum(l.pnl for l in losses))
+    for win in wins:
+        if total_loss <= 0:
+            break
+        offset = min(win.pnl, total_loss)
+        win.tax_amount = round(max(0.0, (win.pnl - offset) * win.tax_rate), 2)
+        total_loss -= offset
+    return lots
+
+
 def generate_tax_report(
-    year: int = 2026,
+    year: int | None = None,
     trades: Optional[list[dict[str, Any]]] = None,
     dividends: Optional[list[dict[str, Any]]] = None,
     include_broker_report: bool = True,
 ) -> TaxReport:
+    if year is None:
+        year = datetime.now().year
     report = TaxReport(year=year)
     if trades:
         lots = compute_tax_lots(trades)
+        lots = _apply_loss_harvesting(lots)
         report.lots = lots
-        report.total_realised_pnl = round(sum(lot.pnl for lot in lots), 2)
+        report.total_realized_pnl = round(sum(lot.pnl for lot in lots), 2)
         report.total_tax_due = round(sum(lot.tax_amount for lot in lots), 2)
     if dividends:
         div_results = compute_dividend_tax(dividends)
@@ -126,9 +197,11 @@ def generate_tax_report(
 
 
 def load_trades_from_db(
-    year: int = 2026,
+    year: int | None = None,
     ticker: Optional[str] = None,
 ) -> list[dict[str, Any]]:
+    if year is None:
+        year = datetime.now().year
     db = get_session()
     try:
         query = db.query(TradeLog)
@@ -157,9 +230,11 @@ def load_trades_from_db(
 
 
 def load_dividends_from_db(
-    year: int = 2026,
+    year: int | None = None,
     ticker: Optional[str] = None,
 ) -> list[dict[str, Any]]:
+    if year is None:
+        year = datetime.now().year
     db = get_session()
     try:
         query = db.query(Dividend).join(Instrument)
@@ -216,7 +291,7 @@ def generate_broker_report_csv(report: TaxReport) -> str:
         writer.writerow([d["ticker"], d["date"], d["gross_amount"], d["tax_rate"], d["tax_amount"], d["net_amount"]])
     writer.writerow([])
     writer.writerow(["Итого:"])
-    writer.writerow(["Реализованный P&L", f"{report.total_realised_pnl:.2f} RUB"])
+    writer.writerow(["Реализованный P&L", f"{report.total_realized_pnl:.2f} RUB"])
     writer.writerow(["Дивиденды (гросс)", f"{report.total_dividends:.2f} RUB"])
     writer.writerow(["Налог к уплате", f"{report.total_tax_due:.2f} RUB"])
     writer.writerow(["Комиссии брокера", f"{report.broker_commission_total:.2f} RUB"])
@@ -224,10 +299,10 @@ def generate_broker_report_csv(report: TaxReport) -> str:
 
 
 def generate_3ndfl_section(report: TaxReport) -> dict[str, Any]:
-    taxable_income = report.total_realised_pnl + report.total_dividends
+    taxable_income = report.total_realized_pnl + report.total_dividends
     return {
         "year": report.year,
-        "доходы_от_ценных_бумаг": round(report.total_realised_pnl, 2),
+        "доходы_от_ценных_бумаг": round(report.total_realized_pnl, 2),
         "доходы_от_дивидендов": round(report.total_dividends, 2),
         "налоговая_база": round(taxable_income, 2),
         "налог_к_уплате": round(report.total_tax_due, 2),

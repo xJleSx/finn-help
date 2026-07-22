@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import logging
+import threading
 from typing import Optional
 
 import pandas as pd
@@ -10,6 +11,7 @@ from src.config import personal
 logger = logging.getLogger(__name__)
 
 _risk_lock: asyncio.Lock | None = None
+_thread_lock = threading.RLock()
 
 
 def _get_risk_lock() -> asyncio.Lock:
@@ -26,14 +28,17 @@ def _cb_state_change_handler(name: str, old_state: object, new_state: object) ->
     from src.core.resilience import CircuitState
 
     if new_state is CircuitState.OPEN:
+        with _thread_lock:
+            _CB_KILL_SWITCH_REASONS.add(name)
         reason = f"circuit_breaker.{name}.opened"
-        _CB_KILL_SWITCH_REASONS.add(name)
         logger.warning("KILL SWITCH via circuit breaker: %s", reason)
         activate_kill_switch(reason)
-    elif new_state is CircuitState.CLOSED and name in _CB_KILL_SWITCH_REASONS:
-        _CB_KILL_SWITCH_REASONS.discard(name)
-        if not _CB_KILL_SWITCH_REASONS:
-            logger.info("Circuit breaker %s recovered — kill switch may be manually deactivated", name)
+    elif new_state is CircuitState.CLOSED:
+        with _thread_lock:
+            if name in _CB_KILL_SWITCH_REASONS:
+                _CB_KILL_SWITCH_REASONS.discard(name)
+                if not _CB_KILL_SWITCH_REASONS:
+                    logger.info("Circuit breaker %s recovered — kill switch may be manually deactivated", name)
 
 
 def wire_circuit_breakers_to_kill_switch() -> None:
@@ -49,11 +54,13 @@ def wire_circuit_breakers_to_kill_switch() -> None:
 
 
 def circuit_breaker_kill_switch_active() -> bool:
-    return len(_CB_KILL_SWITCH_REASONS) > 0
+    with _thread_lock:
+        return len(_CB_KILL_SWITCH_REASONS) > 0
 
 
 # kill switch
 _kill_switch_active = False
+_sector_kill_switches: dict[str, bool] = {}
 _daily_loss_limit: Optional[float] = None
 _position_limit_pct: Optional[float] = None
 
@@ -119,9 +126,10 @@ def _resolve_risk_profile() -> dict[str, float]:
 def _load_risk_params() -> None:
     mapping = _resolve_risk_profile()
     global _position_limit_pct, _daily_loss_limit, _max_drawdown_pct
-    _position_limit_pct = mapping["max_position_pct"]
-    _daily_loss_limit = mapping["daily_loss_limit"]
-    _max_drawdown_pct = mapping["max_drawdown_pct"]
+    with _thread_lock:
+        _position_limit_pct = mapping["max_position_pct"]
+        _daily_loss_limit = mapping["daily_loss_limit"]
+        _max_drawdown_pct = mapping["max_drawdown_pct"]
 
 
 def risk_per_trade() -> float:
@@ -133,54 +141,88 @@ def max_position_pct() -> float:
 
 
 def max_drawdown_pct() -> float:
-    return _max_drawdown_pct
+    with _thread_lock:
+        return _max_drawdown_pct
 
 
 def activate_kill_switch(reason: str = "") -> None:
     global _kill_switch_active
-    _kill_switch_active = True
+    with _thread_lock:
+        _kill_switch_active = True
     logger.warning("KILL SWITCH ACTIVATED%s", f": {reason}" if reason else "")
 
 
 def deactivate_kill_switch() -> None:
     global _kill_switch_active
-    _kill_switch_active = False
+    with _thread_lock:
+        _kill_switch_active = False
     logger.info("Kill switch deactivated")
 
 
 def is_kill_switch_active() -> bool:
-    return _kill_switch_active or circuit_breaker_kill_switch_active()
+    with _thread_lock:
+        return _kill_switch_active or circuit_breaker_kill_switch_active()
+
+
+def activate_sector_kill_switch(sector: str, reason: str = "") -> None:
+    with _thread_lock:
+        _sector_kill_switches[sector.lower()] = True
+    logger.warning("Sector kill switch activated for %s%s", sector, f": {reason}" if reason else "")
+
+
+def deactivate_sector_kill_switch(sector: str) -> None:
+    with _thread_lock:
+        _sector_kill_switches.pop(sector.lower(), None)
+    logger.info("Sector kill switch deactivated for %s", sector)
+
+
+def is_sector_kill_switch_active(sector: str) -> bool:
+    with _thread_lock:
+        return _sector_kill_switches.get(sector.lower(), False)
+
+
+def active_sector_kill_switches() -> list[str]:
+    with _thread_lock:
+        return list(_sector_kill_switches.keys())
 
 
 def set_daily_loss_limit(pct: float) -> None:
     global _daily_loss_limit
-    _daily_loss_limit = pct
+    with _thread_lock:
+        _daily_loss_limit = pct
     logger.info("Daily loss limit set to %.1f%%", pct * 100)
 
 
 def set_max_drawdown_pct(pct: float) -> None:
     global _max_drawdown_pct
-    _max_drawdown_pct = pct
+    with _thread_lock:
+        _max_drawdown_pct = pct
     logger.info("Max drawdown set to %.1f%%", pct * 100)
 
 
 def check_daily_loss(day_return_pct: float) -> bool:
-    if _daily_loss_limit is not None and day_return_pct < -_daily_loss_limit:
-        logger.warning("Daily loss limit hit: %.2f%% < -%.2f%%", day_return_pct * 100, _daily_loss_limit * 100)
-        activate_kill_switch(f"daily loss {day_return_pct:.2%}")
-        return True
-    return False
+    with _thread_lock:
+        if _daily_loss_limit is not None and day_return_pct < -_daily_loss_limit:
+            logger.warning("Daily loss limit hit: %.2f%% < -%.2f%%", day_return_pct * 100, _daily_loss_limit * 100)
+            activate_kill_switch(f"daily loss {day_return_pct:.2%}")
+            return True
+        return False
 
 
 def set_max_position_pct(pct: float) -> None:
     global _position_limit_pct
-    _position_limit_pct = pct
+    with _thread_lock:
+        _position_limit_pct = pct
     logger.info("Max position size set to %.1f%%", pct * 100)
+
+
+# TODO: i18n — Russian messages below need translation
 
 
 def check_position_size(position_value: float, portfolio_value: float) -> tuple[bool, str]:
     pct = position_value / portfolio_value if portfolio_value > 0 else 0
-    limit = _position_limit_pct if _position_limit_pct is not None else 0.25
+    with _thread_lock:
+        limit = _position_limit_pct if _position_limit_pct is not None else 0.25
 
     if pct > limit:
         return False, f"Позиция {pct:.1%} > лимит {limit:.1%}"
@@ -234,7 +276,8 @@ _MAX_LEVERAGE: float = 1.0
 
 def set_max_leverage(n: float) -> None:
     global _MAX_LEVERAGE
-    _MAX_LEVERAGE = n
+    with _thread_lock:
+        _MAX_LEVERAGE = n
 
 
 def check_leverage(current_leverage: float) -> tuple[bool, str]:
@@ -245,7 +288,8 @@ def check_leverage(current_leverage: float) -> tuple[bool, str]:
 
 def set_var_limit(pct: float) -> None:
     global VAR_LIMIT
-    VAR_LIMIT = pct
+    with _thread_lock:
+        VAR_LIMIT = pct
 
 
 def check_var_limit(var_95: float) -> tuple[bool, str]:
@@ -260,7 +304,8 @@ MIN_LIQUIDITY_RATIO = 2
 
 def set_min_volume(vol: float) -> None:
     global MIN_DAILY_VOLUME
-    MIN_DAILY_VOLUME = vol
+    with _thread_lock:
+        MIN_DAILY_VOLUME = vol
 
 
 def check_liquidity(avg_volume: float, order_value: float) -> tuple[bool, str]:
@@ -291,26 +336,29 @@ def check_news_sentiment(news_scores: list[float]) -> tuple[bool, str]:
 
 def update_drawdown(current_value: float) -> float:
     global _peak_value, _current_portfolio_value
-    _current_portfolio_value = current_value
-    if _peak_value is None or current_value > _peak_value:
-        _peak_value = current_value
-    if _peak_value <= 0:
-        return 0.0
-    dd = (current_value - _peak_value) / _peak_value
-    if dd < -_max_drawdown_pct:
-        activate_kill_switch(f"max drawdown {dd:.2%} exceeded threshold {_max_drawdown_pct:.2%}")
-    return dd
+    with _thread_lock:
+        _current_portfolio_value = current_value
+        if _peak_value is None or current_value > _peak_value:
+            _peak_value = current_value
+        if _peak_value <= 0:
+            return 0.0
+        dd = (current_value - _peak_value) / _peak_value
+        if dd < -_max_drawdown_pct:
+            activate_kill_switch(f"max drawdown {dd:.2%} exceeded threshold {_max_drawdown_pct:.2%}")
+        return dd
 
 
 def reset_peak(value: float) -> None:
     global _peak_value
-    _peak_value = value
+    with _thread_lock:
+        _peak_value = value
 
 
 def current_drawdown() -> float:
-    if _peak_value is None or _current_portfolio_value is None or _peak_value <= 0:
-        return 0.0
-    return (_current_portfolio_value - _peak_value) / _peak_value
+    with _thread_lock:
+        if _peak_value is None or _current_portfolio_value is None or _peak_value <= 0:
+            return 0.0
+        return (_current_portfolio_value - _peak_value) / _peak_value
 
 
 # track P&L for the day
@@ -320,22 +368,25 @@ _current_day_value: Optional[float] = None
 
 def start_day(portfolio_value: float) -> None:
     global _day_start_value, _current_day_value
-    _day_start_value = portfolio_value
-    _current_day_value = portfolio_value
+    with _thread_lock:
+        _day_start_value = portfolio_value
+        _current_day_value = portfolio_value
     logger.info("Day start value: %.2f", portfolio_value)
 
 
 def update_day_value(current_value: float) -> None:
     global _current_day_value
-    _current_day_value = current_value
+    with _thread_lock:
+        _current_day_value = current_value
 
 
 def get_day_pnl() -> tuple[float, float]:
-    if _day_start_value is None or _current_day_value is None:
-        return 0.0, 0.0
-    pnl = _current_day_value - _day_start_value
-    pnl_pct = pnl / _day_start_value if _day_start_value else 0
-    return pnl, pnl_pct
+    with _thread_lock:
+        if _day_start_value is None or _current_day_value is None:
+            return 0.0, 0.0
+        pnl = _current_day_value - _day_start_value
+        pnl_pct = pnl / _day_start_value if _day_start_value else 0
+        return pnl, pnl_pct
 
 
 async def async_check_daily_loss(day_return_pct: float) -> bool:
@@ -375,12 +426,13 @@ async def async_start_day(value: float) -> None:
 
 try:
     _load_risk_params()
-    logger.info(
-        "Risk params loaded: position_limit=%.0f%%, daily_loss=%.0f%%, max_drawdown=%.0f%%",
-        _position_limit_pct * 100 if _position_limit_pct else 0,
-        _daily_loss_limit * 100 if _daily_loss_limit else 0,
-        _max_drawdown_pct * 100 if _max_drawdown_pct else 0,
-    )
+    with _thread_lock:
+        logger.info(
+            "Risk params loaded: position_limit=%.0f%%, daily_loss=%.0f%%, max_drawdown=%.0f%%",
+            _position_limit_pct * 100 if _position_limit_pct else 0,
+            _daily_loss_limit * 100 if _daily_loss_limit else 0,
+            _max_drawdown_pct * 100 if _max_drawdown_pct else 0,
+        )
 except Exception:
     logger.exception("Unhandled exception")
     logger.warning("Could not load risk params from config, using defaults")
@@ -588,6 +640,7 @@ class CircuitBreaker:
         if elapsed >= self._cooldown_seconds:
             self._triggered = False
             self._triggered_at = None
+            self.reset_pnl()
             return False
         return True
 

@@ -106,8 +106,6 @@ class NewsBatchProcessor:
                     logger.error(f"Filter error for article {article.id}: {e}")
                     stats["errors"].append(f"Filter: {e}")
 
-            db_session.commit()
-
             # Step 3: Classify remaining articles
             relevant_articles = [a for a in articles if a.is_relevant]
             for article in relevant_articles:
@@ -127,8 +125,6 @@ class NewsBatchProcessor:
                 except Exception as e:
                     logger.error(f"Classification error for article {article.id}: {e}")
                     stats["errors"].append(f"Classify: {e}")
-
-            db_session.commit()
 
             # Step 3.5: Generate embeddings & enhanced clustering
             try:
@@ -154,8 +150,6 @@ class NewsBatchProcessor:
                     if article and article.event_id is None:
                         article.event_id = event_id
 
-                db_session.commit()
-
             except Exception as e:
                 logger.error(f"Clustering error: {e}")
                 stats["errors"].append(f"Cluster: {e}")
@@ -172,8 +166,6 @@ class NewsBatchProcessor:
                 except Exception as e:
                     logger.error(f"Sector impact error for article {article.id}: {e}")
                     stats["errors"].append(f"Sector impact: {e}")
-
-            db_session.commit()
 
             # Step 6: Calculate company-level impacts
             from src.db.models import Instrument, NewsInstrument
@@ -203,8 +195,6 @@ class NewsBatchProcessor:
                     logger.error(f"Company impact error for article {article.id}: {e}")
                     stats["errors"].append(f"Company impact: {e}")
 
-            db_session.commit()
-
             # Step 7: Update daily risk scores
             try:
                 from src.db.models import Instrument
@@ -219,8 +209,6 @@ class NewsBatchProcessor:
                     if risk["article_count"] > 0:
                         self.impact_engine.store_daily_sector_risk(sector, risk, db_session)
 
-                db_session.commit()
-
             except Exception as e:
                 logger.error(f"Sector risk calc error: {e}")
                 stats["errors"].append(f"Sector risk: {e}")
@@ -230,7 +218,6 @@ class NewsBatchProcessor:
                 geo_risk = self.geo_engine.calculate_daily_geopolitical_risk(db_session)
                 self.geo_engine.store_geopolitical_risk(geo_risk, db_session)
                 stats["geo_risks_updated"] = True
-                db_session.commit()
 
             except Exception as e:
                 logger.error(f"Geo risk calc error: {e}")
@@ -238,17 +225,18 @@ class NewsBatchProcessor:
 
             # Step 9: Update company risks
             try:
-                instruments = db_session.query(Instrument).limit(100).all()
+                instruments = db_session.query(Instrument).order_by(Instrument.id).limit(100).all()
 
                 for instrument in instruments:
                     company_risk = self.company_aggregator.calculate_company_risk(instrument, db_session)
                     self.company_aggregator.store_company_risk(company_risk, db_session)
 
-                db_session.commit()
-
             except Exception as e:
                 logger.error(f"Company risk calc error: {e}")
                 stats["errors"].append(f"Company risk: {e}")
+
+            # Single commit at the end
+            db_session.commit()
 
             logger.info(f"Batch processing complete: {stats}")
 
@@ -292,7 +280,7 @@ class NewsBatchProcessor:
                 stats["geo_risk_updated"] = True
 
             # Update company risks for top instruments
-            top_instruments = db_session.query(Instrument).limit(200).all()
+            top_instruments = db_session.query(Instrument).order_by(Instrument.id).limit(200).all()
             for instrument in top_instruments:
                 company_risk = self.company_aggregator.calculate_company_risk(instrument, db_session)
                 if self.company_aggregator.store_company_risk(company_risk, db_session):

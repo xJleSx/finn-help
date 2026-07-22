@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any, Optional
 from urllib.parse import urlencode
@@ -40,9 +41,11 @@ class ResilientClient:
         self._max_wait = max_wait
         self._timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
-        self._circuit_breaker: CircuitBreaker = get_circuit_breaker(name)
-        self._circuit_breaker.config.failure_threshold = circuit_breaker_failure_threshold
-        self._circuit_breaker.config.recovery_timeout = circuit_breaker_recovery_timeout
+        cb = get_circuit_breaker(name)
+        self._circuit_breaker_config = copy.copy(cb.config)
+        self._circuit_breaker_config.failure_threshold = circuit_breaker_failure_threshold
+        self._circuit_breaker_config.recovery_timeout = circuit_breaker_recovery_timeout
+        self._circuit_breaker: CircuitBreaker = CircuitBreaker(self._circuit_breaker_config)
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -75,7 +78,7 @@ class ResilientClient:
                         )
                         raise
                     raise
-        return None
+        raise RuntimeError(f"Request to {url} returned no result after {self._max_retries} retries")
 
     async def get_json(self, url: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         if params:

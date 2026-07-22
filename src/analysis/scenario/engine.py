@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -13,6 +14,8 @@ from src.analysis.stress import CRASH_SCENARIOS, SECTOR_SHOCKS
 from src.db.models import Instrument, Portfolio, Price
 
 logger = logging.getLogger(__name__)
+
+SIMULATION_TIMEOUT = 120  # seconds
 
 
 @dataclass
@@ -141,13 +144,31 @@ class ScenarioEngine:
         return dict(sector_map)
 
     def run_monte_carlo(self, n_simulations: int = 10000, periods: int = 252) -> ScenarioResult:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(self._run_monte_carlo_impl, n_simulations, periods)
+            try:
+                result = fut.result(timeout=SIMULATION_TIMEOUT)
+                if result is None or (isinstance(result, ScenarioResult) and result.loss_pct == 0.0 and result.total_after == 0.0):
+                    return ScenarioResult(
+                        name="Monte Carlo",
+                        total_before=self._total,
+                        loss_pct=0.0,
+                        scenario_type="monte_carlo",
+                    )
+                return result
+            except concurrent.futures.TimeoutError:
+                logger.warning("Monte Carlo simulation timed out after %ds", SIMULATION_TIMEOUT)
+                return ScenarioResult(
+                    name="Monte Carlo (timeout)",
+                    total_before=self._total,
+                    loss_pct=0.0,
+                    scenario_type="monte_carlo",
+                )
+
+    def _run_monte_carlo_impl(self, n_simulations: int = 10000, periods: int = 252) -> ScenarioResult | None:
         if self._cov_matrix is None or self._weights is None:
-            return ScenarioResult(
-                name="Monte Carlo",
-                total_before=self._total,
-                loss_pct=0.0,
-                scenario_type="monte_carlo",
-            )
+            return None
         n_assets = len(self._weights)
         mean_ret = np.zeros(n_assets)
         rng = np.random.default_rng(42)
@@ -177,13 +198,31 @@ class ScenarioEngine:
         )
 
     def run_historical_bootstrap(self, n_simulations: int = 10000, periods: int = 252) -> ScenarioResult:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(self._run_bootstrap_impl, n_simulations, periods)
+            try:
+                result = fut.result(timeout=SIMULATION_TIMEOUT)
+                if result is None:
+                    return ScenarioResult(
+                        name="Historical Bootstrap",
+                        total_before=self._total,
+                        loss_pct=0.0,
+                        scenario_type="bootstrap",
+                    )
+                return result
+            except concurrent.futures.TimeoutError:
+                logger.warning("Historical bootstrap timed out after %ds", SIMULATION_TIMEOUT)
+                return ScenarioResult(
+                    name="Historical Bootstrap (timeout)",
+                    total_before=self._total,
+                    loss_pct=0.0,
+                    scenario_type="bootstrap",
+                )
+
+    def _run_bootstrap_impl(self, n_simulations: int = 10000, periods: int = 252) -> ScenarioResult | None:
         if not self._tickers:
-            return ScenarioResult(
-                name="Historical Bootstrap",
-                total_before=self._total,
-                loss_pct=0.0,
-                scenario_type="bootstrap",
-            )
+            return None
         weights_list = []
         for p in self.positions:
             if p["ticker"] in self._tickers:
@@ -193,12 +232,7 @@ class ScenarioEngine:
 
         tickers_with_data = [t for t in self._tickers if len(self._returns.get(t, [])) >= 20]
         if not tickers_with_data:
-            return ScenarioResult(
-                name="Historical Bootstrap",
-                total_before=self._total,
-                loss_pct=0.0,
-                scenario_type="bootstrap",
-            )
+            return None
         min_len = min(len(self._returns[t]) for t in tickers_with_data)
         aligned = np.column_stack([self._returns[t][-min_len:] for t in tickers_with_data])
 

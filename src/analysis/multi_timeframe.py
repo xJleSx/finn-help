@@ -3,44 +3,47 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-TIMEFRAMES = {
-    "daily": 1,
-    "weekly": 5,
-    "monthly": 21,
+TIMEFRAMES: dict[str, str] = {
+    "daily": "D",
+    "weekly": "W",
+    "monthly": "ME",
 }
 
 
 class MultiTimeframeAnalyzer:
     def compute_all(self, df: pd.DataFrame) -> dict[str, pd.DataFrame]:
         result = {}
-        for name, period in TIMEFRAMES.items():
-            resampled = self._resample(df, period)
-            if resampled is not None and len(resampled) >= 30:
+        for name, freq in TIMEFRAMES.items():
+            resampled = self._resample(df, freq)
+            if resampled is not None and len(resampled) >= 15:
                 result[name] = self._compute_indicators(resampled)
         return result
 
-    def _resample(self, df: pd.DataFrame, period_days: int) -> pd.DataFrame | None:
-        if df.empty or period_days < 1:
+    def _resample(self, df: pd.DataFrame, freq: str) -> pd.DataFrame | None:
+        if df.empty:
             return df
-        if period_days == 1:
-            return df.sort_values("date").reset_index(drop=True)
-
         d = df.sort_values("date").copy()
-        d["_bucket"] = np.arange(len(d)) // period_days
-        agg = d.groupby("_bucket").agg(
-            date=("date", "last"),
+        d["date"] = pd.to_datetime(d["date"])
+        d = d.set_index("date")
+        if freq == "D":
+            return d.reset_index()
+        resampled = d.resample(freq)
+        if resampled.ngroups == 0:
+            return None
+        agg = resampled.agg(
             open=("open", "first"),
             high=("high", "max"),
             low=("low", "min"),
             close=("close", "last"),
             volume=("volume", "sum"),
         )
-        return agg.reset_index(drop=True)
+        agg = agg.dropna(subset=["open"])
+        agg = agg.reset_index()
+        return agg
 
     def _compute_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         d = df.copy()

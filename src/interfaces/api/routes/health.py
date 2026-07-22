@@ -23,7 +23,6 @@ async def healthz() -> dict[str, str]:
 
 @router.get("/api/health", response_model=HealthResponse)
 async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    healthy = True
     checks: dict[str, str] = {}
     components: dict[str, Any] = {}
 
@@ -137,7 +136,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
                 logger.exception("Unhandled exception")
                 components[name] = "error"
 
-    status = "degraded" if checks and healthy else "unhealthy" if not healthy else "ok"
+    status = "degraded" if checks else "ok"
     return {
         "status": status,
         "checks": checks or None,

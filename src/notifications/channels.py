@@ -190,7 +190,6 @@ class WebPushChannel:
             try:
                 conn(payload)
             except Exception:
-                logger.exception("Unhandled exception")
                 logger.exception("web_push_failed", user_id=user_id)
         return True
 
@@ -226,7 +225,6 @@ class PushManager:
                 self._telegram_handler(user_id, msg)
                 results["telegram"] = True
             except Exception:
-                logger.exception("Unhandled exception")
                 logger.exception("telegram_push_failed", user_id=user_id)
                 results["telegram"] = False
 

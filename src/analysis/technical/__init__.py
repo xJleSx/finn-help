@@ -22,7 +22,7 @@ class TechnicalAnalyzer:
         if df.empty:
             return df
 
-        df = df.sort_values("date").copy()
+        df = df.sort_values("date")
 
         df = self.sma(df, 20)
         df = self.sma(df, 50)
@@ -36,6 +36,9 @@ class TechnicalAnalyzer:
 
     def sma(self, df: pd.DataFrame, period: int) -> pd.DataFrame:
         col = f"sma_{period}"
+        if period < 1:
+            df[col] = np.nan
+            return df
         df[col] = df["close"].rolling(window=period).mean()
         return df
 
@@ -149,8 +152,12 @@ class TechnicalAnalyzer:
         if not pd.isna(latest.get("macd_hist")):
             max_score += 1.0
             prev = df.iloc[-2] if len(df) > 1 else latest
-            macd_std = df["macd_hist"].std()
-            whipsaw_threshold = max(0.01, macd_std * 0.1) if not pd.isna(macd_std) else 0.01
+            macd_abs = df["macd_hist"].abs()
+            if len(macd_abs) > 20:
+                perc_75 = macd_abs.rolling(20, min_periods=5).quantile(0.75).iloc[-1]
+                whipsaw_threshold = max(0.01, perc_75) if not pd.isna(perc_75) else 0.01
+            else:
+                whipsaw_threshold = 0.01
             if (latest["macd_hist"] > whipsaw_threshold
                     and prev.get("macd_hist", 0) <= 0):
                 score += 1.0

@@ -161,6 +161,27 @@ def mock_client(mock_db):
     app.dependency_overrides.clear()
 
 
+# ── Populated DB fixtures (for tests that need data) ─────────────────────────
+
+
+@pytest.fixture
+async def populated_db_session(async_in_memory_db) -> AsyncGenerator[AsyncSession, None]:
+    """Yield an async session pre-populated with 1 user, 1 instrument, and 1 portfolio entry."""
+    from src.db.models import Instrument, Portfolio, User
+
+    session_class = async_sessionmaker(bind=async_in_memory_db, class_=AsyncSession, expire_on_commit=False)
+    async with session_class() as session:
+        user = User(id=1, username="testuser", hashed_password="x", role="user", is_active=True, risk_profile="balanced")
+        inst = Instrument(id=1, ticker="AAPL", full_name="Apple Inc.", instrument_type="stock")
+        portfolio = Portfolio(id=1, user_id=1, instrument_id=1, quantity=10, avg_price=150.0)
+        session.add_all([user, inst, portfolio])
+        await session.commit()
+        try:
+            yield session
+        finally:
+            await session.close()
+
+
 # ── Legacy sync client fixture ──────────────────────────────────────────────
 
 

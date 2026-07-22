@@ -1,14 +1,22 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import date
+from enum import Enum
 from typing import Any, Optional, cast
 
 import numpy as np
+import pandas as pd
 
 from src.analysis.metrics import compute_calmar, compute_max_drawdown, compute_returns, compute_sharpe, compute_sortino
 from src.config import personal
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
+
+
+class VolRegime(str, Enum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +73,7 @@ class PersonalBacktestResult:
     trades: list[TradeRecord] = field(default_factory=list)
     walk_forward: list[WalkForwardFold] = field(default_factory=list)
     benchmark_ticker: str = "IMOEX"
+    regimes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def summary(self) -> str:
         lines = [
@@ -183,6 +192,26 @@ def run_personal_backtest(
             prices_map[t] = prices_map[t][:min_len]
         bench_prices = bench_prices[:min_len]
 
+        # volatility regime classification
+        regimes_map: dict[str, list[dict[str, Any]]] = {}
+        for t in valid_tickers:
+            closes = pd.Series([p["close"] for p in prices_map[t]], dtype=float)
+            log_ret = np.log(closes / closes.shift(1))
+            hv = log_ret.rolling(21).std() * np.sqrt(252)
+            cutoff_low = hv.quantile(0.3)
+            cutoff_high = hv.quantile(0.7)
+            regs: list[dict[str, Any]] = []
+            for i, p in enumerate(prices_map[t]):
+                v = hv.iloc[i] if i < len(hv) else hv.iloc[-1]
+                if pd.isna(v) or v <= cutoff_low:
+                    r = VolRegime.LOW
+                elif v >= cutoff_high:
+                    r = VolRegime.HIGH
+                else:
+                    r = VolRegime.NORMAL
+                regs.append({"date": p["date"].isoformat(), "regime": r.value, "hv": round(float(v), 4) if not pd.isna(v) else 0})
+            regimes_map[t] = regs
+
         # equal-weight portfolio
         n = len(valid_tickers)
         weight = 1.0 / n
@@ -193,20 +222,20 @@ def run_personal_backtest(
         total_commission = 0.0
         total_slippage = 0.0
 
-        # initial buy
+        # initial buy at close — shift to next bar's open
         for t in valid_tickers:
-            p = prices_map[t][0]["close"]
-            shares = (capital * weight) / p
+            p0 = prices_map[t][1]["close"] if min_len > 1 else prices_map[t][0]["close"]
+            shares = (capital * weight) / p0
             comm = capital * weight * commission_pct
             slip = capital * weight * slippage_pct
             total_commission += comm
             total_slippage += slip
             trades.append(
                 TradeRecord(
-                    date=prices_map[t][0]["date"],
+                    date=prices_map[t][1]["date"] if min_len > 1 else prices_map[t][0]["date"],
                     ticker=t,
                     action="BUY",
-                    price=p,
+                    price=p0,
                     shares=shares,
                     value=capital * weight,
                     commission=comm,
@@ -306,6 +335,7 @@ def run_personal_backtest(
             trades=trades,
             walk_forward=wf_folds,
             benchmark_ticker=benchmark,
+            regimes=regimes_map,
         )
     finally:
         db.close()

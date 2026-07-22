@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, Awaitable, Callable, TypeVar, overload
 
 T = TypeVar("T")
 
@@ -95,7 +96,11 @@ class Container:
 
     def _resolve(self, key: str) -> Any:
         if key in self._instances:
-            return self._instances[key]
+            reg = self._registry.get(key)
+            if reg is not None and reg.lifecycle == Lifecycle.TRANSIENT:
+                del self._instances[key]
+            else:
+                return self._instances[key]
         if key in self._factories:
             reg = self._registry[key]
             if reg.lifecycle == Lifecycle.SINGLETON:
@@ -107,7 +112,11 @@ class Container:
 
     async def _resolve_async(self, key: str) -> Any:
         if key in self._instances:
-            return self._instances[key]
+            reg = self._registry.get(key)
+            if reg is not None and reg.lifecycle == Lifecycle.TRANSIENT:
+                del self._instances[key]
+            else:
+                return self._instances[key]
         if key in self._factories:
             reg = self._registry[key]
             if reg.lifecycle == Lifecycle.SINGLETON:
@@ -124,15 +133,31 @@ class Container:
             return await self._async_factories[key]()
         raise KeyError(f"No registration for {key}")
 
-    def get(self, key: str) -> Any:
-        return self._resolve(key)
+    @overload
+    def get(self, key: str) -> Any: ...
 
-    async def get_async(self, key: str) -> Any:
-        return await self._resolve_async(key)
+    @overload
+    def get(self, cls: type[T]) -> T: ...
+
+    def get(self, key_or_cls: str | type[T]) -> Any:
+        if isinstance(key_or_cls, type):
+            return self._resolve(key_or_cls.__name__)
+        return self._resolve(key_or_cls)
+
+    @overload
+    async def get_async(self, key: str) -> Any: ...
+
+    @overload
+    async def get_async(self, cls: type[T]) -> T: ...
+
+    async def get_async(self, key_or_cls: str | type[T]) -> Any:
+        if isinstance(key_or_cls, type):
+            return await self._resolve_async(key_or_cls.__name__)
+        return await self._resolve_async(key_or_cls)
 
     def get_or_none(self, key: str) -> Any:
         try:
-            return self.get(key)
+            return self._resolve(key)
         except KeyError:
             return None
 
@@ -146,12 +171,13 @@ class Container:
         self._registry.clear()
 
     def dispose(self) -> None:
+        logger = logging.getLogger(__name__)
         for key, instance in self._instances.items():
             if hasattr(instance, "close") and callable(instance.close):
                 try:
                     instance.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.exception("Failed to dispose %s: %s", key, e)
         self.clear()
 
 
@@ -166,6 +192,7 @@ def wire(settings_override: Any = None) -> None:
     _register_social()
     _register_scheduler()
     _register_services()
+    _register_core()
 
 
 def _register_analysis() -> None:
@@ -205,19 +232,20 @@ def _register_scheduler() -> None:
     container.register("scheduler_fusion", sched_fusion)
 
 
+def _register_core() -> None:
+    container.register_factory("event_bus", lambda: importlib.import_module("src.core.event_bus").get_event_bus())
+    container.register_factory("circuit_breaker", lambda: importlib.import_module("src.core.resilience").get_circuit_breaker())
+    container.register_factory("rate_limiter", lambda: importlib.import_module("src.core.resilience").get_rate_limiter())
+
+
 def _register_services() -> None:
     from src.alerts.push import AlertPushService
-    from src.interfaces.nlq import nlq
-    from src.llm.rate_limiter import _retry_handler as groq_retry_handler
-    from src.llm.router import llm as llm_router
-    from src.notifications.service import NotificationService
-    from src.portfolio.allocator import allocator
     from src.user_profile import profile_manager
     container.register("profile_manager", profile_manager)
-    container.register("nlq_engine", nlq)
-    container.register("groq_retry_handler", groq_retry_handler)
-    container.register("portfolio_allocator", allocator)
-    container.register("llm_router", llm_router)
+    container.register_factory("nlq_engine", lambda: importlib.import_module("src.interfaces.nlq").nlq)
+    container.register_factory("groq_retry_handler", lambda: importlib.import_module("src.llm.rate_limiter")._retry_handler)
+    container.register_factory("portfolio_allocator", lambda: importlib.import_module("src.portfolio.allocator").allocator)
+    container.register_factory("llm_router", lambda: importlib.import_module("src.llm.router").llm)
     container.register_factory("alert_push_service", lambda: AlertPushService())
     container.register_factory("notification_service", lambda: NotificationService())
     container.register_factory("position_tracker", lambda: importlib.import_module("src.trading.execution.stoploss").position_tracker)
@@ -226,7 +254,7 @@ def _register_services() -> None:
     container.register_factory("run_analysis", lambda: importlib.import_module("src.cli").run_analysis)
 
 
-def container_for_testing() -> Container:
+def container_for_testing(overrides: dict[str, Any] | None = None) -> Container:
     from unittest.mock import MagicMock
     c = Container()
     keys = [
@@ -239,6 +267,14 @@ def container_for_testing() -> Container:
         "groq_retry_handler", "portfolio_allocator", "llm_router",
         "notification_service", "telegram_bot", "bot_app", "run_analysis",
     ]
+    overrides = overrides or {}
     for key in keys:
-        c.register(key, MagicMock())
+        if key in overrides:
+            c.register(key, overrides[key])
+        else:
+            c.register(key, MagicMock())
+    missing_core = [k for k in ("settings",) if k not in overrides and k in keys]
+    if missing_core:
+        logger = logging.getLogger(__name__)
+        logger.warning("container_for_testing: core deps %s are MagicMock, replace for real tests", missing_core)
     return c

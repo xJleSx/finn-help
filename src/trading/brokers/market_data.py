@@ -5,7 +5,8 @@ from typing import cast
 from sqlalchemy import select
 
 from src.config import personal, settings
-from src.db.connection import get_async_session
+from src.core.credential_store import get_broker_token as _get_broker_token_db
+from src.db.connection import get_async_session, session_scope
 from src.db.models import Instrument, Price
 from src.trading.brokers.tbank import TBankClient
 
@@ -13,13 +14,21 @@ logger = logging.getLogger(__name__)
 
 
 async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", days: int = 5) -> int:
-    if not settings.tinkoff_token:
+    token: str = ""
+    try:
+        with session_scope() as db:
+            token = _get_broker_token_db(0, "tbank", db) or ""
+    except Exception as e:
+        logger.debug("DB token lookup failed: %s", e)
+    if not token:
+        token = settings.tinkoff_token
+    if not token:
         logger.warning("TINKOFF_TOKEN not set, skipping T-Invest candles")
         return 0
 
     use_sandbox = settings.tinkoff_sandbox
     new_count = 0
-    async with TBankClient(use_sandbox=use_sandbox) as client:
+    async with TBankClient(token=token, use_sandbox=use_sandbox) as client:
         candles = await client.get_candles(figi=figi, interval=interval, days=days)
 
     async with get_async_session() as db:
@@ -66,7 +75,13 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
 
 async def update_all_favorites(interval: str = "5min", days: int = 5) -> dict[str, int]:
     stats: dict[str, int] = {}
-    if not settings.tinkoff_token:
+    token: str = ""
+    try:
+        with session_scope() as db:
+            token = _get_broker_token_db(0, "tbank", db) or ""
+    except Exception as e:
+        logger.debug("DB token lookup failed: %s", e)
+    if not token and not settings.tinkoff_token:
         return stats
 
     tickers: list[str] = cast(list[str], personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP", "YNDX", "TATN"]))

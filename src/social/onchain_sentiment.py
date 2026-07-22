@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable
 
 import numpy as np
@@ -24,7 +25,7 @@ DEFAULT_BULLISH_KEYWORDS = [
     "positive",
     "strong",
     "overbought",
-    " momentum ",
+    "momentum",
 ]
 
 DEFAULT_BEARISH_KEYWORDS = [
@@ -45,6 +46,9 @@ DEFAULT_BEARISH_KEYWORDS = [
     "oversold",
     "capitulation",
 ]
+
+
+# TODO: onchain sentiment functions — integrate when exchange data available
 
 
 def funding_rate_sentiment(funding_rates: pd.Series, threshold: float = 0.001) -> pd.Series:
@@ -87,11 +91,13 @@ def keyword_sentiment(
     pos_words = positive_keywords or DEFAULT_BULLISH_KEYWORDS
     neg_words = negative_keywords or DEFAULT_BEARISH_KEYWORDS
 
+    pos_patterns = [re.compile(rf'\b{re.escape(kw)}\b', re.IGNORECASE) for kw in pos_words]
+    neg_patterns = [re.compile(rf'\b{re.escape(kw)}\b', re.IGNORECASE) for kw in neg_words]
+
     results: list[float] = []
     for text in texts:
-        text_lower = text.lower()
-        pos_count = sum(1 for kw in pos_words if kw.lower() in text_lower)
-        neg_count = sum(1 for kw in neg_words if kw.lower() in text_lower)
+        pos_count = sum(1 for pat in pos_patterns if pat.search(text))
+        neg_count = sum(1 for pat in neg_patterns if pat.search(text))
         total = pos_count + neg_count
         if total == 0:
             results.append(0.0)

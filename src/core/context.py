@@ -10,6 +10,7 @@ _operation: ContextVar[str] = ContextVar("operation", default="")
 
 
 def generate_id(prefix: str = "", length: int = 12) -> str:
+    length = max(1, min(length, 32))
     raw = uuid.uuid4().hex[:length]
     return f"{prefix}_{raw}" if prefix else raw
 

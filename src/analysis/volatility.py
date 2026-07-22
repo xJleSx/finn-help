@@ -49,8 +49,8 @@ def parkinson_volatility(
     out = np.full_like(highs, np.nan)
     if len(highs) < period:
         return out
-    for i in range(period - 1, len(highs)):
-        out[i] = np.sqrt(np.nanmean(squared[i - period + 1 : i + 1]) / divisor)
+    rolling = pd.Series(squared).rolling(period, min_periods=period).mean().to_numpy()
+    out[period - 1:] = np.sqrt(rolling[period - 1:] / divisor)
     if annualize:
         out *= np.sqrt(TRADING_DAYS)
     return out
@@ -93,8 +93,8 @@ def garman_klass_volatility(
     out = np.full_like(closes, np.nan)
     if len(closes) < period:
         return out
-    for i in range(period - 1, len(closes)):
-        out[i] = np.sqrt(np.nanmean(term[i - period + 1 : i + 1]))
+    rolling = pd.Series(term).rolling(period, min_periods=period).mean().to_numpy()
+    out[period - 1:] = np.sqrt(np.maximum(rolling[period - 1:], 0))
     if annualize:
         out *= np.sqrt(TRADING_DAYS)
     return out
@@ -146,15 +146,12 @@ def yang_zhang_volatility(
     out = np.full_like(closes, np.nan)
     if len(closes) < period:
         return out
-    for i in range(period - 1, len(closes)):
-        slice_rs = rs[i - period + 1 : i + 1]
-        slice_oc = log_oc[i - period + 1 : i + 1]
-        slice_cc = log_cc[i - period + 1 : i + 1]
-        overnight_var = np.nanvar(slice_oc)
-        intraday_var = np.nanvar(slice_cc)
-        rs_mean = np.nanmean(slice_rs)
-        k = 0.34 / (1.34 + (period + 1) / (period - 1))
-        out[i] = np.sqrt(overnight_var + k * intraday_var + (1.0 - k) * rs_mean)
+    rs_rolling = pd.Series(rs).rolling(period, min_periods=period).mean().to_numpy()
+    oc_var = pd.Series(log_oc).rolling(period, min_periods=period).var().to_numpy()
+    cc_var = pd.Series(log_cc).rolling(period, min_periods=period).var().to_numpy()
+    k = 0.34 / (1.34 + (period + 1) / (period - 1))
+    variance = oc_var + k * cc_var + (1.0 - k) * rs_rolling
+    out[period - 1:] = np.sqrt(np.maximum(variance[period - 1:], 0))
     if annualize:
         out *= np.sqrt(TRADING_DAYS)
     return out
@@ -395,22 +392,49 @@ VOLATILITY_REGIMES: dict[str, _VolatilityThresholds] = {
 
 
 class VolatilityRegimeDetector:
+    def _dynamic_thresholds(self, atr_series: pd.Series, hv_series: pd.Series) -> tuple[float, float, float, float]:
+        if len(atr_series) > 20:
+            low_atr = float(atr_series.quantile(0.25))
+            norm_atr = float(atr_series.quantile(0.75))
+        else:
+            low_atr = VOLATILITY_REGIMES["LOW"]["threshold_atr"]
+            norm_atr = VOLATILITY_REGIMES["NORMAL"]["threshold_atr"]
+        if len(hv_series) > 20:
+            low_hv = float(hv_series.quantile(0.25))
+            norm_hv = float(hv_series.quantile(0.75))
+        else:
+            low_hv = VOLATILITY_REGIMES["LOW"]["threshold_hv"]
+            norm_hv = VOLATILITY_REGIMES["NORMAL"]["threshold_hv"]
+        return low_atr, norm_atr, low_hv, norm_hv
+
     def detect(self, df: pd.DataFrame, ind_df: pd.DataFrame) -> dict[str, Any]:
         if df.empty:
             return {"regime": "NORMAL", "atr_ratio": 0.0, "hv": 0.0, "adjustment": 1.0}
 
         close = np.asarray(df["close"], dtype=float)
-        returns = np.diff(close) / close[:-1]
-        hv = float(np.std(returns) * np.sqrt(252)) if len(returns) > 1 else 0.0
+        returns = pd.Series(np.diff(close) / close[:-1])
+        hv_series = returns.rolling(60, min_periods=10).std() * np.sqrt(252)
+        hv = float(hv_series.iloc[-1]) if not hv_series.empty and not pd.isna(hv_series.iloc[-1]) else 0.0
 
         atr_ratio = 0.0
+        atr_series = pd.Series(dtype=float)
         if not ind_df.empty and "atr" in ind_df.columns:
-            last_atr = ind_df["atr"].iloc[-1]
-            last_close = close[-1]
-            if pd.notna(last_atr) and last_close > 0:
-                atr_ratio = last_atr / last_close
+            atr_vals = ind_df["atr"].dropna()
+            if len(atr_vals) > 0:
+                last_atr = atr_vals.iloc[-1]
+                last_close = close[-1]
+                if pd.notna(last_atr) and last_close > 0:
+                    atr_ratio = last_atr / last_close
+                atr_series = atr_vals / close[-1]
 
-        regime = self._classify(atr_ratio, hv)
+        low_atr, norm_atr, low_hv, norm_hv = self._dynamic_thresholds(atr_series, hv_series.dropna())
+
+        if atr_ratio < low_atr and hv < low_hv:
+            regime = "LOW"
+        elif atr_ratio < norm_atr or hv < norm_hv:
+            regime = "NORMAL"
+        else:
+            regime = "HIGH"
 
         adjustment = self._weight_adjustment(regime)
 
@@ -420,17 +444,6 @@ class VolatilityRegimeDetector:
             "hv": round(hv, 4),
             "adjustment": adjustment,
         }
-
-    def _classify(self, atr_ratio: float, hv: float) -> str:
-        low_atr: float = VOLATILITY_REGIMES["LOW"]["threshold_atr"]
-        low_hv: float = VOLATILITY_REGIMES["LOW"]["threshold_hv"]
-        norm_atr: float = VOLATILITY_REGIMES["NORMAL"]["threshold_atr"]
-        norm_hv: float = VOLATILITY_REGIMES["NORMAL"]["threshold_hv"]
-        if atr_ratio < low_atr and hv < low_hv:
-            return "LOW"
-        if atr_ratio < norm_atr or hv < norm_hv:
-            return "NORMAL"
-        return "HIGH"
 
     def _weight_adjustment(self, regime: str) -> dict[str, float]:
         if regime == "HIGH":

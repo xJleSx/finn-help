@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 
 from src.db.models import News
+
+
+def _content_hash(article: News) -> str:
+    raw = (article.title or "") + (article.content or "")
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 class AlertDeduplicator:
@@ -11,7 +17,8 @@ class AlertDeduplicator:
         self._seen: dict[str, datetime] = {}
 
     def is_duplicate(self, article: News) -> bool:
-        key = f"{article.category}:{article.subcategory}:{article.source_name}"
+        ch = _content_hash(article)
+        key = f"{article.category}:{article.subcategory}:{article.source_name}:{ch}"
         now = datetime.now(timezone.utc)
         last = self._seen.get(key)
         if last and (now - last).total_seconds() < self._hours * 3600:
@@ -20,6 +27,7 @@ class AlertDeduplicator:
         return False
 
     def reset(self) -> None:
+        # TODO: add test coverage for reset()
         self._seen.clear()
 
 

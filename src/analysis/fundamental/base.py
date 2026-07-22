@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date, timedelta
 from typing import Any, Optional
@@ -30,6 +31,46 @@ SECTOR_BENCHMARKS: dict[str, dict[str, float]] = {
     "Прочее":           {"pe_median": 10.0, "pb_median": 1.5,  "roe_median": 12.0, "de_median": 1.5},
 }
 
+_SECTOR_MEDIAN_CACHE: dict[str, dict[str, float]] = {}
+_SECTOR_MEDIAN_CACHE_AT: float = 0.0
+_SECTOR_MEDIAN_CACHE_TTL = 86400  # 24h
+
+
+def get_sector_benchmarks() -> dict[str, dict[str, float]]:
+    import time
+    if _SECTOR_MEDIAN_CACHE and (time.time() - _SECTOR_MEDIAN_CACHE_AT) < _SECTOR_MEDIAN_CACHE_TTL:
+        return _SECTOR_MEDIAN_CACHE
+    return dict(SECTOR_BENCHMARKS)
+
+
+def refresh_sector_benchmarks(db: Any) -> dict[str, dict[str, float]]:
+    global _SECTOR_MEDIAN_CACHE, _SECTOR_MEDIAN_CACHE_AT
+    try:
+        from src.analysis.fundamental.sector_medians import SectorMedianCalculator
+
+        calc = SectorMedianCalculator(db)
+        results: dict[str, dict[str, float]] = {}
+        for metric, target_key in [("pe_ratio", "pe_median"), ("pb_ratio", "pb_median"), ("roe", "roe_median"), ("debt_equity", "de_median")]:
+            per_sector = calc.compute_all_sectors(metric)
+            for sector, data in per_sector.items():
+                median = data.get("current_median")
+                if median is not None:
+                    results.setdefault(sector, {})[target_key] = round(float(median), 1)
+
+        if results:
+            for sector in SECTOR_BENCHMARKS:
+                if sector not in results:
+                    results[sector] = dict(SECTOR_BENCHMARKS[sector])
+
+            import time
+            _SECTOR_MEDIAN_CACHE = results
+            _SECTOR_MEDIAN_CACHE_AT = time.time()
+            logger.info("Sector benchmarks refreshed from DB: %d sectors", len(results))
+        return _SECTOR_MEDIAN_CACHE or dict(SECTOR_BENCHMARKS)
+    except Exception as e:
+        logger.warning("Failed to compute sector medians from DB: %s", e)
+        return dict(SECTOR_BENCHMARKS)
+
 # Deviation multipliers: how far from sector median before flagging
 PE_HIGH_MULTIPLE = 3.0   # P/E > median * 3 -> anomaly
 ROE_LOW_MULTIPLE = 0.3   # ROE < median * 0.3 -> anomaly
@@ -58,6 +99,10 @@ INTERNATIONAL_RATING_MAP: list[tuple[float, list[str]]] = [
     (0.25, ["b+", "b"]),
     (0.30, ["ccc", "cc", "c", "d"]),
 ]
+
+
+def _periodic_compound(rate: float, periods: int = 2) -> float:
+    return (1 + rate / periods) ** periods - 1
 
 
 def _rating_risk(rating: str | None) -> float:
@@ -110,7 +155,8 @@ class FundamentalAnalyzer:
         if len(recent) < 20:
             return {"risk": 0.5, "anomalies": [], "signals": ["недостаточно данных за 3 года"]}
 
-        bench = SECTOR_BENCHMARKS.get(sector, SECTOR_BENCHMARKS["Прочее"])
+        benchmarks = get_sector_benchmarks()
+        bench = benchmarks.get(sector, benchmarks["Прочее"])
 
         # ── Price-based risks (sector-agnostic) ──
         yearly = recent.copy()
@@ -253,7 +299,9 @@ class FundamentalAnalyzer:
 
         if ytm is not None:
             if key_rate is not None and key_rate > 0:
-                spread = ytm - key_rate
+                ytm_periodic = _periodic_compound(ytm / 100, periods=2)
+                key_rate_periodic = _periodic_compound(key_rate / 100, periods=2)
+                spread = (ytm_periodic - key_rate_periodic) * 100
                 if spread > 5:
                     anomalies.append(f"Аномально высокий спред к ключевой ставке: {spread:.1f}%")
                     risk_parts.append(0.25)
@@ -305,3 +353,11 @@ class FundamentalAnalyzer:
         from src.interfaces.response_formatter import format_financial_facts
 
         return format_financial_facts(report)
+
+
+async def async_refresh_sector_benchmarks() -> dict[str, dict[str, float]]:
+    from src.db.connection import get_session
+
+    loop = asyncio.get_running_loop()
+    with get_session() as db:
+        return await loop.run_in_executor(None, lambda: refresh_sector_benchmarks(db))

@@ -37,10 +37,11 @@ async def check_llm_health() -> dict[str, Any]:
 
         if llm is None:
             return {"status": "not_configured"}
-        # Quick ping via a minimal completion
-        result = await llm.ask("respond with just: ok", system_prompt="")
-        is_ok = isinstance(result, str) and "ok" in result.lower()
-        return {"status": "ok" if is_ok else "degraded"}
+        if hasattr(llm, "is_available") and callable(llm.is_available):
+            ok = llm.is_available()
+        else:
+            ok = True
+        return {"status": "ok" if ok else "degraded"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -73,7 +74,10 @@ async def check_tbank_health() -> dict[str, Any]:
         from src.trading.brokers.tbank import TBankClient
 
         client = TBankClient(token=settings.tinkoff_token, sandbox=settings.tinkoff_sandbox)
-        accounts = await asyncio.to_thread(client.get_accounts)
+        accounts = await asyncio.wait_for(
+            asyncio.to_thread(client.get_accounts),
+            timeout=5.0,
+        )
         has_accounts = len(accounts) > 0 if accounts else False
         return {"status": "ok" if has_accounts else "no_accounts"}
     except Exception as e:

@@ -256,36 +256,29 @@ class MLCoordinator:
             ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="error").inc()
             return None
 
-    async def train_models(
+    async def _train_single(
         self,
+        inst: Instrument,
         db: AsyncSession,
-        ticker: str | None = None,
-        event_builder: EventFeatureBuilder | None = None,
-    ) -> dict[str, bool]:
-        q = select(Instrument)
-        if ticker:
-            q = q.where(Instrument.ticker == ticker.upper())
-        result = await db.execute(q)
-        instruments = result.scalars().all()
-
-        builder = event_builder or event_features
-        all_results: dict[str, bool] = {}
-        loop = asyncio.get_running_loop()
-        for inst in instruments:
+        builder: EventFeatureBuilder,
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[str, bool] | None:
+        async with semaphore:
             sym = str(inst.ticker or "")
+            loop = asyncio.get_running_loop()
 
             result = await db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
             prices = result.scalars().all()
             if len(prices) < 60:
                 logger.info("Skipping %s: only %d prices", sym, len(prices))
-                continue
+                return None
             df = self.price_df(prices)
 
             result = await db.execute(select(Indicator).where(Indicator.instrument_id == inst.id).order_by(Indicator.date))
             ind_rows = result.scalars().all()
             if len(ind_rows) < 2:
                 logger.info("Skipping %s: no indicators", sym)
-                continue
+                return None
             ind_df = self.indicator_df(ind_rows)
             ind_df = ind_df.merge(df[["date", "close"]], on="date", how="left")
 
@@ -315,7 +308,7 @@ class MLCoordinator:
 
             news_ok = await loop.run_in_executor(get_executor(), _train_news_impact_sync, sym)
 
-            all_results[sym] = all(ensemble_ok.values()) and prophet_ok
+            ok = all(ensemble_ok.values()) and prophet_ok
 
             MLflowTracker.log_model_params(
                 "ensemble",
@@ -337,6 +330,31 @@ class MLCoordinator:
                 "OK" if prophet_ok else "FAIL",
                 "OK" if news_ok else "SKIP",
             )
+            return sym, ok
+
+    async def train_models(
+        self,
+        db: AsyncSession,
+        ticker: str | None = None,
+        event_builder: EventFeatureBuilder | None = None,
+    ) -> dict[str, bool]:
+        q = select(Instrument)
+        if ticker:
+            q = q.where(Instrument.ticker == ticker.upper())
+        result = await db.execute(q)
+        instruments = result.scalars().all()
+
+        builder = event_builder or event_features
+        semaphore = asyncio.Semaphore(20)
+        tasks = [self._train_single(inst, db, builder, semaphore) for inst in instruments]
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        all_results: dict[str, bool] = {}
+        for o in outcomes:
+            if isinstance(o, BaseException):
+                logger.warning("Training task failed: %s", o)
+            elif o is not None:
+                sym, ok = o
+                all_results[sym] = ok
         return all_results
 
 

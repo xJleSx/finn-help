@@ -13,6 +13,7 @@ except ImportError:
 
 OTLP_METRICS_ENDPOINT = "http://localhost:4318/v1/metrics"
 
+_setup_done = False
 _meter = None
 _inference_counter = None
 _inference_histogram = None
@@ -24,19 +25,24 @@ _error_counter = None
 
 
 def setup_metrics(service_name: str = "finn-api", exporter_endpoint: str | None = None) -> None:
-    global _meter
+    global _meter, _setup_done
+    if _setup_done:
+        return
     if not _OTEL_AVAILABLE:
         import logging
 
         logging.getLogger(__name__).info("OpenTelemetry not installed, metrics disabled")
+        _setup_done = True
         return
     resource = Resource.create({"service.name": service_name})
-    endpoint = exporter_endpoint or OTLP_METRICS_ENDPOINT
+    from src.config import settings
+    endpoint = exporter_endpoint or settings.otlp_endpoint or "http://localhost:4317"
     reader = PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint))
     provider = MeterProvider(resource=resource, metric_readers=[reader])
     set_meter_provider(provider)
     _meter = get_meter_provider().get_meter(service_name)
     _init_instruments()
+    _setup_done = True
 
 
 def _init_instruments() -> None:

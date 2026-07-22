@@ -14,7 +14,7 @@ class SentimentDivergenceDetector:
     def detect(self, db: Optional[Session] = None, news_list: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
         if db:
             cutoff = datetime.now(timezone.utc) - timedelta(days=NEWS_SENTIMENT_DAYS)
-            recent_news = db.query(News).filter(News.created_at >= cutoff).limit(1000).all()
+            recent_news = db.query(News).filter(News.created_at >= cutoff).order_by(News.published_at.desc()).limit(1000).all()
             scores = [float(n.sentiment_score) for n in recent_news if n.sentiment_score is not None]
         elif news_list:
             scores = [n.get("sentiment_score", 0) for n in news_list if n.get("sentiment_score") is not None]

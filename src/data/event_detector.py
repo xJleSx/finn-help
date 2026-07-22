@@ -175,7 +175,7 @@ class EventDetector:
         return "neutral"
 
 
-class SentimentDivergenceDetector:
+class DataSentimentDivergenceDetector:
     """Detects divergence in sentiment around a topic/sector."""
 
     def __init__(self, divergence_threshold: float = 0.4):

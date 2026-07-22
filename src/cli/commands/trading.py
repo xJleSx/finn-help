@@ -18,11 +18,15 @@ def buy(
     quantity: float = typer.Argument(..., help="Количество"),
     price: float = typer.Argument(None, help="Цена (опционально)"),
     reason: str = typer.Option("", "--reason", "-r", help="Причина сделки"),
+    user_id: int = typer.Option(0, "--user-id", "-u", help="ID пользователя (по умолч. 0)"),
 ) -> None:
     """Купить тикер в paper-портфеле"""
+    if user_id == 0:
+        import warnings
+        warnings.warn("Using default user_id=0 — specify --user-id in production")
     from src.trading.paper import PaperTradingEngine
 
-    engine = PaperTradingEngine(user_id=0)
+    engine = PaperTradingEngine(user_id=user_id)
     result = engine.execute_order(ticker=ticker, direction="BUY", quantity=quantity, price=price, reason=reason)
     if result["status"] == "error":
         console.print(f"[red]Ошибка:[/red] {result['error']}")
@@ -39,11 +43,15 @@ def sell(
     quantity: float = typer.Argument(None, help="Количество (все, если не указано)"),
     price: float = typer.Argument(None, help="Цена (опционально)"),
     reason: str = typer.Option("", "--reason", "-r", help="Причина сделки"),
+    user_id: int = typer.Option(0, "--user-id", "-u", help="ID пользователя (по умолч. 0)"),
 ) -> None:
     """Продать тикер из paper-портфеля"""
+    if user_id == 0:
+        import warnings
+        warnings.warn("Using default user_id=0 — specify --user-id in production")
     from src.trading.paper import PaperTradingEngine
 
-    engine = PaperTradingEngine(user_id=0)
+    engine = PaperTradingEngine(user_id=user_id)
     if quantity is None:
         pos = engine.get_positions().get(ticker.upper())
         if not pos:
@@ -63,11 +71,15 @@ def sell(
 @paper_app.command()
 def history(
     limit: int = typer.Option(20, "--limit", "-l", help="Количество записей"),
+    user_id: int = typer.Option(0, "--user-id", "-u", help="ID пользователя (по умолч. 0)"),
 ) -> None:
     """Показать историю paper-сделок"""
+    if user_id == 0:
+        import warnings
+        warnings.warn("Using default user_id=0 — specify --user-id in production")
     from src.trading.paper import PaperTradingEngine
 
-    engine = PaperTradingEngine(user_id=0)
+    engine = PaperTradingEngine(user_id=user_id)
     trades = engine.get_trades(limit=limit)
     if not trades:
         console.print("[dim]Нет сделок[/dim]")

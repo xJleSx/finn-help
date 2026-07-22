@@ -36,7 +36,7 @@ class NewsSystemFactory:
                 from src.data.batch_processor import NewsBatchProcessor
                 from src.data.company_risk_aggregator import CompanyRiskAggregator
                 from src.data.dashboard_provider import DashboardDataProvider
-                from src.data.event_detector import EventDetector, SentimentDivergenceDetector
+                from src.data.event_detector import EventDetector, DataSentimentDivergenceDetector
                 from src.data.geopolitical_risk_engine import GeopoliticalRiskEngine
                 from src.data.impact_matrix import ImpactMatrix
                 from src.data.news_classifier import NewsClassifier
@@ -62,7 +62,7 @@ class NewsSystemFactory:
                 factory._components["company_aggregator"] = CompanyRiskAggregator()
                 factory._components["geo_engine"] = GeopoliticalRiskEngine()
                 factory._components["event_detector"] = EventDetector()
-                factory._components["sentiment_divergence"] = SentimentDivergenceDetector()
+                factory._components["sentiment_divergence"] = DataSentimentDivergenceDetector()
 
                 factory._components["signal_fusion"] = SignalFusionIntegration(
                     factory._components["geo_engine"],
@@ -154,7 +154,7 @@ class NewsSystemFactory:
         return self.get("event_detector")
 
     def get_sentiment_divergence(self) -> Any:
-        """Get SentimentDivergenceDetector instance."""
+        """Get DataSentimentDivergenceDetector instance."""
         return self.get("sentiment_divergence")
 
     def get_signal_fusion(self) -> Any:

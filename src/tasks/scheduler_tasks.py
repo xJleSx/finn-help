@@ -8,15 +8,7 @@ from src.tasks import app
 logger = logging.getLogger(__name__)
 
 
-def _run_async(coro: Any) -> Any:
-    import asyncio
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+from src.tasks._utils import run_async as _run_async
 
 
 @app.task(bind=True, max_retries=2, name="run_daily_update")
@@ -94,37 +86,60 @@ def run_monthly_report(self) -> dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
+def _snapshot_data() -> None:
+    from src.scheduler.reporting import take_snapshot
+    _run_async(take_snapshot("daily"))
+
+
+def _generate_and_send_report() -> None:
+    from src.scheduler.reporting import generate_daily_report
+    report = _run_async(generate_daily_report())
+    if not report or not report.report_text:
+        return
+    from src.interfaces.telegram import app as bot_app
+    if bot_app is not None:
+        from src.notifications.service import NotificationService
+        ns = NotificationService()
+        for uid, cid in ns.get_subscribers("daily"):
+            target = cid or uid
+            try:
+                _run_async(bot_app.bot.send_message(chat_id=target, text=report.report_text, parse_mode="HTML"))
+            except Exception as e:
+                logger.warning("Failed to send daily report to %d: %s", target, e)
+    else:
+        logger.info("Daily report:\n%s", report.report_text)
+
+
+def _broadcast_today_signals() -> None:
+    from src.interfaces.telegram_broadcaster import broadcast_today_signals
+    _run_async(broadcast_today_signals())
+
+
+def _broadcast_dividends() -> None:
+    from src.interfaces.telegram_broadcaster import broadcast_dividends
+    _run_async(broadcast_dividends())
+
+
+def _broadcast_enrichment_alerts() -> None:
+    from src.interfaces.telegram_broadcaster import broadcast_enrichment_alerts
+    _run_async(broadcast_enrichment_alerts())
+
+
+def _broadcast_author_posts() -> None:
+    from src.interfaces.telegram_broadcaster import broadcast_author_posts
+    _run_async(broadcast_author_posts())
+
+
 @app.task(bind=True, name="take_daily_snapshot")
 def take_daily_snapshot(self) -> dict[str, Any]:
-    from src.scheduler.reporting import generate_daily_report, take_snapshot
-
     logger.info("Taking daily snapshot via Celery task")
     try:
-        _run_async(take_snapshot("daily"))
-        report = _run_async(generate_daily_report())
-        if report and report.report_text:
-            from src.interfaces.telegram import app as bot_app
-            if bot_app is not None:
-                from src.notifications.service import NotificationService
-                ns = NotificationService()
-                for uid, cid in ns.get_subscribers("daily"):
-                    target = cid or uid
-                    try:
-                        _run_async(bot_app.bot.send_message(chat_id=target, text=report.report_text, parse_mode="HTML"))
-                    except Exception as e:
-                        logger.warning("Failed to send daily report to %d: %s", target, e)
-            else:
-                logger.info("Daily report:\n%s", report.report_text)
-        from src.interfaces.telegram_broadcaster import (
-            broadcast_author_posts,
-            broadcast_dividends,
-            broadcast_enrichment_alerts,
-            broadcast_today_signals,
-        )
-        _run_async(broadcast_today_signals())
-        _run_async(broadcast_dividends())
-        _run_async(broadcast_enrichment_alerts())
-        _run_async(broadcast_author_posts())
+        _snapshot_data()
+        _generate_and_send_report()
+        _broadcast_today_signals()
+        _broadcast_dividends()
+        _broadcast_enrichment_alerts()
+        _broadcast_author_posts()
         return {"status": "ok"}
     except Exception as e:
         logger.exception("Daily snapshot failed")
@@ -194,7 +209,7 @@ def retry_failed_receipts(self) -> dict[str, Any]:
         count = 0
         for receipt in pending:
             try:
-                if receipt.channel == "email" and receipt.title:
+                if receipt.title:
                     from src.notifications.channels import EmailPushChannel, PushMessage
                     channel = EmailPushChannel(db=db)
                     msg = PushMessage(
@@ -204,7 +219,27 @@ def retry_failed_receipts(self) -> dict[str, Any]:
                         priority=0,
                         alert_type=receipt.notification_type or "general",
                     )
-                    success = channel.send("", msg)
+                    if receipt.channel == "email":
+                        success = channel.send("", msg)
+                    elif receipt.channel == "telegram":
+                        from src.interfaces.telegram import app as bot_app
+                        success = False
+                        if bot_app is not None:
+                            try:
+                                import asyncio
+                                asyncio.run(bot_app.bot.send_message(
+                                    chat_id=receipt.user_id,
+                                    text=receipt.message or "",
+                                ))
+                                success = True
+                            except Exception:
+                                success = False
+                    elif receipt.channel == "web":
+                        from src.notifications.channels import WebPushChannel
+                        web = WebPushChannel()
+                        success = web.send(receipt.user_id, msg)
+                    else:
+                        success = False
                     if success:
                         mgr.mark_sent(receipt.id)
                     else:

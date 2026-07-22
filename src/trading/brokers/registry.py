@@ -4,6 +4,8 @@ import logging
 from typing import Optional
 
 from src.config import settings
+from src.core.credential_store import get_broker_token
+from src.db.connection import session_scope
 from src.trading.brokers.base import BaseBrokerClient
 
 logger = logging.getLogger(__name__)
@@ -48,11 +50,18 @@ def get_default_broker() -> str:
     return _default_broker
 
 
-def _get_broker_token(name: str) -> str:
+def _get_broker_token(name: str, user_id: int = 0) -> str:
+    try:
+        with session_scope() as db:
+            token = get_broker_token(user_id, name, db)
+            if token:
+                return token
+    except Exception as e:
+        logger.debug("DB broker token lookup failed, falling back to env: %s", e)
     attr = _BROKER_TOKEN_ATTRS.get(name.lower())
     if attr and hasattr(settings, attr):
         return str(getattr(settings, attr) or "")
-    return settings.tinkoff_token
+    return ""
 
 
 def _get_broker_sandbox(name: str) -> bool:

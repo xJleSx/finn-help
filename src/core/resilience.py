@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import threading
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
@@ -109,18 +110,16 @@ class CircuitBreaker:
                     raise CircuitBreakerOpenError(f"Circuit breaker '{self.config.name}' is HALF_OPEN, max probe calls reached")
                 self._half_open_calls += 1
 
-        try:
-            result = await fn(*args, **kwargs)
-        except Exception as e:
-            async with self._lock:
+            try:
+                result = await fn(*args, **kwargs)
+            except Exception as e:
                 self._failure_count += 1
                 self._consecutive_successes = 0
                 self._last_failure_time = time.monotonic()
                 if self._state is CircuitState.HALF_OPEN or self._failure_count >= self.config.failure_threshold:
                     self._transition(CircuitState.OPEN)
-            raise e
+                raise e
 
-        async with self._lock:
             if self._state is CircuitState.HALF_OPEN:
                 self._consecutive_successes += 1
                 if self._consecutive_successes >= self.config.success_threshold:
@@ -129,7 +128,7 @@ class CircuitBreaker:
                     self._consecutive_successes = 0
                     self._transition(CircuitState.CLOSED)
 
-        return result
+            return result
 
     async def reset(self) -> None:
         async with self._lock:
@@ -159,12 +158,14 @@ class CircuitBreakerOpenError(Exception):
 
 
 _circuit_breakers: dict[str, CircuitBreaker] = {}
-_circuit_breakers_lock = asyncio.Lock()
+_circuit_breakers_lock = threading.Lock()
 
 
 def get_circuit_breaker(name: str = "default") -> CircuitBreaker:
     if name not in _circuit_breakers:
-        _circuit_breakers[name] = CircuitBreaker(CircuitBreakerConfig(name=name))
+        with _circuit_breakers_lock:
+            if name not in _circuit_breakers:
+                _circuit_breakers[name] = CircuitBreaker(CircuitBreakerConfig(name=name))
     return _circuit_breakers[name]
 
 
@@ -242,7 +243,9 @@ class AsyncRateLimiter:
                     self._tokens -= 1.0
                     return
                 wait_time = (1.0 - self._tokens) / self.config.max_rate
-            await asyncio.sleep(max(wait_time, 0.001))
+            event = asyncio.Event()
+            asyncio.get_running_loop().call_later(max(wait_time, 0.001), event.set)
+            await event.wait()
 
     async def __aenter__(self) -> Self:
         await self.acquire()
@@ -263,12 +266,14 @@ class AsyncRateLimiter:
 
 
 _rate_limiters: dict[str, AsyncRateLimiter] = {}
-_rate_limiters_lock = asyncio.Lock()
+_rate_limiters_lock = threading.Lock()
 
 
 def get_rate_limiter(name: str = "default", config: RateLimiterConfig | None = None) -> AsyncRateLimiter:
     if name not in _rate_limiters:
-        _rate_limiters[name] = AsyncRateLimiter(config)
+        with _rate_limiters_lock:
+            if name not in _rate_limiters:
+                _rate_limiters[name] = AsyncRateLimiter(config)
     return _rate_limiters[name]
 
 

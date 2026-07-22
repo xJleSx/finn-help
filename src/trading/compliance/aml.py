@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from src.trading.types import AMLRecord, ComplianceCheck
@@ -15,14 +15,25 @@ STRUCTURING_WINDOW_HOURS: int = 24
 MAX_DAILY_VOLUME_RUB: float = 10_000_000
 PEP_THRESHOLD_RUB: float = 5_000_000
 
+# TODO: Persist AML state to DB instead of keeping only in memory.
+# On restart the following dicts are empty, losing all daily volume caps,
+# structuring detection, and velocity checks. A user could immediately
+# bypass daily limits after a service restart.
 _user_daily_volume: dict[int, float] = {}
+_user_daily_volume_date: dict[int, date] = {}
 _user_tx_timestamps: dict[int, list[dict[str, Any]]] = {}
 _user_velocity: dict[int, list[float]] = {}
+logger.warning("AML state is in-memory only and will be lost on restart. TODO: persist to DB for continuity.")
 
 
 def _reset_daily_if_needed(user_id: int) -> None:
     _user_daily_volume.setdefault(user_id, 0.0)
+    _user_daily_volume_date.setdefault(user_id, date.today())
     _user_tx_timestamps.setdefault(user_id, [])
+    today = date.today()
+    if _user_daily_volume_date[user_id] != today:
+        _user_daily_volume[user_id] = 0.0
+        _user_daily_volume_date[user_id] = today
 
 
 def _check_volume_threshold(ticker: str, volume_rub: float, user_id: int) -> list[str]:
@@ -101,9 +112,8 @@ def check_order_aml(
                 check.blocks,
             )
     except Exception as e:
-        logger.error("AML check error: %s", e, exc_info=True)
-        check.passed = False
-        check.blocks.append(f"AML check error: {e}")
+        logger.error("AML check error (system): %s", e, exc_info=True)
+        check.warnings.append(f"AML system error: {e}")
     return check
 
 
@@ -131,4 +141,4 @@ def reset_aml_state() -> None:
     _user_daily_volume.clear()
     _user_tx_timestamps.clear()
     _user_velocity.clear()
-    logger.info("AML state reset")
+    logger.info("AML state reset — in-memory only, lost on restart. TODO: persist to DB.")

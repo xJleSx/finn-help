@@ -1,4 +1,5 @@
 import secrets
+from typing import Optional
 
 import typer
 
@@ -51,7 +52,7 @@ def check_env() -> None:
     issues: list[str] = []
     ok_count = 0
 
-    env_path = Path(".env")
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
     if not env_path.exists():
         issues.append(".env file not found")
     else:
@@ -85,3 +86,95 @@ def check_env() -> None:
         console.print("[bold green]No security issues found![/bold green]")
 
     console.print(f"\n[dim]Checks passed: {ok_count}/{ok_count + len(issues)}[/dim]")
+
+
+@security_app.command(name="credential-set")
+def credential_set(
+    broker: str = typer.Argument(..., help="Broker name (tbank, bcs, finam, alor, openapi)"),
+    token: str = typer.Argument(..., help="API token to encrypt and store"),
+    user_id: int = typer.Option(0, "--user", "-u", help="User ID"),
+) -> None:
+    """Encrypt and store a broker API token in the database."""
+    from src.core.credential_store import set_broker_token
+    from src.db.connection import get_session
+
+    db = get_session()
+    try:
+        set_broker_token(user_id, broker, token, db)
+        console.print(f"[green]Token for [bold]{broker}[/bold] stored encrypted (user={user_id})[/green]")
+    except Exception as e:
+        console.print(f"[red]Failed to store credential: {e}[/red]")
+        raise typer.Exit(1)
+    finally:
+        db.close()
+
+
+@security_app.command(name="credential-delete")
+def credential_delete(
+    broker: str = typer.Argument(..., help="Broker name"),
+    user_id: int = typer.Option(0, "--user", "-u", help="User ID"),
+) -> None:
+    """Delete a stored broker credential from the database."""
+    from src.core.credential_store import delete_broker_token
+    from src.db.connection import get_session
+
+    db = get_session()
+    try:
+        if delete_broker_token(user_id, broker, db):
+            console.print(f"[green]Credential for [bold]{broker}[/bold] deleted[/green]")
+        else:
+            console.print(f"[yellow]No credential found for {broker} (user={user_id})[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+    finally:
+        db.close()
+
+
+@security_app.command(name="credential-list")
+def credential_list(
+    user_id: int = typer.Option(0, "--user", "-u", help="User ID"),
+) -> None:
+    """List stored broker credentials (tokens not shown)."""
+    from src.core.credential_store import list_broker_tokens
+    from src.db.connection import get_session
+
+    db = get_session()
+    try:
+        creds = list_broker_tokens(user_id, db)
+        if not creds:
+            console.print("[yellow]No broker credentials stored[/yellow]")
+        else:
+            console.print(f"[bold]Broker credentials (user={user_id}):[/bold]")
+            for c in creds:
+                status = "[green]active[/green]" if c["is_active"] else "[dim]inactive[/dim]"
+                console.print(f"  {c['broker_name']:10s} {status}  [dim]({c['updated_at'] or 'never'})[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+    finally:
+        db.close()
+
+
+@security_app.command(name="credential-test")
+def credential_test(
+    broker: str = typer.Argument(..., help="Broker name"),
+    user_id: int = typer.Option(0, "--user", "-u", help="User ID"),
+) -> None:
+    """Test that a stored credential decrypts and resolves correctly."""
+    from src.core.credential_store import get_broker_token
+    from src.db.connection import get_session
+
+    db = get_session()
+    try:
+        token = get_broker_token(user_id, broker, db)
+        if token:
+            masked = token[:6] + "…" + token[-4:] if len(token) > 12 else "…"
+            console.print(f"[green]Token for [bold]{broker}[/bold] resolves: {masked}[/green]")
+        else:
+            console.print(f"[red]No token resolves for [bold]{broker}[/bold] (user={user_id})[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+    finally:
+        db.close()

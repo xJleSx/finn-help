@@ -902,3 +902,13 @@ async def collect_social_posts(db: AsyncSession) -> int:
     except Exception as e:
         logger.error("Social post collection failed: %s", e)
         return 0
+
+
+async def async_compute_indicators(instrument_ids: set[int] | None = None) -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, compute_indicators, get_session(), instrument_ids)
+
+
+async def async_collect_company_profiles() -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, collect_company_profiles, get_session())

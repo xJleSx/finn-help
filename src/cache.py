@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
 from typing import Any, Callable
@@ -21,9 +23,10 @@ _lock = threading.Lock()
 
 def _get_pool() -> ConnectionPool | None:
     global _pool
-    if _pool is None:
+    if _pool is None or _pool is False:
         with _lock:
-            if _pool is None:
+            if _pool is None or _pool is False:
+                _pool = None
                 try:
                     url = settings.redis_url or "redis://localhost:6379/0"
                     password = settings.redis_password or None
@@ -57,7 +60,7 @@ def get_redis() -> Any:
 
 def make_key(prefix: str, *args: Any, **kwargs: Any) -> str:
     raw = f"{prefix}:{json.dumps(args, sort_keys=True, default=str)}:{json.dumps(kwargs, sort_keys=True, default=str)}"
-    return f"finn:{hashlib.md5(raw.encode()).hexdigest()}"
+    return f"finn:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
 def cached(
@@ -65,42 +68,79 @@ def cached(
     prefix: str | None = None,
 ) -> Callable[..., Any]:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            key = make_key(prefix or func.__name__, *args, **kwargs)
-            r = get_redis()
-            if r:
-                try:
-                    data = r.get(key)
-                    if data is not None:
-                        return json.loads(data)
-                except Exception as exc:
-                    logger.debug("Redis get failed: %s", exc)
-            else:
-                with _lock:
-                    entry = _memory_cache.get(key)
-                    if entry and time.time() - entry[0] < ttl:
-                        return entry[1]
+        is_async = asyncio.iscoroutinefunction(func)
 
-            result = func(*args, **kwargs)
+        if is_async:
+            async def wrapper(*args: Any, **kwargs: Any) -> Any:
+                key = make_key(prefix or func.__name__, *args, **kwargs)
+                r = get_redis()
+                if r:
+                    try:
+                        data = r.get(key)
+                        if data is not None:
+                            return json.loads(data)
+                    except Exception as exc:
+                        logger.debug("Redis get failed: %s", exc)
+                else:
+                    with _lock:
+                        entry = _memory_cache.get(key)
+                        if entry and time.time() - entry[0] < ttl:
+                            return entry[1]
 
-            if r:
-                try:
-                    r.setex(key, ttl, json.dumps(result, default=str))
-                except Exception as exc:
-                    logger.debug("Redis set failed: %s", exc)
-            else:
-                with _lock:
-                    _memory_cache[key] = (time.time(), result)
+                result = await func(*args, **kwargs)
 
-            return result
+                if r:
+                    try:
+                        r.setex(key, ttl, json.dumps(result, default=str))
+                    except Exception as exc:
+                        logger.debug("Redis set failed: %s", exc)
+                else:
+                    with _lock:
+                        _memory_cache[key] = (time.time(), result)
+
+                return result
+        else:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                key = make_key(prefix or func.__name__, *args, **kwargs)
+                r = get_redis()
+                if r:
+                    try:
+                        data = r.get(key)
+                        if data is not None:
+                            return json.loads(data)
+                    except Exception as exc:
+                        logger.debug("Redis get failed: %s", exc)
+                else:
+                    with _lock:
+                        entry = _memory_cache.get(key)
+                        if entry and time.time() - entry[0] < ttl:
+                            return entry[1]
+
+                result = func(*args, **kwargs)
+
+                if r:
+                    try:
+                        r.setex(key, ttl, json.dumps(result, default=str))
+                    except Exception as exc:
+                        logger.debug("Redis set failed: %s", exc)
+                else:
+                    with _lock:
+                        _memory_cache[key] = (time.time(), result)
+
+                return result
 
         return wrapper
 
     return decorator
 
 
+def _sanitize_glob(pattern: str) -> str:
+    return re.sub(r"([?\[\]{}\\])", r"[\1]", pattern)
+
+
 def invalidate(pattern: str) -> None:
-    key = f"finn:{pattern}"
+    safe = _sanitize_glob(pattern)
+    key = f"finn:{safe}"
     r = get_redis()
     if r:
         try:
@@ -114,7 +154,10 @@ def invalidate(pattern: str) -> None:
         except Exception as exc:
             logger.debug("Redis invalidate failed: %s", exc)
     with _lock:
-        keys_to_delete = [k for k in _memory_cache if k.startswith(key.replace("*", ""))]
+        import fnmatch
+        escaped = fnmatch.translate(f"finn:{pattern}")
+        prefix_re = re.compile(escaped.replace(".*", "").rstrip("\\Z"))
+        keys_to_delete = [k for k in _memory_cache if prefix_re.match(k)]
         for k in keys_to_delete:
             _memory_cache.pop(k, None)
 
@@ -122,6 +165,7 @@ def invalidate(pattern: str) -> None:
 def close_redis() -> None:
     global _pool
     with _lock:
+        _memory_cache.clear()
         if _pool and _pool is not False:
             try:
                 _pool.disconnect()
@@ -129,4 +173,3 @@ def close_redis() -> None:
             except Exception as exc:
                 logger.warning("Failed to close Redis pool: %s", exc)
         _pool = None
-        _memory_cache.clear()

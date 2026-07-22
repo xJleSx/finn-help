@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -7,6 +9,11 @@ from sqlalchemy import select
 
 from src.db.connection import get_session
 from src.db.models.audit import AuditLog
+
+
+def _hash_audit_row(prev_hash: str, user_id: str, action: str, resource: str, details: str | None) -> str:
+    raw = json.dumps({"prev_hash": prev_hash, "user_id": user_id, "action": action, "resource": resource, "details": details}, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 class AuditTrail:
@@ -21,6 +28,11 @@ class AuditTrail:
     ) -> None:
         db = get_session()
         try:
+            last_row = db.execute(
+                select(AuditLog.hash).where(AuditLog.hash.isnot(None)).order_by(AuditLog.id.desc()).limit(1)
+            ).scalar_one_or_none()
+            prev_hash = last_row or ""
+            cur_hash = _hash_audit_row(prev_hash, str(user_id), action, resource, details)
             entry = AuditLog(
                 user_id=str(user_id),
                 action=action,
@@ -28,6 +40,8 @@ class AuditTrail:
                 details=details,
                 ip_address=ip_address,
                 success=success,
+                prev_hash=prev_hash or None,
+                hash=cur_hash,
             )
             db.add(entry)
             db.commit()

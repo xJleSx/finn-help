@@ -80,33 +80,70 @@ async def take_snapshot(period: str) -> None:
                     geo_score = round(float(geo_row.score), 2)
 
             indicator_map: dict[int, Any] = {}
-            ind_result = await db.execute(
-                select(Indicator)
-                .distinct(Indicator.instrument_id)
+            # Use subquery pattern for DISTINCT + ORDER BY compatibility
+            indicator_subq = (
+                select(
+                    Indicator.instrument_id,
+                    Indicator.date,
+                    Indicator.rsi,
+                    Indicator.macd_line,
+                    Indicator.macd_signal,
+                    Indicator.macd_hist,
+                    Indicator.sma_20,
+                    Indicator.sma_50,
+                    Indicator.sma_200,
+                    func.row_number().over(
+                        partition_by=Indicator.instrument_id,
+                        order_by=Indicator.date.desc(),
+                    ).label("rn"),
+                )
                 .filter(Indicator.instrument_id.in_(inst_ids))
-                .order_by(Indicator.instrument_id, Indicator.date.desc())
+                .subquery()
             )
-            for row in ind_result.scalars().all():
+            ind_result = await db.execute(
+                select(indicator_subq).where(indicator_subq.c.rn == 1)
+            )
+            for row in ind_result:
                 indicator_map[row.instrument_id] = row
 
             price_map: dict[int, Any] = {}
-            price_result = await db.execute(
-                select(Price)
-                .distinct(Price.instrument_id)
+            price_subq = (
+                select(
+                    Price.instrument_id,
+                    Price.date,
+                    Price.close,
+                    func.row_number().over(
+                        partition_by=Price.instrument_id,
+                        order_by=Price.date.desc(),
+                    ).label("rn"),
+                )
                 .filter(Price.instrument_id.in_(inst_ids))
-                .order_by(Price.instrument_id, Price.date.desc())
+                .subquery()
             )
-            for row in price_result.scalars().all():
+            price_result = await db.execute(
+                select(price_subq).where(price_subq.c.rn == 1)
+            )
+            for row in price_result:
                 price_map[row.instrument_id] = row
 
             signal_map: dict[int, Any] = {}
-            sig_result = await db.execute(
-                select(SignalModel)
-                .distinct(SignalModel.instrument_id)
+            sig_subq = (
+                select(
+                    SignalModel.instrument_id,
+                    SignalModel.date,
+                    SignalModel.fused_json,
+                    func.row_number().over(
+                        partition_by=SignalModel.instrument_id,
+                        order_by=SignalModel.date.desc(),
+                    ).label("rn"),
+                )
                 .filter(SignalModel.instrument_id.in_(inst_ids))
-                .order_by(SignalModel.instrument_id, SignalModel.date.desc())
+                .subquery()
             )
-            for row in sig_result.scalars().all():
+            sig_result = await db.execute(
+                select(sig_subq).where(sig_subq.c.rn == 1)
+            )
+            for row in sig_result:
                 signal_map[row.instrument_id] = row
 
             for inst in instruments:
@@ -265,7 +302,7 @@ async def generate_daily_report() -> DailyReport | None:
                         }
                     )
 
-            market_avg = round(sum(scores) / len(scores), 4) if scores else None
+            market_avg = round(sum(scores) / len(scores), 4) if scores else 0.0
             trend = ("up" if market_avg > 0.02 else "down" if market_avg < -0.02 else "flat") if market_avg is not None else "flat"
 
             text_lines = [f"📅 *Отчёт за {today.isoformat()}*"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
+# V2-style Pydantic (already uses V2-compatible BaseModel from pydantic>=2)
 from pydantic import BaseModel, Field
 
 

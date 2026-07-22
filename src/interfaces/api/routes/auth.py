@@ -12,7 +12,6 @@ from src.interfaces.api.auth import (
     create_oauth_token,
     decode_refresh_token,
     is_refresh_token_blacklisted,
-    oauth_login,
     require_user,
 )
 from src.interfaces.api.dependencies import get_auth_service
@@ -59,6 +58,7 @@ class TotpCodeBody(BaseModel):
 
 class OAuthBody(BaseModel):
     code: str
+    state: str = ""
 
 
 @router.post("/refresh")
@@ -169,4 +169,11 @@ async def oauth(
     provider: str,
     body: OAuthBody,
 ) -> dict[str, Any]:
+    if not body.code or not body.code.strip():
+        raise HTTPException(status_code=400, detail="Authorization code is required")
+    if not body.state:
+        raise HTTPException(status_code=400, detail="OAuth state parameter is required")
+
+    from src.interfaces.api.auth import oauth_login
+
     return oauth_login(provider, body.code)

@@ -19,7 +19,7 @@ Components:
 from src.data.batch_processor import NewsBatchProcessor
 from src.data.company_risk_aggregator import CompanyRiskAggregator
 from src.data.dashboard_provider import DashboardDataProvider
-from src.data.event_detector import EventDetector, SentimentDivergenceDetector
+from src.data.event_detector import EventDetector, SentimentDivergenceDetector as DataSentimentDivergenceDetector
 from src.data.geopolitical_risk_engine import GeopoliticalRiskEngine
 from src.data.impact_matrix import ImpactMatrix
 from src.data.news_classifier import NewsClassifier
@@ -40,7 +40,7 @@ __all__ = [
     "CompanyRiskAggregator",
     "GeopoliticalRiskEngine",
     "EventDetector",
-    "SentimentDivergenceDetector",
+    "DataSentimentDivergenceDetector",
     "SignalFusionIntegration",
     "DashboardDataProvider",
     "NewsBatchProcessor",

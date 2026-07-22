@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
 import structlog
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from prometheus_client import Counter, Histogram, generate_latest
@@ -114,15 +114,8 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
-origins = [o.strip() for o in settings.cors_origins.split(",")]
-allow_creds = False
-if "*" in origins:
-    if len(origins) > 1:
-        origins = [o for o in origins if o != "*"]
-    else:
-        allow_creds = False
-else:
-    allow_creds = settings.cors_credentials
+origins = [o.strip() for o in (settings.cors_origins or "").split(",") if o.strip()]
+allow_creds = settings.cors_credentials and "*" not in origins
 if allow_creds and "*" in origins:
     logger.warning("CORS: cannot use credentials with wildcard origins, disabling credentials")
     allow_creds = False
@@ -152,7 +145,8 @@ async def security_headers_middleware(request: Request, call_next: Any) -> Respo
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if not PRODUCTION:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Content-Security-Policy"] = (
         f"default-src 'self'; "
         f"script-src {script_src}; "
@@ -173,32 +167,6 @@ async def prometheus_middleware(request: Request, call_next: Any) -> Response:
         response = await call_next(request)
     HTTP_REQUESTS.labels(method=request.method, endpoint=request.url.path, status=response.status_code).inc()
     return response
-
-
-RBAC_PROTECTED_PATHS: dict[str, Permission] = {
-    "/api/trading": Permission.TRADE_EXECUTE,
-    "/api/portfolio": Permission.VIEW_PORTFOLIO,
-    "/api/instruments": Permission.VIEW_INSTRUMENTS,
-    "/api/analysis": Permission.VIEW_ANALYSIS,
-    "/api/alerts": Permission.MANAGE_ALERTS,
-}
-
-
-@app.middleware("http")
-async def rbac_middleware(request: Request, call_next):
-    path = request.url.path
-    if request.method == "OPTIONS":
-        return await call_next(request)
-    for prefix, perm in RBAC_PROTECTED_PATHS.items():
-        if path.startswith(prefix):
-            try:
-                role = get_current_user_role(request)
-                require_permission(perm)
-            except HTTPException as exc:
-                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-            break
-    return await call_next(request)
-
 
 RBAC_PROTECTED_PATHS: dict[str, Permission] = {
     "/api/trading": Permission.TRADE_EXECUTE,
@@ -241,6 +209,8 @@ app.include_router(trading_v2_router)
 app.include_router(instruments_router)
 app.include_router(portfolio_router)
 app.include_router(market_router)
+from src.interfaces.api.sse import sse_router
+app.include_router(sse_router)
 
 
 @app.get("/metrics")
@@ -248,7 +218,7 @@ async def metrics(request: Request) -> Response:
     token = settings.metrics_token
     if not token:
         logger.warning("METRICS_TOKEN not set — /metrics only accessible from localhost")
-        host = request.client.host if request.client else ""
+        host = getattr(request.client, "host", "unknown")
         if host not in ("127.0.0.1", "::1", "localhost"):
             raise HTTPException(status_code=403, detail="Forbidden")
         return PlainTextResponse(generate_latest().decode("utf-8"), media_type="text/plain")

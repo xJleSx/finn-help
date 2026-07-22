@@ -126,7 +126,7 @@ class SocialSentimentAnalyzer:
             confidence = abs(score)
             if confidence < 0.1:
                 continue
-            signals_created += self._add_signal(post, score, confidence, f"ruBERT: score={score:.3f}")
+            signals_created += self._add_signal(db, post, score, confidence, f"ruBERT: score={score:.3f}")
 
         return signals_created
 
@@ -166,11 +166,11 @@ class SocialSentimentAnalyzer:
             else:
                 reasoning = f"LLM({entry.get('reason','')}): bullish={bullish:.2f} bearish={bearish:.2f}"
             if llm_conf >= 0.1:
-                signals += self._add_signal(post, score, llm_conf, reasoning)
+                signals += self._add_signal(db, post, score, llm_conf, reasoning)
 
         return signals
 
-    def _add_signal(self, post: SocialPost, score: float, confidence: float, reasoning: str) -> int:
+    def _add_signal(self, db: Any, post: SocialPost, score: float, confidence: float, reasoning: str) -> int:
         tickers = _post_tickers(post)
         source_weight = _get_source_weight(post.source or "")
         topic = classify_topic(_post_text(post))
@@ -187,16 +187,11 @@ class SocialSentimentAnalyzer:
                 source_weight=source_weight,
             )
             sig.composite_score = round((sig.bullish_score - sig.bearish_score) * sig.confidence, 4)
-            db = get_session()
             try:
                 db.add(sig)
-                db.commit()
                 signals_created += 1
             except Exception as e:
                 logger.warning("Failed to save signal for post %d: %s", post.id, e)
-                db.rollback()
-            finally:
-                db.close()
         return signals_created
 
 

@@ -82,7 +82,7 @@ class FinancialReportCollector(BaseCollector):
         """
         url = SMARTLAB_URL.format(ticker=ticker.upper())
         try:
-            html = await self._fetch_text(url, headers={"User-Agent": "Mozilla/5.0"})
+            html = await self._fetch_text(url, headers={"User-Agent": "FinnHelp/1.0 (+https://finn-help.ai)"})
         except Exception as e:
             logger.warning("SmartLab fetch failed for %s: %s", ticker, e)
             return {}

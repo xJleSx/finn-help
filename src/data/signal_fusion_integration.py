@@ -247,9 +247,9 @@ class SignalFusionIntegration:
             )
 
         # Sentiment divergence alerts (uncertainty signals)
-        from src.data.event_detector import SentimentDivergenceDetector
+        from src.data.event_detector import DataSentimentDivergenceDetector
 
-        detector = SentimentDivergenceDetector()
+        detector = DataSentimentDivergenceDetector()
         divergences = detector.find_all_divergences(db_session, min_articles=3)
 
         for div in divergences[:3]:  # Top 3 divergences

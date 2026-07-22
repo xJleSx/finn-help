@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -15,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 def _is_postgres(url: str) -> bool:
-    return "postgresql" in url
+    return url.startswith("postgresql")
+
 
 
 def _is_sqlite(url: str) -> bool:
@@ -127,36 +129,47 @@ async def get_read_replica_session() -> AsyncIterator[AsyncSession]:
 DB_DIR = Path("data")
 DB_DIR.mkdir(parents=True, exist_ok=True)
 
-sync_engine = create_engine(
-    settings.database_url,
-    echo=False,
-    pool_size=settings.db_pool_size if _is_postgres(settings.database_url) else 1,
-    max_overflow=settings.db_max_overflow if _is_postgres(settings.database_url) else 0,
-    pool_pre_ping=settings.db_pool_pre_ping,
-    pool_recycle=settings.db_pool_recycle if _is_postgres(settings.database_url) else -1,
-    pool_timeout=settings.db_pool_timeout if _is_postgres(settings.database_url) else 30,
-    connect_args={"check_same_thread": False} if _is_sqlite(settings.database_url) else {},
-)
+_engine: Any = None
+_engine_lock = threading.Lock()
+_SyncSessionLocal: scoped_session | None = None
 
 
-@event.listens_for(sync_engine, "connect")
-def _set_sqlite_pragma(dbapi_connection: Any, connection_record: Any) -> None:
-    if _is_sqlite(settings.database_url):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+def _ensure_sync() -> None:
+    global _engine, _SyncSessionLocal
+    if _engine is None:
+        with _engine_lock:
+            if _engine is None:
+                engine = create_engine(
+                    settings.database_url,
+                    echo=False,
+                    pool_size=settings.db_pool_size if _is_postgres(settings.database_url) else 1,
+                    max_overflow=settings.db_max_overflow if _is_postgres(settings.database_url) else 0,
+                    pool_pre_ping=settings.db_pool_pre_ping,
+                    pool_recycle=settings.db_pool_recycle if _is_postgres(settings.database_url) else -1,
+                    pool_timeout=settings.db_pool_timeout if _is_postgres(settings.database_url) else 30,
+                    connect_args={"check_same_thread": False} if _is_sqlite(settings.database_url) else {},
+                )
 
+                @event.listens_for(engine, "connect")
+                def _set_sqlite_pragma(dbapi_connection: Any, connection_record: Any) -> None:
+                    if _is_sqlite(settings.database_url):
+                        cursor = dbapi_connection.cursor()
+                        cursor.execute("PRAGMA journal_mode=WAL")
+                        cursor.execute("PRAGMA foreign_keys=ON")
+                        cursor.close()
 
-SyncSessionLocal = scoped_session(sessionmaker(bind=sync_engine, expire_on_commit=False))
+                _engine = engine
+                _SyncSessionLocal = scoped_session(sessionmaker(bind=engine, expire_on_commit=False))
 
 
 def get_session() -> Session:
-    return SyncSessionLocal()
+    _ensure_sync()
+    return _SyncSessionLocal()
 
 
 def close_session() -> None:
-    SyncSessionLocal.remove()
+    _ensure_sync()
+    _SyncSessionLocal.remove()
 
 
 @contextmanager
@@ -165,9 +178,12 @@ def session_scope() -> Any:
     session = get_session()
     try:
         yield session
-    except Exception:
+    except Exception as e:
         logger.exception("Unhandled exception")
-        session.rollback()
+        try:
+            session.rollback()
+        except Exception:
+            pass
         raise
     finally:
         session.close()
@@ -192,3 +208,11 @@ def close_db() -> None:
         logger.info("All database sessions closed")
     except Exception as e:
         logger.warning("Failed to close database sessions: %s", e)
+    global _engine
+    if _engine is not None:
+        try:
+            _engine.dispose()
+            _engine = None
+            logger.info("Sync engine disposed")
+        except Exception as e:
+            logger.warning("Failed to dispose sync engine: %s", e)

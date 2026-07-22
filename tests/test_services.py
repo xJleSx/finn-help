@@ -46,11 +46,21 @@ class TestPortfolioService:
         positions = await svc.get_positions(user_id=1)
         assert positions == []
 
+    async def test_populated_portfolio(self, populated_db_session: AsyncSession) -> None:
+        svc = PortfolioService(populated_db_session)
+        positions = await svc.get_positions(user_id=1)
+        assert len(positions) > 0
+
     async def test_add_position_instrument_not_found(self, async_db_session: AsyncSession) -> None:
         svc = PortfolioService(async_db_session)
         with pytest.raises(HTTPException) as exc:
             await svc.add_position(user_id=1, ticker="NONEXIST", quantity=10)
         assert exc.value.status_code == 404
+
+    async def test_add_position_with_populated_data(self, populated_db_session: AsyncSession) -> None:
+        svc = PortfolioService(populated_db_session)
+        result = await svc.add_position(user_id=1, ticker="AAPL", quantity=5)
+        assert result is not None
 
     async def test_get_signals_csv_empty(self, async_db_session: AsyncSession) -> None:
         svc = PortfolioService(async_db_session)
@@ -62,6 +72,11 @@ class TestPortfolioService:
         positions = await svc.get_positions_for_csv(user_id=None)
         assert positions == []
 
+    async def test_get_positions_for_csv_with_user(self, populated_db_session: AsyncSession) -> None:
+        svc = PortfolioService(populated_db_session)
+        positions = await svc.get_positions_for_csv(user_id=1)
+        assert len(positions) > 0
+
 
 class TestMarketService:
     async def test_list_instruments_empty(self, async_db_session: AsyncSession) -> None:
@@ -69,10 +84,25 @@ class TestMarketService:
         result = await svc.list_instruments()
         assert result == []
 
+    async def test_list_instruments_populated(self, populated_db_session: AsyncSession) -> None:
+        svc = MarketService(populated_db_session)
+        result = await svc.list_instruments()
+        assert len(result) > 0
+
     async def test_list_instruments_with_filter(self, async_db_session: AsyncSession) -> None:
         svc = MarketService(async_db_session)
         result = await svc.list_instruments(type_filter="stock")
         assert result == []
+
+    async def test_list_instruments_with_filter_populated(self, populated_db_session: AsyncSession) -> None:
+        svc = MarketService(populated_db_session)
+        result = await svc.list_instruments(type_filter="stock")
+        assert len(result) > 0
+
+    async def test_get_instrument_found(self, populated_db_session: AsyncSession) -> None:
+        svc = MarketService(populated_db_session)
+        inst = await svc.get_instrument("AAPL")
+        assert inst.ticker == "AAPL"
 
     async def test_get_instrument_not_found(self, async_db_session: AsyncSession) -> None:
         svc = MarketService(async_db_session)

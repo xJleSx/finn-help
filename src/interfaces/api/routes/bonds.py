@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import structlog
@@ -358,7 +358,7 @@ async def get_bond_analysis(ticker: str, db: AsyncSession = Depends(get_db)) -> 
         "cons": cons,
         "risks": risks,
         "allocation": allocation,
-        "updatedAt": datetime.utcnow().isoformat() + "Z",
+        "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
 

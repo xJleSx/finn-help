@@ -134,14 +134,17 @@ def run_walk_forward(
         if len(train_prices) < config.min_train_size or len(test_prices) < config.test_size:
             continue
 
+        train_equity = [p / train_prices[0] for p in train_prices]
+        test_equity = [p / test_prices[0] for p in test_prices]
+
         fold = WalkForwardFold(
             fold=i + 1,
             train_start=0,
             train_end=train_end,
             test_start=test_start,
             test_end=test_end,
-            train_metrics=compute_metrics(train_prices, annual_factor=config.annual_factor),
-            test_metrics=compute_metrics(test_prices, annual_factor=config.annual_factor),
+            train_metrics=compute_metrics(train_equity, annual_factor=config.annual_factor),
+            test_metrics=compute_metrics(test_equity, annual_factor=config.annual_factor),
         )
         result.folds.append(fold)
 
@@ -195,6 +198,9 @@ def run_combinatorial_purged_cv(
         if len(train_prices) < min_train_size or len(test_prices) < 5:
             continue
 
+        train_equity = [p / train_prices[0] for p in train_prices]
+        test_equity = [p / test_prices[0] for p in test_prices]
+
         fold_id += 1
         fold = WalkForwardFold(
             fold=fold_id,
@@ -202,8 +208,8 @@ def run_combinatorial_purged_cv(
             train_end=train_end,
             test_start=test_start,
             test_end=test_end,
-            train_metrics=compute_metrics(train_prices, annual_factor=annual_factor),
-            test_metrics=compute_metrics(test_prices, annual_factor=annual_factor),
+            train_metrics=compute_metrics(train_equity, annual_factor=annual_factor),
+            test_metrics=compute_metrics(test_equity, annual_factor=annual_factor),
         )
         result.folds.append(fold)
 

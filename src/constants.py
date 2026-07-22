@@ -1,11 +1,11 @@
 from typing import Any
 
-MIN_PRICE_ROWS = 50
-MIN_INDICATOR_ROWS = 2
-MIN_TRAIN_PRICES = 60
-MIN_PLAN_ROWS = 20
-ANALYSIS_CONCURRENCY = 10
-TRADE_PLAN_ATR_MULTIPLIER = 0.02
+MIN_PRICE_ROWS = 50  # min rows for price analysis
+MIN_INDICATOR_ROWS = 2  # min rows for indicator calculation
+MIN_TRAIN_PRICES = 60  # min price points for ML training
+MIN_PLAN_ROWS = 20  # min rows for trade plan generation
+ANALYSIS_CONCURRENCY = 10  # parallel analysis tasks
+TRADE_PLAN_ATR_MULTIPLIER = 0.02  # ATR multiplier for stop-loss in trade plans
 
 KNOWN_DIVIDEND_STOCKS: dict[str, str] = {
     "SBER": "dividend",
@@ -22,6 +22,25 @@ KNOWN_DIVIDEND_STOCKS: dict[str, str] = {
     "RTKM": "dividend",
     "PHOR": "dividend",
     "AFKS": "growth",
+}
+
+# TODO: i18n — Russian sector/risk labels below need translation
+SECTOR_NAME_MAP: dict[str, str] = {
+    "Банки": "banking",
+    "Нефть": "energy",
+    "Нефть и газ": "energy",
+    "IT": "tech",
+    "Металлы": "metals",
+    "Телеком": "telecom",
+    "Энергетика": "utilities",
+    "Транспорт": "transport",
+    "Потребтовары": "retail",
+    "Потреб": "retail",
+    "Строительство": "construction",
+    "Химия": "chemicals",
+    "Машиностроение": "manufacturing",
+    "Медицина": "healthcare",
+    "Финансы": "banking",
 }
 
 SECTOR_NAMES: dict[str, str] = {
@@ -92,9 +111,9 @@ ACTION_EMOJI: dict[str, str] = {
     "NEUTRAL": "\u26aa",
 }
 
-CACHE_TTL: int = 300
-MAX_CACHE_SIZE: int = 100
-COOLDOWN_SECONDS: int = 5
+CACHE_TTL: int = 300  # default cache TTL in seconds
+MAX_CACHE_SIZE: int = 100  # max entries in memory cache
+COOLDOWN_SECONDS: int = 5  # cooldown between repeated operations
 
 # ── Macro thresholds (signal/engine.py) ──────────────────────────────
 
@@ -107,7 +126,7 @@ MACRO_THRESHOLDS: dict[str, dict[str, Any]] = {
     "imoex": {"high": 3500, "high_adj": 0.02, "low": 2500, "low_adj": -0.03},
 }
 
-MACRO_MAX_ADJUSTMENT: float = 0.10
+MACRO_MAX_ADJUSTMENT: float = 0.10  # cap on macro-driven signal adjustment
 
 # ── Signal / position limits (signal/engine.py) ──────────────────────
 
@@ -119,9 +138,9 @@ BASE_POSITION_PCT: dict[str, int] = {
     "NEUTRAL": 10,
 }
 
-GEO_RISK_HIGH: float = 7.0
-GEO_RISK_ELEVATED: float = 5.0
-FUND_RISK_HIGH: float = 0.6
+GEO_RISK_HIGH: float = 7.0  # threshold for high geopolitical risk score
+GEO_RISK_ELEVATED: float = 5.0  # threshold for elevated geopolitical risk
+FUND_RISK_HIGH: float = 0.6  # threshold for high fundamental risk
 
 # ── Allocator thresholds (portfolio/allocator.py) ────────────────────
 
@@ -130,11 +149,11 @@ ALLOCATOR_CAPITAL_TIERS: list[dict[str, Any]] = [
     {"max_capital": 3000, "min_budget": 1000, "max_positions": 2},
 ]
 
-ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL: float = 10000
+ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL: float = 10000  # min capital to enforce sector limits
 
-ALLOCATOR_LEFTOVER_THRESHOLD: float = 0.10
-ALLOCATOR_LEFTOVER_MIN_ABS: float = 500
-ALLOCATOR_RECOMMEND_MAX_PICKS: int = 15
+ALLOCATOR_LEFTOVER_THRESHOLD: float = 0.10  # max fraction of capital left unallocated
+ALLOCATOR_LEFTOVER_MIN_ABS: float = 500  # min leftover in RUB before forcing allocation
+ALLOCATOR_RECOMMEND_MAX_PICKS: int = 15  # max tickers in recommendation output
 ALLOCATOR_RECOMMEND_TIER_PICKS: list[dict[str, Any]] = [
     {"max_capital": 1000, "max_picks": 4},
     {"max_capital": 5000, "max_picks": 8},
@@ -142,9 +161,9 @@ ALLOCATOR_RECOMMEND_TIER_PICKS: list[dict[str, Any]] = [
 
 # ── Sentiment / news thresholds (analysis/service.py, tasks.py) ──────
 
-NEWS_SENTIMENT_DAYS: int = 3
-SOCIAL_SENTIMENT_WEIGHT: float = 0.6
-NEWS_SENTIMENT_WEIGHT: float = 0.4
+NEWS_SENTIMENT_DAYS: int = 3  # lookback window for news sentiment
+SOCIAL_SENTIMENT_WEIGHT: float = 0.6  # weight of social sentiment in composite
+NEWS_SENTIMENT_WEIGHT: float = 0.4  # weight of news sentiment in composite
 
 # ── Phase 10: Advanced Trading & Compliance ──────────────────────────
 
@@ -201,7 +220,7 @@ BROKER_NAMES: dict[str, str] = {
 
 # ── Default days for data collection ─────────────────────────────────
 
-DEFAULT_HISTORY_DAYS: int = 365
-DIVIDEND_CHECK_DAYS: int = 365
-NEWS_MAX_PER_FEED: int = 5
-NEWS_STALE_HOURS: int = 24
+DEFAULT_HISTORY_DAYS: int = 365  # default price history lookback
+DIVIDEND_CHECK_DAYS: int = 365  # lookback for dividend data collection
+NEWS_MAX_PER_FEED: int = 5  # max news articles per feed source
+NEWS_STALE_HOURS: int = 24  # hours after which news is considered stale

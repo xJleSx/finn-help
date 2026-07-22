@@ -230,11 +230,13 @@ class NotificationService:
         db = self._get_sync_db()
         try:
             today = date.today()
+            from datetime import datetime
+            today_start = datetime.combine(today, datetime.min.time())
             count = (
                 db.query(Notification)
                 .filter(
                     Notification.type == notif_type,
-                    Notification.created_at >= today,
+                    Notification.created_at >= today_start,
                     Notification.title == ticker,
                 )
                 .count()

@@ -19,17 +19,21 @@ def get_executor() -> ThreadPoolExecutor:
     if _executor is None:
         with _lock:
             if _executor is None:
+                max_workers = min(settings.executor_max_workers, 32)
                 _executor = ThreadPoolExecutor(
-                    max_workers=settings.executor_max_workers,
+                    max_workers=max_workers,
                     thread_name_prefix="cpuworker",
                 )
-                logger.info("Created ThreadPoolExecutor with max_workers=%d", settings.executor_max_workers)
+                logger.info("Created ThreadPoolExecutor with max_workers=%d", max_workers)
     return _executor
 
 
 async def run_cpu_bound(fn: Callable[..., Any], *args: Any) -> Any:
+    ex = get_executor()
+    if ex._shutdown:
+        raise RuntimeError("Executor has been shut down")
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(get_executor(), fn, *args)
+    return await loop.run_in_executor(ex, fn, *args)
 
 
 def shutdown_executor() -> None:

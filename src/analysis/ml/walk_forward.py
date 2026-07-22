@@ -44,7 +44,10 @@ def build_labels(close_series: pd.Series, lookahead: int = 5, threshold: float =
 def walk_forward_validate(
     model_instance: Any,
     x: np.ndarray,
-    y: np.ndarray,
+    y: np.ndarray | None = None,
+    close_series: pd.Series | None = None,
+    lookahead: int = 5,
+    threshold: float = 0.03,
     n_splits: int = 3,
     min_train_size: int = 60,
     gap: int = GAP_SIZE,
@@ -72,9 +75,22 @@ def walk_forward_validate(
             continue
 
         x_train, x_test = x[:train_end], x[test_start:test_end]
-        y_train, y_test = y[:train_end], y[test_start:test_end]
 
-        if len(x_test) < 5:
+        if close_series is not None:
+            train_labels, train_mask = build_labels(close_series[:train_end], lookahead=lookahead, threshold=threshold)
+            train_mask = train_mask[:train_end]
+            y_train = train_labels[:train_end][train_mask[:len(train_labels)]].astype(int)
+            x_train = x_train[train_mask[:len(x_train)]]
+
+            test_labels, test_mask = build_labels(close_series[:test_end], lookahead=lookahead, threshold=threshold)
+            test_mask_slice = test_mask[test_start:test_end]
+            y_test = test_labels[test_start:test_end][test_mask_slice].astype(int)
+            x_test = x_test[test_mask_slice]
+        else:
+            y_train = y[:train_end]
+            y_test = y[test_start:test_end]
+
+        if len(x_test) < 5 or len(x_train) < 5:
             continue
 
         try:

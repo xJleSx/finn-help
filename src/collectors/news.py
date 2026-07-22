@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -46,7 +47,10 @@ class NewsCollector(BaseCollector):
         saved = 0
         for feed in collector.feeds:
             try:
-                articles = asyncio.run(collector._fetch_feed(feed["url"], feed["name"], NEWS_MAX_PER_FEED))
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                articles = loop.run_until_complete(collector._fetch_feed(feed["url"], feed["name"], NEWS_MAX_PER_FEED))
+                loop.close()
             except Exception as exc:
                 logger.warning("News feed error %s: %s", feed["name"], exc)
                 continue
@@ -85,7 +89,7 @@ class NewsCollector(BaseCollector):
                 # Also link to any other tickers mentioned
                 search_text = f"{n.title or ''} {n.summary or ''}".upper()
                 for t, iid in ticker_map.items():
-                    if len(t) >= 2 and t in search_text and iid != inst.id and not db.query(NewsInstrument).filter_by(news_id=n.id, instrument_id=iid).first():
+                    if len(t) >= 2 and re.search(rf"\b{re.escape(t)}\b", search_text) and iid != inst.id and not db.query(NewsInstrument).filter_by(news_id=n.id, instrument_id=iid).first():
                             db.add(NewsInstrument(news_id=n.id, instrument_id=iid))
                 saved += 1
         if saved:

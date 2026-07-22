@@ -1,3 +1,4 @@
+# TODO: i18n — Russian labels in log messages may need translation
 from datetime import date, timedelta
 from typing import cast
 
@@ -16,20 +17,24 @@ logger = structlog.get_logger(__name__)
 def _portfolio_tickers() -> list[str]:
     db = get_session()
     try:
-        rows = db.query(PortModel).all()
+        from sqlalchemy.orm import joinedload
+        rows = db.query(PortModel).options(joinedload(PortModel.instrument)).all()
         if not rows:
             return []
         tickers = []
         for p in rows:
-            inst = db.query(Instrument.ticker).filter(Instrument.id == p.instrument_id).first()
-            if inst and inst.ticker:
-                tickers.append(inst.ticker)
+            if p.instrument:
+                tickers.append(p.instrument.ticker)
+            else:
+                inst = db.query(Instrument.ticker).filter(Instrument.id == p.instrument_id).first()
+                if inst and inst.ticker:
+                    tickers.append(inst.ticker)
         return tickers
     finally:
         db.close()
 
 
-def generate_weekly_report() -> bytes | None:
+def generate_weekly_chart() -> bytes | None:
     import io
 
     import matplotlib
@@ -37,13 +42,16 @@ def generate_weekly_report() -> bytes | None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    fig = None
     try:
         end = date.today()
         start = end - timedelta(days=120)
 
         tickers = _portfolio_tickers()
         if not tickers:
-            tickers = cast(list[str], personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP"]))
+            fallback = cast(list[str], personal.get("favorite_tickers", ["SBER", "LKOH", "GAZP"]))
+            logger.warning("Portfolio is empty, falling back to tickers", tickers=fallback)
+            tickers = fallback
 
         result = run_personal_backtest(
             tickers=tickers,
@@ -53,18 +61,16 @@ def generate_weekly_report() -> bytes | None:
         )
 
         if not result.equity_curve:
-            logger.warning("No equity curve data for weekly report")
+            logger.warning("No equity curve data for weekly chart")
             return None
 
-        # build figure
         fig, axes = plt.subplots(3, 1, figsize=(10, 10), gridspec_kw={"height_ratios": [3, 1.2, 1.2]})
         fig.suptitle(
-            f"Weekly Report: {start.isoformat()} to {end.isoformat()}",
+            f"Weekly Chart: {start.isoformat()} to {end.isoformat()}",
             fontsize=14,
             fontweight="bold",
         )
 
-        # 1. Equity curve
         ax1 = axes[0]
         ec = result.equity_curve
         if ec:
@@ -80,7 +86,6 @@ def generate_weekly_report() -> bytes | None:
             ax1.set_xticks(ticks)
             ax1.tick_params(axis="x", rotation=30)
 
-        # 2. Monthly returns bar
         ax2 = axes[1]
         mr = result.monthly_returns
         if mr:
@@ -95,7 +100,6 @@ def generate_weekly_report() -> bytes | None:
             ax2.set_xticklabels(labels, rotation=30, fontsize=8)
             ax2.grid(True, alpha=0.3, axis="y")
 
-        # 3. Drawdown
         ax3 = axes[2]
         if ec:
             eq_arr = np.array([r["portfolio"] for r in ec])
@@ -108,7 +112,6 @@ def generate_weekly_report() -> bytes | None:
             ax3.grid(True, alpha=0.3)
             ax3.legend()
 
-        # stats box
         stats_text = (
             f"Return: {result.total_return:+.1%}  |  Alpha: {result.alpha:+.1%}  |  "
             f"Sharpe: {result.sharpe:.2f}  |  Sortino: {result.sortino:.2f}  |  "
@@ -119,9 +122,11 @@ def generate_weekly_report() -> bytes | None:
         plt.tight_layout(rect=(0, 0.03, 1, 0.95))
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=150)
-        plt.close(fig)
         buf.seek(0)
         return buf.read()
     except Exception as e:
-        logger.warning("Weekly report generation failed: %s", e, exc_info=True)
+        logger.warning("Weekly chart generation failed: %s", e, exc_info=True)
         return None
+    finally:
+        if fig is not None:
+            plt.close(fig)

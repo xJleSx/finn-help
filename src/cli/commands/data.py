@@ -335,7 +335,8 @@ def financials(
 
         from datetime import date as dt_date
 
-        report_date = dt_date(year, 1, 1)
+        current_month = dt_date.today().month
+        report_date = dt_date(year, current_month, 1)
         existing = db.query(FinancialReport).filter_by(instrument_id=inst.id, report_date=report_date, period_type=period).first()
         if existing:
             console.print("[yellow]Отчёт за этот период уже существует, обновляю...[/yellow]")
@@ -423,7 +424,7 @@ def bond(
             isin=isin or inst.isin or "",
             coupon_type=coupon_type,
             coupon_rate=coupon_rate,
-            coupon_period_days=coupon_period or 30,
+            coupon_period_days=coupon_period or 182.5,
             spread_to_key_rate=spread,
             yield_to_maturity=ytm,
             maturity_years=maturity_years,

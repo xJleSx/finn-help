@@ -337,18 +337,15 @@ class TBankClient:
         ]
 
     @staticmethod
-    def _decimal(val: object) -> float:
+    def _to_float(val: object) -> float:
         if hasattr(val, "units") and hasattr(val, "nano"):
             return val.units + val.nano / 1e9
         if isinstance(val, (int, float)):
             return float(val)
         return 0.0
 
-    @staticmethod
-    def _money(val: object) -> float:
-        if hasattr(val, "units") and hasattr(val, "nano"):
-            return val.units + val.nano / 1e9
-        return 0.0
+    _decimal = _to_float
+    _money = _to_float
 
     @staticmethod
     def _to_quotation(val: float) -> object:

@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 
 
 class FundamentalDataCollector(BaseCollector):
-    """Сбор фундаментальных данных о компаниях.
+    """Collect fundamental company data.
 
-    Текущий источник: MOEX ISS (shares outstanding, market cap via price × shares).
-    P/E, P/B, ROE, EPS, Debt/Equity требуют внешнего источника (SmartLab, Cbonds и т.п.)
-    и пока возвращаются как None.
+    Current source: MOEX ISS (shares outstanding, market cap via price × shares).
+    P/E, P/B, ROE, EPS, Debt/Equity require external sources (SmartLab, Cbonds etc.)
+    and currently return as None.
     """
 
     def __init__(self) -> None:

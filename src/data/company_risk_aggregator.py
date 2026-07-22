@@ -24,19 +24,21 @@ BASE_WEIGHTS: dict[str, float] = {
     "company_specific_risk": 0.25,
 }
 
+from src.constants import SECTOR_NAME_MAP
+
 SECTOR_BASELINE_RISK: dict[str, float] = {
-    "Финансы": 5.5,
-    "Нефть": 6.0,
-    "IT": 4.0,
-    "Металлы": 5.5,
-    "Телеком": 4.5,
-    "Энергетика": 5.0,
-    "Транспорт": 5.0,
-    "Потребтовары": 4.0,
-    "Строительство": 5.5,
-    "Химия": 4.5,
-    "Машиностроение": 5.0,
-    "Медицина": 3.5,
+    "banking": 5.5,
+    "energy": 6.0,
+    "tech": 4.0,
+    "metals": 5.5,
+    "telecom": 4.5,
+    "utilities": 5.0,
+    "transport": 5.0,
+    "retail": 4.0,
+    "construction": 5.5,
+    "chemicals": 4.5,
+    "manufacturing": 5.0,
+    "healthcare": 3.5,
 }
 
 CONTAGION_COEFFICIENT = 0.15  # spillover from peer risk
@@ -52,7 +54,8 @@ class CompanyRiskAggregator:
 
     @staticmethod
     def _get_sector_baseline(sector: Optional[str]) -> float:
-        return SECTOR_BASELINE_RISK.get(sector, 5.0)
+        mapped = SECTOR_NAME_MAP.get(sector, sector) if sector else sector
+        return SECTOR_BASELINE_RISK.get(mapped, 5.0)
 
     @staticmethod
     def _compute_volatility(db_session: Any, instrument_id: int, days: int = 60) -> float:

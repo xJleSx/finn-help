@@ -37,7 +37,8 @@ def article_counts_per_day(db: Session, ticker: str, days_back: int | None = Non
     if df.empty:
         return pd.DataFrame(columns=["day", "count"])
     df = df.set_index("day")
-    full_idx = pd.date_range(df.index.min(), df.index.max(), freq="D")
+    max_date = min(df.index.max(), pd.Timestamp.now(tz=df.index.tz if hasattr(df.index, 'tz') else None))
+    full_idx = pd.date_range(df.index.min(), max_date, freq="D")
     df = df.reindex(full_idx, fill_value=0)
     df.index.name = "day"
     return df
@@ -89,7 +90,8 @@ def sentiment_features_per_day(db: Session, ticker: str, days_back: int | None =
     if df.empty:
         return pd.DataFrame(columns=["day", "sentiment_mean", "article_count"])
     df = df.set_index("day")
-    full_idx = pd.date_range(df.index.min(), df.index.max(), freq="D")
+    max_date = min(df.index.max(), pd.Timestamp.now(tz=df.index.tz if hasattr(df.index, 'tz') else None))
+    full_idx = pd.date_range(df.index.min(), max_date, freq="D")
     df = df.reindex(full_idx).fillna(0)
     df.index.name = "day"
 

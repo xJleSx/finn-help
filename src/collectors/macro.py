@@ -2,6 +2,8 @@ import logging
 from datetime import date
 from typing import Any, cast
 
+from lxml import html
+
 from src.collectors.base import BaseCollector
 
 logger = logging.getLogger(__name__)
@@ -106,8 +108,6 @@ class MacroCollector(BaseCollector):
             "https://www.cbr.ru/hd_base/KeyRate",
             params={"UniDbQuery.Formatted": "True", "UniDbQuery.Date": date.today().strftime("%d.%m.%Y")},
         )
-        from lxml import html
-
         tree = html.fromstring(text)
         rows = cast(list[Any], tree.xpath("//table[@class='data']//tr"))
         for row in rows[1:]:
@@ -169,8 +169,6 @@ class MacroCollector(BaseCollector):
             "https://www.cbr.ru/hd_base/infl",
             params={"UniDbQuery.Formatted": "True", "UniDbQuery.Date": date.today().strftime("%d.%m.%Y")},
         )
-        from lxml import html
-
         tree = html.fromstring(text)
         rows = cast(list[Any], tree.xpath("//table[@class='data']//tr"))
         for row in rows[1:]:
@@ -190,8 +188,6 @@ class MacroCollector(BaseCollector):
 
     async def _fetch_ofz_yield(self) -> dict[str, Any] | None:
         text = await self._fetch_text("https://www.cbr.ru/hd_base/zcyc_params")
-        from lxml import html
-
         tree = html.fromstring(text)
         rows = cast(list[Any], tree.xpath("//table[contains(@class, 'data')]//tr"))
         for row in rows[1:]:

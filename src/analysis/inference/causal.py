@@ -26,6 +26,26 @@ class GrangerCausality:
     def __init__(self, max_lag: int = _DEFAULT_MAX_LAG):
         self.max_lag = max_lag
 
+def _check_multicollinearity(data: np.ndarray, max_vif: float = 10.0) -> list[int]:
+    """Return indices of columns with VIF > max_vif."""
+    try:
+        from statsmodels.stats.outliers_influence import variance_inflation_factor
+    except ImportError:
+        return []
+    high_vif: list[int] = []
+    for i in range(data.shape[1]):
+        vif = variance_inflation_factor(data, i)
+        if vif > max_vif:
+            high_vif.append(i)
+    return high_vif
+
+
+class GrangerCausality:
+    """Test whether news sentiment Granger-causes price returns."""
+
+    def __init__(self, max_lag: int = _DEFAULT_MAX_LAG):
+        self.max_lag = max_lag
+
     def test_news_sentiment_impact(self, ticker: str, db_session: Any) -> dict[str, Any]:
         if not _HAS_STATSMODELS:
             return {"available": False}
@@ -69,6 +89,9 @@ class GrangerCausality:
         data = np.column_stack([return_series, sentiment_series])
 
         try:
+            high_vif = _check_multicollinearity(data)
+            if high_vif:
+                logger.warning("Multicollinearity detected in %s data — VIF high at columns %s", ticker, high_vif)
             result = grangercausalitytests(data, maxlag=self.max_lag, verbose=False)
         except Exception as exc:
             return {"ticker": ticker, "error": str(exc)}
@@ -266,6 +289,9 @@ class InstrumentCausalGraph:
         data = np.column_stack([tgt_series, src_series])
 
         try:
+            high_vif = _check_multicollinearity(data)
+            if high_vif:
+                logger.warning("Multicollinearity in %s->%s — VIF high at cols %s", source_ticker, target_ticker, high_vif)
             result = grangercausalitytests(data, maxlag=self.max_lag, verbose=False)
         except Exception as exc:
             return {"source": source_ticker, "target": target_ticker, "error": str(exc)}

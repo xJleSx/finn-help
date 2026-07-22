@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -36,12 +35,37 @@ class PortfolioAllocator:
         if profile in PROFILES:
             self.profile = profile
 
-    def _load_profile_from_db(self) -> None:
+    def _load_profile_from_db(self, db: Any = None) -> None:
         try:
             from src.db.models import UserSetting
 
-            with session_scope() as db:
+            if db is not None:
                 row = db.query(UserSetting).filter_by(key="risk_profile").first()
+                if row and row.value in PROFILES:
+                    self.profile = row.value
+                return
+            with session_scope() as s:
+                row = s.query(UserSetting).filter_by(key="risk_profile").first()
+                if row and row.value in PROFILES:
+                    self.profile = row.value
+        except Exception as e:
+            logger.warning("Failed to load risk profile from DB: %s", e)
+
+    async def _load_profile_from_db_async(self, db: AsyncSession | None = None) -> None:
+        try:
+            from src.db.models import UserSetting
+
+            if db is not None:
+                result = await db.execute(select(UserSetting).where(UserSetting.key == "risk_profile"))
+                row = result.scalar_one_or_none()
+                if row and row.value in PROFILES:
+                    self.profile = row.value
+                return
+            from src.db.connection import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(select(UserSetting).where(UserSetting.key == "risk_profile"))
+                row = result.scalar_one_or_none()
                 if row and row.value in PROFILES:
                     self.profile = row.value
         except Exception as e:
@@ -118,7 +142,9 @@ class PortfolioAllocator:
                 amount = round(budget * share, 2)
 
                 last_price = item.get("last_price")
-                if last_price and last_price > 0 and amount < last_price:
+                if not last_price or last_price <= 0:
+                    continue
+                if amount < last_price:
                     continue
 
                 sector = item.get("sector", "Прочее")
@@ -152,15 +178,15 @@ class PortfolioAllocator:
 
         leftover = round(capital - total_allocated, 2)
         if leftover > max(ALLOCATOR_LEFTOVER_MIN_ABS, capital * ALLOCATOR_LEFTOVER_THRESHOLD):
-            for cat_name in ["etf", "dividend"]:
-                if cat_name in plan and plan[cat_name]["items"]:
-                    items = plan[cat_name]["items"]
-                    total_score = sum(it.get("amount", 0) for it in items) or 1
-                    for it in items:
-                        frac = it["amount"] / total_score
-                        it["amount"] = round(it["amount"] + leftover * frac, 2)
-                    total_allocated += leftover
-                    break
+            all_items: list[dict[str, Any]] = []
+            for cat_data in plan.values():
+                all_items.extend(cat_data.get("items", []))
+            if all_items:
+                total_amount = sum(it["amount"] for it in all_items) or 1
+                for it in all_items:
+                    frac = it["amount"] / total_amount
+                    it["amount"] = round(it["amount"] + leftover * frac, 2)
+                total_allocated += leftover
 
         projected_monthly = self._calc_projected_yield(plan, capital)
 
@@ -175,20 +201,14 @@ class PortfolioAllocator:
             "sector_allocation": sector_allocation,
         }
 
-    def _allocate_from_data(
+    async def _allocate_from_data(
         self,
         capital: float,
         existing: list[dict[str, Any]],
         instruments_data: list[dict[str, Any]],
-        db: Any,
+        db: AsyncSession,
     ) -> dict[str, Any]:
-        async def score_fn(data: list[dict[str, Any]], cat: str, budget: float, _existing: list[dict[str, Any]]) -> list[dict[str, Any]]:
-            return self._score_candidates(data, cat, budget, _existing, db)
-
-        async def risk_fn(item: dict[str, Any]) -> dict[str, Any]:
-            return item_risk(item, db, capital)
-
-        return asyncio.run(self._allocate_from_data_core(capital, existing, instruments_data, score_fn, risk_fn))
+        return await self._allocate_from_data_async(capital, existing, instruments_data, db)
 
     async def _allocate_from_data_async(
         self,
@@ -205,17 +225,19 @@ class PortfolioAllocator:
 
         return await self._allocate_from_data_core(capital, existing, instruments_data, score_async_fn, risk_async_fn)
 
-    def allocate(self, capital: float, db: Any = None) -> dict[str, Any]:
+    async def allocate(self, capital: float, db: AsyncSession | None = None) -> dict[str, Any]:
+        await self._load_profile_from_db_async(db)
         should_close = db is None
         if db is None:
-            db = get_session()
-        try:
-            existing = self._get_current_portfolio(db)
-            instruments_data = self._load_instruments(db)
-            return self._allocate_from_data(capital, existing, instruments_data, db)
-        finally:
-            if should_close:
-                db.close()
+            from src.db.connection import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as session:
+                existing = await self._get_current_portfolio_async(session)
+                instruments_data = await self._load_instruments_async(session)
+                return await self._allocate_from_data(capital, existing, instruments_data, session)
+        existing = await self._get_current_portfolio_async(db)
+        instruments_data = await self._load_instruments_async(db)
+        return await self._allocate_from_data(capital, existing, instruments_data, db)
 
     def _get_current_portfolio(self, db: Any) -> list[dict[str, Any]]:
         from src.db.models import Portfolio as PortModel
@@ -382,6 +404,31 @@ class PortfolioAllocator:
         for d in all_divs.scalars().all():
             div_map.setdefault(d.instrument_id, []).append(d)
 
+        all_fm = await db.execute(
+            select(FundamentalMetric)
+            .where(FundamentalMetric.instrument_id.in_(inst_ids))
+            .order_by(FundamentalMetric.instrument_id, FundamentalMetric.date.desc())
+        )
+        fm_map: dict[int, Any] = {}
+        for fm in all_fm.scalars().all():
+            if fm.instrument_id not in fm_map:
+                fm_map[fm.instrument_id] = fm
+
+        today = date.today()
+        all_upcoming = await db.execute(
+            select(CorporateEvent)
+            .where(
+                CorporateEvent.instrument_id.in_(inst_ids),
+                CorporateEvent.event_type == "dividend",
+                CorporateEvent.announcement_date >= today,
+            )
+            .order_by(CorporateEvent.instrument_id, CorporateEvent.announcement_date.asc())
+        )
+        upcoming_map: dict[int, Any] = {}
+        for ev in all_upcoming.scalars().all():
+            if ev.instrument_id not in upcoming_map:
+                upcoming_map[ev.instrument_id] = ev
+
         result = []
         for inst in instruments:
             price = price_map.get(inst.id)
@@ -403,19 +450,33 @@ class PortfolioAllocator:
                     )
                     div_yield = 25.0
 
-            result.append(
-                {
-                    "id": inst.id,
-                    "ticker": inst.ticker,
-                    "name": inst.full_name or inst.ticker,
-                    "type": inst.instrument_type,
-                    "sector": sector,
-                    "last_price": float(last_price) if last_price else None,
-                    "div_yield": round(div_yield, 2),
-                    "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_async) == "dividend",
-                    "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_async) == "growth",
-                }
-            )
+            fm = fm_map.get(inst.id)
+            upcoming_div = upcoming_map.get(inst.id)
+
+            entry: dict[str, Any] = {
+                "id": inst.id,
+                "ticker": inst.ticker,
+                "name": inst.full_name or inst.ticker,
+                "type": inst.instrument_type,
+                "sector": sector,
+                "last_price": float(last_price) if last_price else None,
+                "div_yield": round(div_yield, 2),
+                "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_async) == "dividend",
+                "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_async) == "growth",
+            }
+            if fm:
+                entry["pe_ratio"] = float(fm.pe_ratio) if fm.pe_ratio else None
+                entry["pb_ratio"] = float(fm.pb_ratio) if fm.pb_ratio else None
+                entry["roe"] = float(fm.roe) if fm.roe else None
+                entry["market_cap"] = float(fm.market_cap) if fm.market_cap else None
+                entry["debt_equity"] = float(fm.debt_equity) if fm.debt_equity else None
+                entry["eps"] = float(fm.eps) if fm.eps else None
+            if upcoming_div:
+                amt = upcoming_div.dividend_amount
+                entry["upcoming_dividend_amount"] = float(amt) if amt else None
+                ad = upcoming_div.announcement_date
+                entry["upcoming_dividend_date"] = ad.isoformat() if ad else None
+            result.append(entry)
         return result
 
     def _type_matches(self, inst_type: str, target: str) -> bool:
@@ -1031,6 +1092,7 @@ class PortfolioAllocator:
                 db.close()
 
     async def allocate_async(self, capital: float, db: AsyncSession | None = None) -> dict[str, Any]:
+        await self._load_profile_from_db_async(db)
         if db is None:
             from src.db.connection import AsyncSessionLocal
 

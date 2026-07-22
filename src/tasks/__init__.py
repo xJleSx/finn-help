@@ -28,8 +28,17 @@ app.conf.update(
     beat_max_loop_interval=60,
 )
 
+import re
+
+_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
+
+for _name in list(app.conf.beat_schedule.keys()):
+    if not _NAME_RE.match(_name):
+        import warnings
+        warnings.warn(f"Beat schedule task name '{_name}' does not match pattern a-z0-9_-")
+
 app.conf.beat_schedule = {
-    "daily-update-every-5min": {
+    "recurring-update-every-5min": {
         "task": "run_daily_update",
         "schedule": 300,
         "args": (),
@@ -102,3 +111,16 @@ app.conf.beat_schedule = {
 }
 
 app.autodiscover_tasks(["src.tasks"])
+
+app.conf.task_routes = {
+    "run_daily_update": {"queue": "default"},
+    "run_weekly_update": {"queue": "default"},
+    "generate_signals_background": {"queue": "ml"},
+    "train_model": {"queue": "ml"},
+    "train_all_models": {"queue": "ml"},
+    "collect_prices": {"queue": "data"},
+}
+
+if app.conf.task_always_eager and not settings.log_level == "DEBUG":
+    import warnings
+    warnings.warn("task_always_eager=True in non-DEBUG mode — tasks run synchronously in the main process")

@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import pandas as pd
 from sqlalchemy import func
 
+from src.db.models import Price
 from src.tasks import app
 
 logger = logging.getLogger(__name__)
@@ -25,17 +27,25 @@ def train_model(self, instrument_id: int, ticker: str) -> dict[str, Any]:
 
         from src.analysis.ml.ensemble import EnsembleModel
         from src.analysis.ml.news_impact import NewsImpactModel
-        from src.analysis.ml.prophet_model import ProphetModel
+        from src.analysis.ml.prophet_model import StatsModelsTrendPredictor
 
         results: dict[str, Any] = {"ticker": ticker, "models": {}}
 
         try:
-            prophet = ProphetModel(ticker)
-            prophet.train(db)
-            results["models"]["prophet"] = "ok"
+            prices = db.query(Price).filter(Price.instrument_id == instrument_id).order_by(Price.date).all()
+            if prices:
+                price_df = pd.DataFrame([{"ds": p.date, "y": float(p.close)} for p in prices if p.close])
+                if len(price_df) >= 30:
+                    trend = StatsModelsTrendPredictor(ticker)
+                    trend.train(price_df)
+                    results["models"]["trend"] = "ok"
+                else:
+                    results["models"]["trend"] = "insufficient_data"
+            else:
+                results["models"]["trend"] = "no_prices"
         except Exception as e:
-            logger.warning("Prophet training failed for %s: %s", ticker, e)
-            results["models"]["prophet"] = str(e)
+            logger.warning("Trend model training failed for %s: %s", ticker, e)
+            results["models"]["trend"] = str(e)
 
         try:
             ensemble = EnsembleModel(ticker)
@@ -57,7 +67,20 @@ def train_model(self, instrument_id: int, ticker: str) -> dict[str, Any]:
         except Exception as e:
             logger.warning("News impact init failed for %s: %s", ticker, e)
 
-        results["status"] = "ok"
+        model_statuses = results.get("models", {})
+        succeeded = [k for k, v in model_statuses.items() if v == "ok"]
+        failed = [k for k, v in model_statuses.items() if v != "ok" and not v.startswith("no_") and not v.startswith("insufficient_")]
+        if not model_statuses:
+            results["status"] = "error"
+            results["error"] = "No models were trained"
+        elif not succeeded:
+            results["status"] = "error"
+            results["error"] = "All sub-models failed: " + "; ".join(f"{k}={v}" for k, v in failed[:5])
+        elif failed:
+            results["status"] = "partial"
+            results["partial_failures"] = {k: v for k, v in failed}
+        else:
+            results["status"] = "ok"
         logger.info("Training completed for %s: %s", ticker, results)
         return results
     except Exception as e:
@@ -73,9 +96,18 @@ def train_model(self, instrument_id: int, ticker: str) -> dict[str, Any]:
 
 @app.task(bind=True, max_retries=2, default_retry_delay=120, name="train_all_models")
 def train_all_models(self) -> dict[str, Any]:
-    """Train models for all instruments with sufficient data."""
+    """Train models for all instruments with sufficient data.
+
+    Queues tasks in batches of 50 with a 2-second delay between batches
+    to avoid overwhelming the broker and worker pool.
+    """
+    import time
+
     from src.db.connection import get_session
     from src.db.models import Instrument, Price
+
+    BATCH_SIZE = 50
+    BATCH_DELAY = 2
 
     db = get_session()
     try:
@@ -88,13 +120,18 @@ def train_all_models(self) -> dict[str, Any]:
         )
         logger.info("Found %d instruments for training", len(instrument_ids))
         results: dict[str, Any] = {}
-        for inst_id, ticker in instrument_ids:
-            try:
-                result = train_model.delay(inst_id, ticker)
-                results[ticker] = {"task_id": result.id, "status": "queued"}
-            except Exception as e:
-                logger.warning("Failed to queue training for %s: %s", ticker, e)
-                results[ticker] = {"status": "error", "error": str(e)}
+        for batch_start in range(0, len(instrument_ids), BATCH_SIZE):
+            batch = instrument_ids[batch_start : batch_start + BATCH_SIZE]
+            for inst_id, ticker in batch:
+                try:
+                    result = train_model.delay(inst_id, ticker)
+                    results[ticker] = {"task_id": result.id, "status": "queued"}
+                except Exception as e:
+                    logger.warning("Failed to queue training for %s: %s", ticker, e)
+                    results[ticker] = {"status": "error", "error": str(e)}
+            if batch_start + BATCH_SIZE < len(instrument_ids):
+                logger.info("Processed %d/%d instruments, sleeping %ds...", batch_start + len(batch), len(instrument_ids), BATCH_DELAY)
+                time.sleep(BATCH_DELAY)
         return {"instruments": len(instrument_ids), "results": results}
     finally:
         db.close()
@@ -104,18 +141,12 @@ def train_all_models(self) -> dict[str, Any]:
 def generate_signals_background(self, instrument_ids: list[int] | None = None) -> dict[str, Any]:
     """Generate signals for all or specified instruments in background."""
     from src.scheduler.collectors import generate_signals
+    from src.tasks._utils import run_async
 
     logger.info("Generating signals in background task")
     try:
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(generate_signals(instrument_ids=instrument_ids))
-            return {"status": "ok", "signals_generated": result}
-        finally:
-            loop.close()
+        result = run_async(generate_signals(instrument_ids=instrument_ids))
+        return {"status": "ok", "signals_generated": result}
     except Exception as e:
         logger.exception("Signal generation failed")
         return {"status": "error", "error": str(e)}
@@ -125,24 +156,18 @@ def generate_signals_background(self, instrument_ids: list[int] | None = None) -
 def collect_prices_background(self) -> dict[str, Any]:
     """Collect price data in background."""
     from src.scheduler.collectors import collect_prices
+    from src.tasks._utils import run_async
 
     logger.info("Collecting prices in background task")
     try:
-        import asyncio
+        from src.db.connection import get_session
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        db = get_session()
         try:
-            from src.db.connection import get_session
-
-            db = get_session()
-            try:
-                updated = loop.run_until_complete(collect_prices(db))
-                return {"status": "ok", "updated_instruments": updated}
-            finally:
-                db.close()
+            updated = run_async(collect_prices(db))
+            return {"status": "ok", "updated_instruments": updated}
         finally:
-            loop.close()
+            db.close()
     except Exception as e:
         logger.exception("Price collection failed")
         return {"status": "error", "error": str(e)}

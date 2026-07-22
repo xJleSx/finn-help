@@ -6,16 +6,13 @@ the BaseCollector interface with retry + circuit breaker.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Optional
 
 import httpx
-from tenacity import AsyncRetrying, before_log, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from src.collectors.base import BaseCollector
 from src.config import settings
-from src.core.resilience import CircuitBreakerOpenError
 
 logger = logging.getLogger(__name__)
 
@@ -29,45 +26,15 @@ class FinanceMarkerCollector(BaseCollector):
 
     async def _request(self, path: str, params: Optional[dict[str, Any]] = None) -> Any:
         url = f"{self.BASE_URL}{path}"
-        query: dict[str, Any] = {"api_token": self._api_token}
-        if params:
-            query.update(params)
+        headers = {"Authorization": f"Bearer {self._api_token}"}
 
         async def _do_fetch() -> Any:
             client = await self._get_client()
-            resp = await client.get(url, params=query)
+            resp = await client.get(url, params=params or {}, headers=headers)
             resp.raise_for_status()
             return resp.json()
 
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(self.MAX_RETRIES),
-            wait=wait_exponential(multiplier=self.RETRY_DELAY, max=30.0),
-            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError, ValueError)),
-            before=before_log(logger, logging.DEBUG),
-            reraise=True,
-        ):
-            with attempt:
-                try:
-                    return await self._circuit_breaker.call(_do_fetch)
-                except CircuitBreakerOpenError:
-                    if attempt.retry_state.attempt_number < self.MAX_RETRIES:
-                        delay = self.RETRY_DELAY * (2 ** (attempt.retry_state.attempt_number - 1))
-                        logger.warning(
-                            "circuit_breaker.open.%s attempt %d/%d, retrying in %.1fs",
-                            self.__class__.__name__,
-                            attempt.retry_state.attempt_number,
-                            self.MAX_RETRIES,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-                        raise
-                    logger.error(
-                        "circuit_breaker.open.%s exhausted after %d attempts",
-                        self.__class__.__name__,
-                        self.MAX_RETRIES,
-                    )
-                    raise
-        return None
+        return await self._with_retry(_do_fetch, (httpx.HTTPStatusError, httpx.RequestError, ValueError))
 
     async def get_company_overview(self, exchange: str, code: str) -> dict[str, Any]:
         """Company profile + ratios + summary for a single ticker.

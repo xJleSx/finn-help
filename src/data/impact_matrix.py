@@ -4,6 +4,7 @@ Defines how different news types impact sectors with varying intensities.
 Calculates daily sector risk scores based on accumulated news impacts.
 """
 
+import copy
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -98,8 +99,8 @@ class ImpactMatrix:
 
     def __init__(self):
         """Initialize impact matrix."""
-        self.matrix = IMPACT_MATRIX
-        self.decay_params = IMPACT_DECAY_PARAMS
+        self.matrix = copy.deepcopy(IMPACT_MATRIX)
+        self.decay_params = copy.deepcopy(IMPACT_DECAY_PARAMS)
 
     def get_impact(self, news_type: str, sector: str, base_impact_score: float) -> float:
         """Calculate impact of news on a sector.
@@ -112,10 +113,13 @@ class ImpactMatrix:
         Returns:
             Calculated impact (0-10)
         """
+        from src.constants import SECTOR_NAME_MAP
+
         if news_type not in self.matrix:
             news_type = "geopolitical_risk"
 
-        multiplier = self.matrix[news_type].get(sector, 0.3)  # Default low multiplier
+        mapped_sector = SECTOR_NAME_MAP.get(sector, sector)
+        multiplier = self.matrix[news_type].get(mapped_sector, 0.3)  # Default low multiplier
         impact = base_impact_score * multiplier
 
         return min(10, max(0, impact))
