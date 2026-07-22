@@ -5,7 +5,7 @@ from datetime import date, timedelta, timezone
 from typing import Any, Optional
 
 import pandas as pd
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -421,7 +421,7 @@ async def collect_fundamental(db: AsyncSession) -> None:
         select(Price)
         .join(
             latest_price_subq,
-            sqlfunc.and_(
+            and_(
                 Price.instrument_id == latest_price_subq.c.instrument_id,
                 Price.date == latest_price_subq.c.max_date,
             ),
