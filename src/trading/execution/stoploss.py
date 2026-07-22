@@ -13,52 +13,57 @@ class PositionTracker:
         self._short_positions: dict[str, dict[str, Any]] = {}
         self._restore_from_db()
 
+    @staticmethod
+    def _table_exists(db: Any) -> bool:
+        try:
+            db.execute("SELECT 1 FROM orders LIMIT 1")
+            return True
+        except Exception:
+            return False
+
     def _restore_from_db(self) -> None:
-        for attempt in range(3):
-            db = get_session()
-            try:
-                filled = (
-                    db.query(OrderModel)
-                    .filter(
-                        OrderModel.status.in_(["filled", "partial"]),
-                        OrderModel.direction == "BUY",
-                    )
-                    .all()
-                )
-                for o in filled:
-                    self._positions[str(o.ticker)] = {
-                        "shares": int(o.quantity or 0),
-                        "avg_price": float(o.price or 0.0),
-                        "sl": o.stop_loss,
-                        "tp": o.take_profit,
-                    }
-
-                short_filled = (
-                    db.query(OrderModel)
-                    .filter(
-                        OrderModel.status.in_(["filled", "partial"]),
-                        OrderModel.is_short.is_(True),
-                    )
-                    .all()
-                )
-                for o in short_filled:
-                    self._short_positions[str(o.ticker)] = {
-                        "shares": int(o.quantity or 0),
-                        "avg_price": float(o.price or 0.0),
-                        "sl": o.stop_loss,
-                        "tp": o.take_profit,
-                    }
+        db = get_session()
+        try:
+            if not self._table_exists(db):
+                logger.info("orders table not found — starting with empty positions")
                 return
-            except Exception as e:
-                logger.debug("Restore attempt %d/3 failed: %s", attempt + 1, e)
-                if attempt < 2:
-                    import time as _time
+            filled = (
+                db.query(OrderModel)
+                .filter(
+                    OrderModel.status.in_(["filled", "partial"]),
+                    OrderModel.direction == "BUY",
+                )
+                .all()
+            )
+            for o in filled:
+                self._positions[str(o.ticker)] = {
+                    "shares": int(o.quantity or 0),
+                    "avg_price": float(o.price or 0.0),
+                    "sl": o.stop_loss,
+                    "tp": o.take_profit,
+                }
 
-                    _time.sleep(0.5 * (attempt + 1))
-                else:
-                    logger.warning("Failed to restore positions from DB after 3 attempts")
-            finally:
-                db.close()
+            short_filled = (
+                db.query(OrderModel)
+                .filter(
+                    OrderModel.status.in_(["filled", "partial"]),
+                    OrderModel.is_short.is_(True),
+                )
+                .all()
+            )
+            for o in short_filled:
+                self._short_positions[str(o.ticker)] = {
+                    "shares": int(o.quantity or 0),
+                    "avg_price": float(o.price or 0.0),
+                    "sl": o.stop_loss,
+                    "tp": o.take_profit,
+                }
+            if self._positions or self._short_positions:
+                logger.info("Restored %d long + %d short positions from DB", len(self._positions), len(self._short_positions))
+        except Exception as e:
+            logger.warning("Failed to restore positions from DB: %s", e)
+        finally:
+            db.close()
 
     def update(self, ticker: str, direction: str, quantity: int, price: float) -> None:
         if ticker not in self._positions:

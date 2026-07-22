@@ -15,6 +15,18 @@ from sqlalchemy import (
 from .base import Base
 
 
+class AMLState(Base):
+    __tablename__ = "aml_state"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False, unique=True, index=True)
+    date = Column(Date, nullable=False)
+    daily_volume = Column(Float, default=0.0)
+    tx_timestamps_json = Column(JSON, default=list)
+    velocity_timestamps_json = Column(JSON, default=list)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
 class GeoRiskScore(Base):
     __tablename__ = "geo_risk_scores"
 

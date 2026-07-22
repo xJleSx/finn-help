@@ -49,6 +49,7 @@ from src.db.models.portfolio import (
 )
 from src.db.models.audit import AuditLog
 from src.db.models.risk import (
+    AMLState,
     CompanyRiskHistory,
     GeopoliticalRiskHistory,
     GeoRiskScore,
@@ -77,6 +78,7 @@ from src.db.models.user import (
 
 __all__ = [
     "Base",
+    "AMLState",
     "Instrument",
     "Price",
     "Dividend",

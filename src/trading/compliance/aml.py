@@ -4,6 +4,8 @@ import logging
 from datetime import date, datetime, timezone
 from typing import Any
 
+from src.db.connection import get_session
+from src.db.models.risk import AMLState
 from src.trading.types import AMLRecord, ComplianceCheck
 
 logger = logging.getLogger(__name__)
@@ -15,18 +17,57 @@ STRUCTURING_WINDOW_HOURS: int = 24
 MAX_DAILY_VOLUME_RUB: float = 10_000_000
 PEP_THRESHOLD_RUB: float = 5_000_000
 
-# TODO: Persist AML state to DB instead of keeping only in memory.
-# On restart the following dicts are empty, losing all daily volume caps,
-# structuring detection, and velocity checks. A user could immediately
-# bypass daily limits after a service restart.
 _user_daily_volume: dict[int, float] = {}
 _user_daily_volume_date: dict[int, date] = {}
 _user_tx_timestamps: dict[int, list[dict[str, Any]]] = {}
 _user_velocity: dict[int, list[float]] = {}
-logger.warning("AML state is in-memory only and will be lost on restart. TODO: persist to DB for continuity.")
+
+
+def _load_user_state(user_id: int) -> None:
+    if user_id in _user_daily_volume:
+        return
+    try:
+        db = get_session()
+        try:
+            row = db.query(AMLState).filter(AMLState.user_id == user_id).first()
+            if row is not None:
+                _user_daily_volume[user_id] = row.daily_volume or 0.0
+                _user_daily_volume_date[user_id] = row.date
+                _user_tx_timestamps[user_id] = list(row.tx_timestamps_json or [])
+                _user_velocity[user_id] = list(row.velocity_timestamps_json or [])
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug("Could not load AML state for user %d from DB: %s", user_id, e)
+        _user_daily_volume.setdefault(user_id, 0.0)
+        _user_daily_volume_date.setdefault(user_id, date.today())
+        _user_tx_timestamps.setdefault(user_id, [])
+        _user_velocity.setdefault(user_id, [])
+
+
+def _save_user_state(user_id: int) -> None:
+    try:
+        db = get_session()
+        try:
+            row = db.query(AMLState).filter(AMLState.user_id == user_id).first()
+            if row is None:
+                row = AMLState(user_id=user_id)
+                db.add(row)
+            row.date = _user_daily_volume_date.get(user_id, date.today())
+            row.daily_volume = _user_daily_volume.get(user_id, 0.0)
+            row.tx_timestamps_json = _user_tx_timestamps.get(user_id, [])
+            row.velocity_timestamps_json = _user_velocity.get(user_id, [])
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug("Could not persist AML state for user %d: %s", user_id, e)
 
 
 def _reset_daily_if_needed(user_id: int) -> None:
+    _load_user_state(user_id)
     _user_daily_volume.setdefault(user_id, 0.0)
     _user_daily_volume_date.setdefault(user_id, date.today())
     _user_tx_timestamps.setdefault(user_id, [])
@@ -44,6 +85,7 @@ def _check_volume_threshold(ticker: str, volume_rub: float, user_id: int) -> lis
     _user_daily_volume[user_id] += volume_rub
     if _user_daily_volume[user_id] > MAX_DAILY_VOLUME_RUB:
         warnings.append(f"Daily volume limit exceeded: {_user_daily_volume[user_id]:,.0f} RUB")
+    _save_user_state(user_id)
     return warnings
 
 
@@ -59,6 +101,7 @@ def _check_round_trip(ticker: str, user_id: int, volume_rub: float) -> list[str]
         warnings.append(f"Structuring pattern detected: {volume_rub:,.0f} RUB near threshold")
     if recent_volume > STRUCTURING_THRESHOLD_RUB * 3:
         warnings.append(f"Round-trip structuring: {recent_volume:,.0f} RUB in {STRUCTURING_WINDOW_HOURS}h")
+    _save_user_state(user_id)
     return warnings
 
 
@@ -72,6 +115,7 @@ def _check_velocity(user_id: int) -> list[str]:
     _user_velocity[user_id].append(now)
     if len(_user_velocity[user_id]) > 20:
         warnings.append(f"High tx velocity: {len(_user_velocity[user_id])} tx/hour")
+    _save_user_state(user_id)
     return warnings
 
 
@@ -141,4 +185,15 @@ def reset_aml_state() -> None:
     _user_daily_volume.clear()
     _user_tx_timestamps.clear()
     _user_velocity.clear()
-    logger.info("AML state reset — in-memory only, lost on restart. TODO: persist to DB.")
+    try:
+        db = get_session()
+        try:
+            db.query(AMLState).delete()
+            db.commit()
+            logger.info("AML state reset — all rows cleared from DB")
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug("Could not clear AML state from DB: %s", e)
