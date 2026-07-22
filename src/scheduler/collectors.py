@@ -42,7 +42,7 @@ def _first(v1: Any, v2: Any) -> Any:
     return v1 if v1 is not None else v2
 
 
-ETF_BOARDS = ["etf", "etf_tqtd"]
+ETF_BOARDS = ["etf", "etf_tqtd", "shares"]
 
 async def _fetch_prices_for_instrument(db: AsyncSession, inst: Instrument, from_date: str, moex: MOEXCollector) -> int:
     itype = str(inst.instrument_type)
