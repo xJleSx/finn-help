@@ -481,12 +481,13 @@ class TestBaseCollectorRetryBehaviour:
         """Verify that successive retries wait longer each time."""
         import time as tm
 
-        from src.core.resilience import configure_circuit_breaker
+        from src.core.resilience import configure_circuit_breaker, configure_rate_limiter
 
         configure_circuit_breaker("MOEXCollector", failure_threshold=100)
+        configure_rate_limiter("MOEXCollector", max_rate=10000)
         collector = MOEXCollector()
         collector.MAX_RETRIES = 3
-        collector.RETRY_DELAY = 0.01
+        collector.RETRY_DELAY = 0.05
 
         timings: list[float] = []
 

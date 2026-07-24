@@ -105,6 +105,7 @@ def _omega_ratio(returns: np.ndarray, rf: float = 0.0) -> float:
 
 def compute_risk_metrics(price_series: list[float]) -> dict[str, Any]:
     arr = np.array(price_series, dtype=float)
+    arr = arr[~np.isnan(arr)]
     if len(arr) < 10:
         return {"sharpe": 0.0, "sortino": 0.0, "max_drawdown": 0.0, "calmar": 0.0, "omega": 0.0}
     returns = np.diff(arr) / arr[:-1]
@@ -411,6 +412,11 @@ class SignalFusionEngine:
             mdd = risk_metrics.get("max_drawdown", 0.0)
             calmar = risk_metrics.get("calmar", 0.0)
             omega = risk_metrics.get("omega", 0.0)
+            if np.isnan(sharpe): sharpe = 0.0
+            if np.isnan(sortino): sortino = 0.0
+            if np.isnan(mdd): mdd = 0.0
+            if np.isnan(calmar): calmar = 0.0
+            if np.isnan(omega): omega = 0.0
             risk_adj = 1.0
             risk_adj += min(sharpe * 0.05, 0.15)
             risk_adj += min(sortino * 0.03, 0.10)

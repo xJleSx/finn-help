@@ -17,7 +17,7 @@ class TestResample:
 
     def test_period_1_returns_sorted(self):
         df = pd.DataFrame({"date": [3, 1, 2], "close": [30, 10, 20]})
-        result = self.mtf._resample(df, 1)
+        result = self.mtf._resample(df, "D")
         assert result["close"].iloc[0] == 10
 
     def test_resample_weekly(self):
@@ -32,7 +32,7 @@ class TestResample:
                 "volume": [100] * 30,
             }
         )
-        result = self.mtf._resample(df, 5)
+        result = self.mtf._resample(df, "W")
         assert len(result) <= 6
         assert "open" in result.columns
         assert "volume" in result.columns

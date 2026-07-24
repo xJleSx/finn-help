@@ -341,9 +341,12 @@ class AnalysisService:
             except ValueError:
                 return None
 
-        tasks = [_process(inst) for inst in instruments]
-        results = await asyncio.gather(*tasks)
-        return [r for r in results if r is not None]
+        results = []
+        for inst in instruments:
+            r = await _process(inst)
+            if r is not None:
+                results.append(r)
+        return results
 
     async def analyze_with_advice(self, db: AsyncSession, inst: Instrument, ticker: str, with_ml: bool = True) -> tuple[dict[str, Any], str]:
         """Analyze a single instrument and get LLM-generated advice."""

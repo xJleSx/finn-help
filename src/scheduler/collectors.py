@@ -687,14 +687,25 @@ async def collect_bond_offerings(db: AsyncSession) -> None:
                 "duration_years": data.get("duration_years"),
             }
 
+            emit_extra = {}
+            if data.get("emitter_id") is not None:
+                emit_extra["emitter_id"] = data["emitter_id"]
+            if data.get("company_name"):
+                emit_extra["company_name"] = data["company_name"]
+
             if existing:
                 for key, val in offering_kwargs.items():
                     if val is not None:
                         setattr(existing, key, val)
+                if emit_extra:
+                    existing_extra = existing.extra or {}
+                    existing_extra.update(emit_extra)
+                    existing.extra = existing_extra
                 updated_count += 1
             else:
                 offering = BondOffering(
                     instrument_id=inst.id,
+                    extra=emit_extra or None,
                     **offering_kwargs,
                 )
                 db.add(offering)
@@ -749,6 +760,20 @@ async def collect_bond_offerings(db: AsyncSession) -> None:
         logger.info("Bond offerings: %d new, %d updated, %d coupons stored", new_count, updated_count, coupon_count)
     finally:
         await collector.close()
+
+
+async def collect_discover_bonds(db: AsyncSession) -> int:
+    """Fetch latest bond list from MOEX, add newly issued bonds to DB.
+
+    Returns the number of new bonds discovered and added.
+    """
+    from src.analysis.bonds.new_bond_locator import discover_new_bonds
+
+    results = await discover_new_bonds(db, max_results=1000)
+    new_count = len(results)
+    if new_count:
+        logger.info("collect_discover_bonds: %d new bonds added to DB", new_count)
+    return new_count
 
 
 def _parse_coupon_date(val: Any) -> Optional[date]:

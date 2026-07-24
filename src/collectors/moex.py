@@ -157,13 +157,17 @@ class MOEXCollector(BaseCollector):
         """Like get_history but also returns the MOEX board ID (TQCB/TQBD/TQOB)."""
         return self._get_bond_history(ticker, from_date, to_date)
 
-    async def get_bonds(self) -> list[dict[str, Any]]:
+    async def get_bonds(self, columns: Optional[list[str]] = None) -> list[dict[str, Any]]:
         seen = set()
         results = []
+        params: dict[str, str] = {}
+        if columns:
+            params["securities.columns"] = ",".join(columns)
         for board_id in BOND_BOARDS:
             try:
                 board_rows = await self._paginate(
                     f"/engines/stock/markets/bonds/boards/{board_id}/securities.json",
+                    params=params or None,
                     table_name="securities",
                 )
                 for entry in board_rows:
@@ -206,11 +210,18 @@ class MOEXCollector(BaseCollector):
         return info
 
     async def get_coupons(self, ticker: str) -> list[dict[str, Any]]:
-        """Get coupon schedule from MOEX ISS with pagination."""
-        return await self._paginate(
-            f"/securities/{ticker}/coupons.json",
-            table_name="coupons",
+        """Get coupon schedule via MOEX ISS bondization endpoint."""
+        data = await self._fetch_json(
+            f"/statistics/engines/stock/markets/bonds/bondization/{ticker}.json",
+            {"iss.meta": "off", "iss.only": "coupons", "start": 0, "limit": 100},
         )
+        rows = self._parse_table(data, "coupons")
+        for i, row in enumerate(rows, 1):
+            if "couponnumber" not in row or row["couponnumber"] is None:
+                row["couponnumber"] = i
+            if "value" not in row and "value_rub" in row:
+                row["value"] = row["value_rub"]
+        return rows
 
     async def get_aggregates(self, ticker: str) -> list[dict[str, Any]]:
         """Get aggregated bond data (face value, accrued interest, etc.)."""

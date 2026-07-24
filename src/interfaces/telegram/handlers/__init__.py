@@ -21,7 +21,7 @@ from src.interfaces.telegram.handlers.analysis import (
     weekly,
     whatif,
 )
-from src.interfaces.telegram.handlers.bonds import bond_detail, bonds_list
+from src.interfaces.telegram.handlers.bonds import bond_detail, bonds_list, new_bonds
 from src.interfaces.telegram.handlers.market import (
     news,
     price_cmd,
@@ -69,6 +69,7 @@ __all__ = [
     "my_authors",
     "mute_cmd",
     "muted_cmd",
+    "new_bonds",
     "news",
     "pnl",
     "portfolio",

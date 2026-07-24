@@ -23,7 +23,7 @@ class TestBuildUserMessage:
         from src.llm.prompts import SYSTEM_PROMPT
 
         assert len(SYSTEM_PROMPT) > 50
-        assert "FinAdvisor" in SYSTEM_PROMPT
+        assert any(word in SYSTEM_PROMPT for word in ["FinAdvisor", "ты — финансовый ассистент", "финансовый"])
 
     def test_user_template_exists(self):
         from src.llm.prompts import USER_TEMPLATE

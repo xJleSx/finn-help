@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.db.models import Instrument, Portfolio, Price, User
-from src.interfaces.api.auth import get_db, require_user
+from src.interfaces.api.auth import require_user
+from src.interfaces.api.dependencies import get_db
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["portfolio-bonds"], prefix="/api/portfolio")

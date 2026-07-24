@@ -179,6 +179,7 @@ class TestAuditLogQuery:
         from src.interfaces.api.rbac.audit import AuditTrail
 
         mock_db = MagicMock()
+        mock_db.execute.return_value.scalar_one_or_none.return_value = None
         mock_get_session.return_value = mock_db
 
         AuditTrail.log(user_id="1", action="test_action", resource="test:123", details="test", ip_address="127.0.0.1")

@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-from typing import AsyncIterator
+from typing import TYPE_CHECKING, AsyncIterator
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.analysis.service import AnalysisService
-from src.core.auth_service import AuthService
 from src.core.container import container, wire
 from src.db.connection import get_async_session
-from src.market.service import MarketService
-from src.notifications.service import NotificationService
-from src.portfolio.service import PortfolioService
+
+if TYPE_CHECKING:
+    from src.analysis.service import AnalysisService
+    from src.core.auth_service import AuthService
+    from src.market.service import MarketService
+    from src.notifications.service import NotificationService
+    from src.portfolio.service import PortfolioService
 
 wire()
 
@@ -41,19 +43,23 @@ async def get_read_db() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-def get_auth_service(db: AsyncSession = Depends(get_db)) -> AuthService:
+def get_auth_service(db: AsyncSession = Depends(get_db)):
+    from src.core.auth_service import AuthService
     return AuthService(db)
 
 
-def get_portfolio_service(db: AsyncSession = Depends(get_db)) -> PortfolioService:
+def get_portfolio_service(db: AsyncSession = Depends(get_db)):
+    from src.portfolio.service import PortfolioService
     return PortfolioService(db)
 
 
-def get_portfolio_service_readonly(db: AsyncSession = Depends(get_read_db)) -> PortfolioService:
+def get_portfolio_service_readonly(db: AsyncSession = Depends(get_read_db)):
+    from src.portfolio.service import PortfolioService
     return PortfolioService(db)
 
 
-def get_market_service(db: AsyncSession = Depends(get_db)) -> MarketService:
+def get_market_service(db: AsyncSession = Depends(get_db)):
+    from src.market.service import MarketService
     _analysis = container.get("analysis_service")
     _llm = container.get("llm_router")
     _notif = container.get("notification_service")
@@ -65,7 +71,8 @@ def get_market_service(db: AsyncSession = Depends(get_db)) -> MarketService:
     )
 
 
-def get_market_service_readonly(db: AsyncSession = Depends(get_read_db)) -> MarketService:
+def get_market_service_readonly(db: AsyncSession = Depends(get_read_db)):
+    from src.market.service import MarketService
     _analysis = container.get("analysis_service")
     _llm = container.get("llm_router")
     _notif = container.get("notification_service")
@@ -77,11 +84,12 @@ def get_market_service_readonly(db: AsyncSession = Depends(get_read_db)) -> Mark
     )
 
 
-def get_notification_service(db: AsyncSession = Depends(get_db)) -> NotificationService:
+def get_notification_service(db: AsyncSession = Depends(get_db)):
+    from src.notifications.service import NotificationService
     return NotificationService(db=db)
 
 
-def get_analysis_service() -> AnalysisService:
+def get_analysis_service():
     return container.get("analysis_service")
 
 

@@ -67,7 +67,7 @@ class TestReportAnomalies:
         assert result == []
 
     def test_anomaly_on_negative_profit(self, db_session):
-        inst = Instrument(ticker="SBER", full_name="Sberbank")
+        inst = Instrument(ticker="SBER", full_name="Sberbank", instrument_type="stock")
         db_session.add(inst)
         db_session.flush()
 
@@ -101,7 +101,7 @@ class TestCorporateEventAlerts:
         assert result == []
 
     def test_upcoming_divident_alert(self, db_session):
-        inst = Instrument(ticker="LKOH", full_name="Lukoil")
+        inst = Instrument(ticker="LKOH", full_name="Lukoil", instrument_type="stock")
         db_session.add(inst)
         db_session.flush()
 
@@ -127,7 +127,7 @@ class TestSignalDropAlerts:
         assert result == []
 
     def test_signal_drop_detected(self, db_session):
-        inst = Instrument(ticker="SBER", full_name="Sberbank")
+        inst = Instrument(ticker="SBER", full_name="Sberbank", instrument_type="stock")
         db_session.add(inst)
         db_session.flush()
 

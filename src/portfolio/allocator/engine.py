@@ -291,10 +291,10 @@ class PortfolioAllocator:
             if r.instrument_id not in price_map:
                 price_map[r.instrument_id] = r
 
-        one_year_ago = date.today() - timedelta(days=365)
+        two_years_ago = date.today() - timedelta(days=730)
         all_divs = (
             db.query(Dividend)
-            .filter(Dividend.instrument_id.in_(inst_ids), Dividend.date >= one_year_ago)
+            .filter(Dividend.instrument_id.in_(inst_ids), Dividend.date >= two_years_ago)
             .order_by(Dividend.instrument_id, Dividend.date.desc())
             .all()
         )
@@ -361,8 +361,8 @@ class PortfolioAllocator:
                 "sector": sector,
                 "last_price": float(last_price) if last_price else None,
                 "div_yield": round(div_yield, 2),
-                "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_sync) == "dividend",
-                "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_sync) == "growth",
+                "is_dividend": inst.instrument_type == "stock" and div_yield > 0,
+                "is_growth": inst.instrument_type == "stock",
             }
             if fm:
                 entry["pe_ratio"] = float(fm.pe_ratio) if fm.pe_ratio else None
@@ -394,10 +394,10 @@ class PortfolioAllocator:
             if r.instrument_id not in price_map:
                 price_map[r.instrument_id] = r
 
-        one_year_ago = date.today() - timedelta(days=365)
+        two_years_ago = date.today() - timedelta(days=730)
         all_divs = await db.execute(
             select(Dividend)
-            .where((Dividend.instrument_id.in_(inst_ids)) & (Dividend.date >= one_year_ago))
+            .where((Dividend.instrument_id.in_(inst_ids)) & (Dividend.date >= two_years_ago))
             .order_by(Dividend.instrument_id, Dividend.date.desc())
         )
         div_map: dict[int, list[Any]] = {}
@@ -461,8 +461,8 @@ class PortfolioAllocator:
                 "sector": sector,
                 "last_price": float(last_price) if last_price else None,
                 "div_yield": round(div_yield, 2),
-                "is_dividend": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_async) == "dividend",
-                "is_growth": KNOWN_DIVIDEND_STOCKS.get(inst_ticker_async) == "growth",
+                "is_dividend": inst.instrument_type == "stock" and div_yield > 0,
+                "is_growth": inst.instrument_type == "stock",
             }
             if fm:
                 entry["pe_ratio"] = float(fm.pe_ratio) if fm.pe_ratio else None
@@ -1064,9 +1064,21 @@ class PortfolioAllocator:
         try:
             instruments = self._load_instruments(db)
             existing = self._get_current_portfolio(db)
-            all_picks = []
-            for cat, cfg in self._weights().items():
+
+            max_picks = ALLOCATOR_RECOMMEND_MAX_PICKS
+            for tier in ALLOCATOR_RECOMMEND_TIER_PICKS:
+                if capital < tier["max_capital"]:
+                    max_picks = tier["max_picks"]
+                    break
+
+            weights = self._weights()
+            seen_tickers: set[str] = set()
+            all_picks: list[dict[str, Any]] = []
+            leftovers: list[dict[str, Any]] = []
+
+            for cat, cfg in weights.items():
                 candidates = self._score_candidates(instruments, cat, capital or 100_000, existing, db)
+                cat_picks = []
                 for c in candidates:
                     if exclude and c["ticker"] in exclude:
                         continue
@@ -1075,17 +1087,36 @@ class PortfolioAllocator:
                     last_price = c.get("last_price")
                     if last_price and capital > 0 and last_price > capital * 0.8:
                         continue
-                    c["category"] = cfg["label"]
-                    c["score"] = round(c.get("score", 0), 2)
+                    entry = c.copy()
+                    entry["category"] = cfg["label"]
+                    entry["score"] = round(entry.get("score", 0), 2)
                     risk = item_risk(c, db, capital)
-                    c["risk"] = risk
-                    all_picks.append(c)
+                    entry["risk"] = risk
+                    cat_picks.append(entry)
+
+                cat_picks.sort(key=lambda x: x["score"], reverse=True)
+                cat_max = cfg.get("max", 3)
+                cat_added = 0
+                for pick in cat_picks:
+                    if pick["ticker"] in seen_tickers:
+                        continue
+                    seen_tickers.add(pick["ticker"])
+                    if cat_added < cat_max:
+                        all_picks.append(pick)
+                        cat_added += 1
+                    elif len(leftovers) < max_picks * 2:
+                        leftovers.append(pick)
+
+            if leftovers:
+                leftovers.sort(key=lambda x: x["score"], reverse=True)
+                slots_left = max_picks - len(all_picks)
+                if slots_left > 0:
+                    for pick in leftovers:
+                        all_picks.append(pick)
+                        if len(all_picks) >= max_picks:
+                            break
+
             all_picks.sort(key=lambda x: x["score"], reverse=True)
-            max_picks = ALLOCATOR_RECOMMEND_MAX_PICKS
-            for tier in ALLOCATOR_RECOMMEND_TIER_PICKS:
-                if capital < tier["max_capital"]:
-                    max_picks = tier["max_picks"]
-                    break
             return all_picks[:max_picks]
         finally:
             if should_close:

@@ -17,6 +17,7 @@ from src.scheduler.collectors import (
     collect_alternative_data,
     collect_bond_offerings,
     collect_corporate_events,
+    collect_discover_bonds,
     collect_dividends,
     collect_financial_reports,
     collect_fundamental,
@@ -79,6 +80,7 @@ async def daily_update() -> None:
                 logger.info("Daily digest (%d chars)", len(digest))
 
             await run_sector_impact_analysis(db)
+            await collect_discover_bonds(db)
             await collect_bond_offerings(db)
 
             await async_refresh_sector_benchmarks()

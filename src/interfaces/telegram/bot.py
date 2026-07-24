@@ -54,6 +54,7 @@ from src.interfaces.telegram.handlers import (
     mute_cmd,
     muted_cmd,
     my_authors,
+    new_bonds,
     news,
     pnl,
     portfolio,
@@ -225,6 +226,7 @@ async def run_bot() -> None:
     app.add_handler(CommandHandler("authors", my_authors))
     app.add_handler(CommandHandler("bonds", bonds_list))
     app.add_handler(CommandHandler("bond", bond_detail))
+    app.add_handler(CommandHandler("newbonds", new_bonds))
 
     app.add_handler(CallbackQueryHandler(button_callback))
 

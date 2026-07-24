@@ -14,6 +14,7 @@ from src.cache import get_redis
 from src.config import settings
 from src.db.models import User
 from src.db.connection import get_session
+from src.interfaces.api.dependencies import get_db, get_read_db
 
 logger = structlog.get_logger(__name__)
 
@@ -121,8 +122,6 @@ def is_refresh_token_blacklisted(token: str) -> bool:
             logger.warning("Redis get failed for refresh token blacklist, using in-memory fallback")
     return token in _refresh_blacklist_fallback
 
-
-from src.interfaces.api.dependencies import get_db, get_read_db  # noqa: F401  re-exported for backwards compat
 
 
 async def get_current_user(

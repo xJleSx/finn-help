@@ -100,7 +100,7 @@ class UserProfileManager:
             return self._cache[user_id]
         db = get_session()
         try:
-            model = db.query(UserProfileModel).filter(UserProfileModel.user_id == int(user_id)).first()
+            model = db.query(UserProfileModel).filter(UserProfileModel.user_id == user_id).first()
             if model is not None:
                 profile = UserProfile.from_orm(model)
             else:
@@ -120,10 +120,10 @@ class UserProfileManager:
             db.close()
 
     def _save_to_db(self, db: Any, profile: UserProfile) -> None:
-        model = db.query(UserProfileModel).filter(UserProfileModel.user_id == int(profile.user_id)).first()
+        model = db.query(UserProfileModel).filter(UserProfileModel.user_id == profile.user_id).first()
         if model is None:
             model = UserProfileModel(
-                user_id=int(profile.user_id),
+                user_id=profile.user_id,
                 risk_profile=profile.risk_profile,
                 investment_horizon=profile.investment_horizon,
                 capital=profile.capital,
@@ -190,7 +190,7 @@ class UserProfileManager:
         self._cache.pop(user_id, None)
         db = get_session()
         try:
-            db.query(UserProfileModel).filter(UserProfileModel.user_id == int(user_id)).delete()
+            db.query(UserProfileModel).filter(UserProfileModel.user_id == user_id).delete()
             db.commit()
         finally:
             db.close()

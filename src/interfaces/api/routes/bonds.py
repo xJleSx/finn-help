@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -9,8 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.analysis.bonds.new_bond_locator import find_new_bonds
+from src.core.executor import get_executor
+from src.db.connection import get_session
 from src.db.models import BondCouponSchedule, BondOffering, Instrument, Price
-from src.interfaces.api.auth import get_db
+from src.interfaces.api.dependencies import get_db
 from src.interfaces.api.schemas import (
     BondAIAnalysisResponse,
     BondAnalysisResponse,
@@ -664,3 +668,24 @@ async def get_bond_cash_flow(ticker: str, db: AsyncSession = Depends(get_db)) ->
             "maturityDate": maturity.isoformat(),
         },
     }
+
+
+@router.get("/api/bonds/new-issues")
+async def new_bond_issues(
+    min_ytm: float | None = Query(None, description="Минимальная YTM"),
+    max_results: int = Query(20, ge=1, le=100, description="Макс. количество"),
+    min_days: int = Query(0, ge=0, description="Мин. дней до первой выплаты"),
+) -> list[dict[str, Any]]:
+    loop = asyncio.get_running_loop()
+    db = get_session()
+    try:
+        return await loop.run_in_executor(
+            get_executor(),
+            find_new_bonds,
+            db,
+            min_ytm,
+            max_results,
+            min_days,
+        )
+    finally:
+        db.close()

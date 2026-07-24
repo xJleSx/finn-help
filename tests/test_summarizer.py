@@ -23,7 +23,7 @@ class TestNewsSummarizerIntegration:
         assert clusters == []
 
     def test_cluster_articles_groups_by_category(self, db_session):
-        inst = Instrument(ticker="SBER", full_name="Sberbank", sector="Finance")
+        inst = Instrument(ticker="SBER", full_name="Sberbank", sector="Finance", instrument_type="stock")
         db_session.add(inst)
         db_session.flush()
 

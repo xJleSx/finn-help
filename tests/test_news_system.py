@@ -54,10 +54,10 @@ class TestModuleImports:
         assert GeopoliticalRiskEngine is not None
 
     def test_event_detector_import(self):
-        from src.data.event_detector import EventDetector, SentimentDivergenceDetector
+        from src.data.event_detector import EventDetector, DataSentimentDivergenceDetector
 
         assert EventDetector is not None
-        assert SentimentDivergenceDetector is not None
+        assert DataSentimentDivergenceDetector is not None
 
     def test_signal_fusion_integration_import(self):
         from src.data.signal_fusion_integration import SignalFusionIntegration
@@ -651,9 +651,9 @@ class TestEventDetector:
 
 class TestSentimentDivergenceDetector:
     def test_basic_instantiation(self):
-        from src.data.event_detector import SentimentDivergenceDetector
+        from src.data.event_detector import DataSentimentDivergenceDetector
 
-        d = SentimentDivergenceDetector()
+        d = DataSentimentDivergenceDetector()
         assert d is not None
         assert d.threshold == 0.4
 

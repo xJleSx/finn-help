@@ -392,6 +392,13 @@ VOLATILITY_REGIMES: dict[str, _VolatilityThresholds] = {
 
 
 class VolatilityRegimeDetector:
+    def _classify(self, atr_ratio: float, hv: float) -> str:
+        if atr_ratio < VOLATILITY_REGIMES["LOW"]["threshold_atr"] and hv < VOLATILITY_REGIMES["LOW"]["threshold_hv"]:
+            return "LOW"
+        if atr_ratio < VOLATILITY_REGIMES["NORMAL"]["threshold_atr"] and hv < VOLATILITY_REGIMES["NORMAL"]["threshold_hv"]:
+            return "NORMAL"
+        return "HIGH"
+
     def _dynamic_thresholds(self, atr_series: pd.Series, hv_series: pd.Series) -> tuple[float, float, float, float]:
         if len(atr_series) > 20:
             low_atr = float(atr_series.quantile(0.25))

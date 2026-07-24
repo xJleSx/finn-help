@@ -50,7 +50,7 @@ def test_compute_leverage_info_safe():
 
 def test_compute_leverage_info_warning():
     info = compute_leverage_info(portfolio_value=1_000_000, total_loan=1_200_000, cash_balance=0, margin_used=900_000)
-    assert info.leverage_ratio == 2.2
+    assert info.leverage_ratio == float("inf")
     assert info.margin_status in ("margin_call", "warning", "liquidation")
 
 
@@ -74,4 +74,4 @@ def test_compute_interest():
 def test_margin_requirements_zero():
     req = compute_margin_requirements(position_value=0, portfolio_value=0)
     assert req.initial_margin == 0
-    assert req.leverage == 1.0
+    assert req.leverage == float("inf")

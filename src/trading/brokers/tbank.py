@@ -333,7 +333,7 @@ class TBankClient:
                 "lot": s.lot,
                 "min_price_increment": self._decimal(s.min_price_increment),
             }
-            for s in resp.instruments[:100]
+            for s in resp.instruments
         ]
 
     @staticmethod
@@ -354,6 +354,23 @@ class TBankClient:
         units = int(val)
         nano = int(round((val - units) * 1e9))
         return Quotation(units=units, nano=nano)
+
+
+async def get_available_bond_tickers() -> set[str] | None:
+    """Fetch available bond tickers from T-Bank.
+
+    Returns a set of ticker strings, or None if T-Bank is not configured or unavailable.
+    """
+    try:
+        token = settings.tinkoff_token
+        if not token:
+            return None
+        async with TBankClient(token=token) as client:
+            bonds = await client.get_instruments(instrument_type="bond")
+            return {b["ticker"] for b in bonds if b.get("ticker")}
+    except Exception:
+        logger.warning("Failed to fetch T-Bank bond tickers", exc_info=True)
+        return None
 
 
 register_broker("tbank", TBankClient)

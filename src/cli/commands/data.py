@@ -11,10 +11,10 @@ from src.cli.output import console
 from src.collectors.cbr import CBRCollector
 from src.collectors.financials import FinancialReportCollector
 from src.collectors.moex import MOEXCollector
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
-from src.db.connection import get_async_session
-from src.db.models import BondOffering, Dividend, FinancialReport, Instrument, Price
+from src.db.connection import get_async_session, get_session
+from src.db.models import BondCouponSchedule, BondOffering, Dividend, FinancialReport, Instrument, Price
 
 from . import app
 
@@ -122,6 +122,72 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> 
                 logger.warning("Failed to fetch financials for %s: %s", tk, e)
                 await db.rollback()
 
+        if inst.instrument_type == "bond":
+            try:
+                coupons = await moex.get_coupons(tk)
+                if coupons:
+                    await db.execute(delete(BondCouponSchedule).filter_by(instrument_id=inst.id))
+                    for cpn in coupons:
+                        raw_date = cpn.get("coupondate") or cpn.get("couponDate")
+                        cpn_date = None
+                        if isinstance(raw_date, str):
+                            cpn_date = date.fromisoformat(raw_date)
+                        elif isinstance(raw_date, date):
+                            cpn_date = raw_date
+                        if not cpn_date:
+                            continue
+                        try:
+                            value = float(cpn.get("value", 0))
+                        except (ValueError, TypeError):
+                            continue
+                        entry = BondCouponSchedule(
+                            instrument_id=inst.id,
+                            coupon_date=cpn_date,
+                            coupon_value=value,
+                            coupon_number=_safe_int(cpn.get("couponnumber") or cpn.get("couponNumber")),
+                            currency=cpn.get("currency", "RUB"),
+                            fix_date=_parse_cpn_date(cpn.get("fixdate") or cpn.get("fixDate")),
+                            face_value=_safe_float(cpn.get("facevalue") or cpn.get("faceValue")),
+                            initial_face_value=_safe_float(cpn.get("initialfacevalue") or cpn.get("initialFaceValue")),
+                        )
+                        db.add(entry)
+                    await db.commit()
+                    logger.info("Coupon schedule saved for %s (%d entries)", tk, len(coupons))
+            except Exception as e:
+                logger.warning("Coupon schedule fetch failed for %s: %s", tk, e)
+                await db.rollback()
+
+
+def _safe_int(val: object) -> int | None:
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_float(val: object) -> float | None:
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_cpn_date(val: object) -> date | None:
+    if val is None:
+        return None
+    if isinstance(val, date):
+        return val
+    if isinstance(val, str):
+        try:
+            return date.fromisoformat(val)
+        except (ValueError, TypeError):
+            return None
+    return None
+
 
 
 @app.command()
@@ -159,9 +225,15 @@ def update(ticker: Optional[str] = typer.Argument(None, help="Тикер (нап
                     p.update(task2, description="[green]✓[/green] ETF обновлены")
 
                     task3 = p.add_task("Загрузка облигаций...", total=None)
-                    bonds = await moex.get_bonds()
-                    p.update(task3, description=f"Загружено {len(bonds)} облигаций")
-                    for b in bonds[:50]:
+                    bonds_raw = await moex.get_bonds()
+                    bonds = [
+                        b for b in bonds_raw
+                        if b.get("LISTLEVEL") == 1
+                        and b.get("STATUS") == "A"
+                        and b.get("PREVPRICE") is not None
+                    ]
+                    p.update(task3, description=f"Загружено {len(bonds_raw)} -> отобрано {len(bonds)} активных облигаций 1-го уровня")
+                    for b in bonds:
                         secid = b.get("SECID") or b.get("secid")
                         if secid:
                             await _update_ticker(moex, tk=secid, itype="bond")
@@ -477,3 +549,126 @@ def scan(ticker: str = typer.Argument(..., help="Тикер для массов�
             console.print(f"\nЧтобы загрузить: finn update {matches[0].get('SECID', 'TICKER')}")
 
     asyncio.run(_run())
+
+
+@app.command()
+def discover_bonds(
+    min_ytm: Optional[float] = typer.Option(None, "--min-ytm", help="Минимальная YTM (%)"),
+    max_results: int = typer.Option(20, "--max", "-n", help="Максимум результатов"),
+    min_days: int = typer.Option(0, "--min-days", "-d", help="Мин. дней до первого купона"),
+) -> None:
+    """Найти новые облигации на MOEX, добавить в БД, показать рейтинг"""
+
+    async def _run() -> None:
+        from src.analysis.bonds.new_bond_locator import discover_new_bonds
+        from rich.table import Table
+
+        async with get_async_session() as db:
+            results = await discover_new_bonds(
+                db, min_ytm=min_ytm, max_results=max_results, min_days_to_first_coupon=min_days
+            )
+
+        if not results:
+            console.print("[yellow]Новых облигаций без первой выплаты купона не найдено[/yellow]")
+            return
+
+        table = Table(title=f"Новые облигации (найдено: {len(results)})")
+        table.add_column("Тикер", style="cyan")
+        table.add_column("Компания")
+        table.add_column("YTM", justify="right")
+        table.add_column("Рейтинг")
+        table.add_column("След. купон")
+        table.add_column("Дней")
+        table.add_column("Статус")
+
+        for b in results:
+            status = "⚠" if b["data_incomplete"] else "✓"
+            fcd = b["first_coupon_date"] or "—"
+            days = str(b["days_to_first_coupon"]) if b["days_to_first_coupon"] is not None else "—"
+            ytm = f'{b["yield_to_maturity"]:.1f}%' if b["yield_to_maturity"] else "—"
+            company = b.get("company_name") or b["short_name"]
+            table.add_row(
+                b["ticker"],
+                company[:20],
+                ytm,
+                b["credit_rating"],
+                fcd,
+                days,
+                status,
+            )
+
+        console.print(table)
+
+    asyncio.run(_run())
+
+
+def update_coupons(
+    ticker: Optional[str] = typer.Argument(None, help="Тикер (например, SU26238RMFS4)"),
+) -> None:
+    """Обновить купонные графики для облигаций"""
+
+    async def _run() -> None:
+        async with MOEXCollector() as moex:
+            if ticker:
+                await _update_coupon_schedule(moex, tk=ticker.upper())
+                console.print(f"[green]✓ Купоны {ticker} обновлены[/green]")
+                return
+
+            db = get_session()
+            try:
+                bonds = db.query(Instrument).filter(Instrument.instrument_type == "bond").all()
+                total = len(bonds)
+                console.print(f"Загрузка купонов для {total} облигаций...")
+                with console.status("") as s:
+                    for i, inst in enumerate(bonds, 1):
+                        s.update(f"[{i}/{total}] {inst.ticker}")
+                        try:
+                            await _update_coupon_schedule(moex, tk=inst.ticker)
+                        except Exception as e:
+                            logger.warning("Ошибка для %s: %s", inst.ticker, e)
+                console.print(f"[green]✓ Купоны обновлены для {total} облигаций[/green]")
+            finally:
+                db.close()
+
+    asyncio.run(_run())
+
+
+async def _update_coupon_schedule(moex: MOEXCollector, tk: str) -> None:
+    from sqlalchemy import delete
+
+    async with get_async_session() as db:
+        result = await db.execute(select(Instrument).filter_by(ticker=tk, instrument_type="bond"))
+        inst = result.scalars().first()
+        if not inst:
+            return
+
+        coupons = await moex.get_coupons(tk)
+        if not coupons:
+            return
+
+        await db.execute(delete(BondCouponSchedule).filter_by(instrument_id=inst.id))
+        for cpn in coupons:
+            raw_date = cpn.get("coupondate") or cpn.get("couponDate")
+            cpn_date = None
+            if isinstance(raw_date, str):
+                cpn_date = date.fromisoformat(raw_date)
+            elif isinstance(raw_date, date):
+                cpn_date = raw_date
+            if not cpn_date:
+                continue
+            try:
+                value = float(cpn.get("value", 0))
+            except (ValueError, TypeError):
+                continue
+            entry = BondCouponSchedule(
+                instrument_id=inst.id,
+                coupon_date=cpn_date,
+                coupon_value=value,
+                coupon_number=_safe_int(cpn.get("couponnumber") or cpn.get("couponNumber")),
+                currency=cpn.get("currency", "RUB"),
+                fix_date=_parse_cpn_date(cpn.get("fixdate") or cpn.get("fixDate")),
+                face_value=_safe_float(cpn.get("facevalue") or cpn.get("faceValue")),
+                initial_face_value=_safe_float(cpn.get("initialfacevalue") or cpn.get("initialFaceValue")),
+            )
+            db.add(entry)
+        await db.commit()

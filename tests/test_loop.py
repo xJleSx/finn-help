@@ -143,7 +143,7 @@ class TestMarketHoursCheck:
     async def test_outside_hours(self):
         import src.trading.execution.loop as loop
 
-        dt = datetime(2024, 1, 15, 20, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 1, 15, 21, 0, tzinfo=timezone.utc)
         with patch("src.trading.execution.loop.datetime") as mock_dt:
             mock_dt.now.return_value = dt
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw) if a else dt

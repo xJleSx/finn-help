@@ -9,7 +9,7 @@ from structlog import get_logger
 
 from src.core.health import health_registry
 from src.db.models import AltDataPoint, BondOffering, CompanyProfile, CorporateEvent, FinancialReport, Instrument, Price, Signal
-from src.interfaces.api.auth import get_db
+from src.interfaces.api.dependencies import get_db
 from src.interfaces.api.schemas import HealthResponse
 
 router = APIRouter(tags=["health"])

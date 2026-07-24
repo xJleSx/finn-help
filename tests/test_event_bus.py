@@ -78,7 +78,7 @@ async def test_publish_sync(bus):
         received.append(event)
 
     bus.subscribe("sync_test", handler)
-    await bus.publish_sync("sync_test", {"msg": "hello"})
+    await bus.publish_async("sync_test", {"msg": "hello"})
     assert len(received) == 1
     assert received[0].event_type == "sync_test"
     assert received[0].data["msg"] == "hello"
@@ -98,7 +98,7 @@ async def test_publish_sync_default_data(bus):
         received.append(event)
 
     bus.subscribe("no_data", handler)
-    await bus.publish_sync("no_data")
+    await bus.publish_async("no_data")
     assert received[0].data == {}
 
 

@@ -29,6 +29,7 @@ from .analysis import status as status  # noqa: E402
 from .analysis import train_models as train_models  # noqa: E402
 from .data import _update_ticker as _update_ticker  # noqa: E402
 from .data import bond as bond  # noqa: E402
+from .data import discover_bonds as discover_bonds  # noqa: E402
 from .data import financials as financials  # noqa: E402
 from .data import list_instruments as list_instruments  # noqa: E402
 from .data import macro as macro  # noqa: E402

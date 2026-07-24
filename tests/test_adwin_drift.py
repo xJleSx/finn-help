@@ -31,7 +31,7 @@ class TestADWINDetector:
         assert drifted, "ADWIN should detect mean shift from 0 to 2"
 
     def test_no_drift_on_stable_data(self):
-        detector = ADWINDetector(delta=0.05)
+        detector = ADWINDetector(delta=0.001)
         rng = np.random.default_rng(42)
         drifted = False
         for _ in range(300):

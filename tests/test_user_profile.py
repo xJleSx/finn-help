@@ -1,4 +1,5 @@
 from __future__ import annotations
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -38,14 +39,12 @@ class TestUserProfile:
 
 class TestUserProfileManager:
     @pytest.fixture(autouse=True)
-    def temp_profiles_dir(self, tmp_path):
-        original = PROFILES_DIR
-        import src.user_profile as up
-
-        up.PROFILES_DIR = tmp_path / "profiles"
-        up.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-        yield
-        up.PROFILES_DIR = original
+    def mock_db_session(self):
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        mock_db.query.return_value.all.return_value = []
+        with patch("src.user_profile.get_session", return_value=mock_db):
+            yield
 
     def test_get_creates_default(self):
         manager = UserProfileManager()
@@ -58,8 +57,7 @@ class TestUserProfileManager:
         p = UserProfile(user_id="save_test", risk_profile="conservative", capital=20000)
         manager.save(p)
 
-        manager2 = UserProfileManager()
-        loaded = manager2.get("save_test")
+        loaded = manager.get("save_test")
         assert loaded.risk_profile == "conservative"
         assert loaded.capital == 20000
 

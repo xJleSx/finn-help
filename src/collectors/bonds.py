@@ -172,7 +172,23 @@ class BondOfferingCollector(BaseCollector):
             elif name == "QUALIFIEDINVESTOR":
                 qual_value = str(value).lower() if value else ""
                 result["qual_investor_only"] = qual_value in ("yes", "1", "true", "да")
+            elif name == "EMITTER_ID":
+                with contextlib.suppress(ValueError, TypeError):
+                    result["emitter_id"] = int(value) if value else None
+            elif name == "NAME":
+                result["company_name"] = self._parse_company_name(value or "")
         return result
+
+    @staticmethod
+    def _parse_company_name(bond_name: str) -> str:
+        """Extract issuer company name from bond full name (e.g. 'ПР-Лизинг 003Р-02' -> 'ПР-Лизинг')."""
+        import re
+        name = bond_name.strip()
+        # Remove series suffix like 001P, 003P-02, БО-01, etc.
+        name = re.sub(r"\s+[0-9БBOРPС\-]+$", "", name)
+        # Remove common bond-type suffixes
+        name = re.sub(r"\s+(БО|облигация|биржевая|exchange|bond).*", "", name, flags=re.IGNORECASE)
+        return name.strip() or bond_name.strip()
 
     async def close(self) -> None:
         if self._moex:

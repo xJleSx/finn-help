@@ -6,6 +6,9 @@ import pandas as pd
 
 def compute_returns(prices: list[float]) -> np.ndarray:
     arr = np.array(prices, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    if len(arr) < 2:
+        return np.array([], dtype=float)
     return np.diff(arr) / arr[:-1]
 
 
@@ -27,6 +30,9 @@ def compute_sortino(returns: np.ndarray, annual_factor: int = 252) -> float:
 
 def compute_max_drawdown(prices: list[float]) -> float:
     arr = np.array(prices, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    if len(arr) < 2:
+        return 0.0
     peak = np.maximum.accumulate(arr)
     dd = (arr - peak) / peak
     return float(np.min(dd))

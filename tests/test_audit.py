@@ -191,6 +191,7 @@ class TestAuditLogOrder:
         with (
             patch("src.trading.execution.audit.AUDIT_DIR"),
             patch("src.trading.execution.audit._rotate_if_needed"),
+            patch("src.trading.execution.audit._read_last_entry_hash", return_value=""),
             patch("builtins.open") as mock_open,
         ):
             mock_file = MagicMock()
@@ -202,6 +203,7 @@ class TestAuditLogOrder:
         with (
             patch("src.trading.execution.audit.AUDIT_DIR"),
             patch("src.trading.execution.audit._rotate_if_needed"),
+            patch("src.trading.execution.audit._read_last_entry_hash", return_value=""),
             patch("builtins.open") as mock_open,
         ):
             mock_file = MagicMock()

@@ -82,7 +82,7 @@ def test_generate_tax_report():
     ]
     report = generate_tax_report(year=2026, trades=trades, dividends=dividends)
     assert report.year == 2026
-    assert report.total_realised_pnl > 0
+    assert report.total_realized_pnl > 0
     assert report.total_dividends == 500
     assert report.total_tax_due > 0
     assert len(report.lots) == 1
@@ -115,6 +115,6 @@ def test_generate_3ndfl_section():
 
 def test_tax_report_no_trades():
     report = generate_tax_report(year=2026)
-    assert report.total_realised_pnl == 0.0
+    assert report.total_realized_pnl == 0.0
     assert report.lots == []
     assert report.total_tax_due == 0.0

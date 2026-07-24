@@ -230,18 +230,13 @@ class NewsImpactModel(BaseRegressor):
         return results
 
     def predict(self, db: Any, news_article: Any, horizon_days: int = 1) -> dict[str, Any]:
-        try:
-            import torch
-        except ImportError:
-            return {"predicted_return": 0.0, "confidence": 0.0, "model_loaded": False}
-
         model = self._models.get(horizon_days)
         if model is None:
             try:
                 model = load_from_registry(self._model_name(horizon_days))
                 self._models[horizon_days] = model
             except (ValueError, FileNotFoundError):
-                return {"predicted_return": 0.0, "confidence": 0.0, "model_loaded": False}
+                return {"predicted_return": 0.0, "xgb_prediction": 0.0, "lstm_prediction": None, "confidence": 0.0, "model_loaded": False}
 
         features = extract_features(db, news_article)
         vec = np.array([features.get(c, 0.0) for c in self._feature_names], dtype=np.float32).reshape(1, -1)
@@ -252,6 +247,7 @@ class NewsImpactModel(BaseRegressor):
         lstm_model = self._lstm_models.get(horizon_days)
         if lstm_model is None:
             try:
+                import torch
                 lstm_path = MODEL_DIR / f"{self._lstm_model_name(horizon_days)}.pt"
                 if lstm_path.exists():
                     lstm_cls = self._get_lstm_class()
@@ -262,8 +258,8 @@ class NewsImpactModel(BaseRegressor):
                 logger.debug("LSTM model load failed for horizon %d: %s", horizon_days, e)
 
         if lstm_model is not None:
-            with torch.no_grad():
-                lstm_pred = float(lstm_model(torch.from_numpy(vec.reshape(1, 1, -1))).item())
+            import torch
+            lstm_pred = self._predict_lstm(lstm_model, vec.reshape(1, 1, -1))
 
         final_pred = (xgb_pred + lstm_pred) / 2.0 if lstm_model is not None else xgb_pred
 

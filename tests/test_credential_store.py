@@ -37,14 +37,15 @@ class TestGetBrokerToken:
         with patch("src.config.settings") as mock_settings:
             mock_settings.tinkoff_token = "default_token"
             result = get_broker_token(0, "unknown_broker", None)
-            assert result == "default_token"
+            assert result is None
 
 
 class TestSetBrokerToken:
     def test_new_credential_created(self):
         mock_db = MagicMock()
         mock_db.execute.return_value.scalar_one_or_none.return_value = None
-        set_broker_token(1, "tbank", "new_token", mock_db)
+        with patch("src.core.crypto.encrypt", return_value="gAAAAAencrypted"):
+            set_broker_token(1, "tbank", "new_token", mock_db)
         assert mock_db.add.called
         mock_db.commit.assert_called_once()
 

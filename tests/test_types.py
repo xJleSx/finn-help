@@ -79,7 +79,7 @@ def test_tax_lot_dataclass():
 def test_tax_report_defaults():
     r = TaxReport(year=2026)
     assert r.year == 2026
-    assert r.total_realised_pnl == 0.0
+    assert r.total_realized_pnl == 0.0
     assert r.lots == []
     assert r.dividends == []
 

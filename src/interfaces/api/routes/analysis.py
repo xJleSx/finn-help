@@ -15,7 +15,8 @@ from src.analysis.scenario.engine import ScenarioEngine
 from src.core.executor import get_executor
 from src.db.connection import get_session
 from src.db.models import Instrument, News, NewsInstrument, User
-from src.interfaces.api.auth import get_db, require_user
+from src.interfaces.api.auth import require_user
+from src.interfaces.api.dependencies import get_db
 from src.interfaces.api.rate_limiter import limiter
 from src.interfaces.api.schemas import (
     AlertResponse,
