@@ -250,19 +250,28 @@ async def get_bond_metrics(ticker: str, db: AsyncSession = Depends(get_db)) -> d
 
             from src.analysis.bonds_math import compute_accrued_interest as _accrued
 
-            schedule = await db.execute(
+            today = date.today()
+            last_result = await db.execute(
                 select(BondCouponSchedule)
-                .where(BondCouponSchedule.instrument_id == inst.id)
+                .where(BondCouponSchedule.instrument_id == inst.id, BondCouponSchedule.coupon_date <= today)
                 .order_by(BondCouponSchedule.coupon_date.desc())
                 .limit(1)
             )
-            last_coupon = schedule.scalar_one_or_none()
+            last_coupon = last_result.scalar_one_or_none()
             if last_coupon and last_coupon.coupon_date:
+                next_result = await db.execute(
+                    select(BondCouponSchedule)
+                    .where(BondCouponSchedule.instrument_id == inst.id, BondCouponSchedule.coupon_date > today)
+                    .order_by(BondCouponSchedule.coupon_date.asc())
+                    .limit(1)
+                )
+                next_coupon = next_result.scalar_one_or_none()
                 accrued_interest = _accrued(
                     coupon_rate=offering.coupon_rate,
                     nominal=nominal,
                     last_coupon_date=last_coupon.coupon_date,
                     coupon_period_days=offering.coupon_period_days or 182,
+                    next_coupon_date=next_coupon.coupon_date if next_coupon else None,
                 )
         except Exception as _exc:
             logger.debug("Failed to compute accrued interest: %s", _exc)

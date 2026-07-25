@@ -24,6 +24,7 @@ def compute_accrued_interest(
     last_coupon_date: date,
     settlement_date: Optional[date] = None,
     coupon_period_days: int = 182,
+    next_coupon_date: Optional[date] = None,
 ) -> float:
     if coupon_rate <= 0 or nominal <= 0:
         return 0.0
@@ -31,7 +32,12 @@ def compute_accrued_interest(
     days_since_coupon = (settlement - last_coupon_date).days
     if days_since_coupon <= 0:
         return 0.0
-    daily_coupon = (coupon_rate / 100) * nominal / coupon_period_days
+    period_length = coupon_period_days
+    if next_coupon_date is not None:
+        period_length = (next_coupon_date - last_coupon_date).days
+        if period_length <= 0:
+            period_length = coupon_period_days
+    daily_coupon = (coupon_rate / 100) * nominal / period_length
     return round(daily_coupon * days_since_coupon, 2)
 
 
@@ -40,7 +46,7 @@ def clean_price_to_dirty(clean_price_pct: float, nominal: float, accrued_interes
     return clean_rub + accrued_interest
 
 
-def compute_modified_duration(macaulay_duration: float, ytm: float, frequency: int = 2) -> float:
+def compute_modified_duration(macaulay_duration: float, ytm: float, frequency: int) -> float:
     if macaulay_duration <= 0:
         return 0.0
     return round(macaulay_duration / (1 + ytm / 100 / frequency), 4)
@@ -122,10 +128,10 @@ def price_from_ytm(
     ytm: float,
     coupon_rate: float,
     years_to_maturity: float,
+    frequency: int,
     nominal: float = 100.0,
-    frequency: int = 2,
 ) -> float:
-    if years_to_maturity <= 0:
+    if years_to_maturity <= 0 or frequency <= 0:
         return 0.0
     y = ytm / 100 / frequency
     rate = coupon_rate / 100
