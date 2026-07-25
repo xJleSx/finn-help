@@ -33,21 +33,23 @@ async def check_ml_health() -> dict[str, Any]:
 @register_module_health("llm")
 async def check_llm_health() -> dict[str, Any]:
     try:
+        from src.config import settings
         from src.llm.router import llm
 
         if llm is None:
             return {"status": "not_configured"}
-        if hasattr(llm, "is_available") and callable(llm.is_available):
-            ok = llm.is_available()
-        else:
-            ok = True
-        return {"status": "ok" if ok else "degraded"}
+        has_key = bool(settings.groq_api_key)
+        return {"status": "ok" if has_key else "not_configured", "configured": has_key}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 
+_telegram_bot: Any = None
+
+
 @register_module_health("telegram")
 async def check_telegram_health() -> dict[str, Any]:
+    global _telegram_bot
     try:
         from src.config import settings
 
@@ -55,8 +57,9 @@ async def check_telegram_health() -> dict[str, Any]:
             return {"status": "not_configured"}
         import telegram
 
-        bot = telegram.Bot(token=settings.telegram_bot_token)
-        me = await bot.get_me()
+        if _telegram_bot is None:
+            _telegram_bot = telegram.Bot(token=settings.telegram_bot_token)
+        me = await _telegram_bot.get_me()
         return {"status": "ok", "username": me.username if me else "unknown"}
     except Exception as e:
         return {"status": "error", "message": str(e)}

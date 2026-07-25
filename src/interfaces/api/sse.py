@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Request, status
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.db.models import User
 from src.interfaces.api.auth import require_user
@@ -18,6 +19,7 @@ sse_router = APIRouter()
 
 MAX_SUBSCRIBERS = 100
 _signal_subscribers: list[asyncio.Queue] = []
+_subscribers_lock = asyncio.Lock()
 
 
 async def _event_generator(request: Request, queue: asyncio.Queue) -> Any:
@@ -40,16 +42,15 @@ async def signal_stream(
     request: Request,
     user: User = Depends(require_user),
 ):
-    if len(_signal_subscribers) >= MAX_SUBSCRIBERS:
-        logger.warning("Max SSE subscribers reached (%d)", MAX_SUBSCRIBERS)
-        from fastapi.responses import JSONResponse
-        from fastapi import status
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"detail": "Too many subscribers. Try again later."},
-        )
-    queue: asyncio.Queue = asyncio.Queue()
-    _signal_subscribers.append(queue)
+    async with _subscribers_lock:
+        if len(_signal_subscribers) >= MAX_SUBSCRIBERS:
+            logger.warning("Max SSE subscribers reached (%d)", MAX_SUBSCRIBERS)
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"detail": "Too many subscribers. Try again later."},
+            )
+        queue: asyncio.Queue = asyncio.Queue()
+        _signal_subscribers.append(queue)
     return StreamingResponse(
         _event_generator(request, queue),
         media_type="text/event-stream",
@@ -63,8 +64,14 @@ async def signal_stream(
 
 async def broadcast_signal_event(event: dict[str, Any]) -> None:
     event["_timestamp"] = datetime.now(timezone.utc).isoformat()
-    for queue in _signal_subscribers[:]:
+    dead: list[asyncio.Queue] = []
+    for queue in _signal_subscribers:
         try:
             await queue.put(event)
         except Exception:
-            _signal_subscribers.remove(queue)
+            dead.append(queue)
+    if dead:
+        async with _subscribers_lock:
+            for q in dead:
+                with suppress(ValueError):
+                    _signal_subscribers.remove(q)
