@@ -451,8 +451,9 @@ def backtest_allocation(
         mc = run_monte_carlo(result.portfolio_returns)
         result.monte_carlo = mc
 
-        regime_vals = np.array(benchmark_vals[:min_len])
-        result.regime = detect_regime(regime_vals)
+        bench_prices = np.array(benchmark_vals[:min_len])
+        bench_returns = (bench_prices[1:] - bench_prices[:-1]) / bench_prices[:-1]
+        result.regime = detect_regime(bench_returns)
 
         return result
     finally:
