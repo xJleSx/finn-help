@@ -139,8 +139,8 @@ class NewsImpactModel(BaseRegressor):
             if len(clean) < settings.ml_impact_min_train_samples:
                 continue
 
-            x = clean[self._feature_names].values.astype(np.float32)
-            y = clean[target].values.astype(np.float32)
+            x = clean[self._feature_names].values.astype(np.float32)[::-1]
+            y = clean[target].values.astype(np.float32)[::-1]
 
             split = int(len(x) * 0.8)
             x_train, x_val = x[:split], x[split:]

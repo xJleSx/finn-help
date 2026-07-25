@@ -28,11 +28,6 @@ async function fetchMe(): Promise<UserInfo | null> {
   }
 }
 
-function checkHasAuthCookie(): boolean {
-  if (typeof document === "undefined") return false;
-  return document.cookie.includes("finn_auth_token=") || document.cookie.includes("finn_refresh_token=");
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -47,12 +42,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
         return;
       }
-
-      if (!checkHasAuthCookie()) {
-        setIsLoading(false);
-        return;
-      }
-
       const me = await fetchMe();
       if (me) {
         setUser(me);

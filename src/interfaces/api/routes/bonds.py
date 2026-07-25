@@ -230,13 +230,16 @@ async def get_bond_metrics(ticker: str, db: AsyncSession = Depends(get_db)) -> d
     if duration and ytm:
         from src.analysis.bonds_math import compute_convexity as _convexity
         from src.analysis.bonds_math import compute_modified_duration as _mod_dur
+        from src.analysis.bonds_math import coupon_period_to_frequency as _cp_to_freq
 
-        modified_duration = _mod_dur(duration, ytm)
+        freq = _cp_to_freq(offering.coupon_period_days)
+        modified_duration = _mod_dur(duration, ytm, freq)
         years_to_maturity = offering.maturity_years or (duration if duration > 0 else 1)
         convexity = _convexity(
             coupon_rate=offering.coupon_rate or 0,
             ytm=ytm,
             years_to_maturity=years_to_maturity,
+            frequency=freq,
             nominal=nominal,
             price=current_price_pct if current_price_pct > 0 else None,
         )

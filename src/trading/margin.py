@@ -22,6 +22,7 @@ def compute_margin_requirements(
     is_short: bool = False,
     portfolio_value: float = 0.0,
     existing_loan: float = 0.0,
+    avg_entry_price: float = 0.0,
 ) -> MarginRequirements:
     req = MarginRequirements()
     if is_short:
@@ -30,7 +31,7 @@ def compute_margin_requirements(
     else:
         req.initial_margin = position_value * INITIAL_MARGIN_PCT
         req.maintenance_margin = position_value * MAINTENANCE_MARGIN_PCT
-    total_value = portfolio_value + position_value if portfolio_value > 0 else position_value
+    total_value = portfolio_value if portfolio_value > 0 else position_value
     borrowed = existing_loan
     req.loan_amount = borrowed
     req.portfolio_value = total_value
@@ -41,9 +42,10 @@ def compute_margin_requirements(
         req.free_cash = max(0.0, equity - req.initial_margin)
         req.margin_used_pct = req.initial_margin / equity if equity > 0 else 1.0
         if margin_deficit > 0:
-            if is_short:
-                price_per_share = position_value / 1
-                req.margin_call_price = price_per_share * (1 + SHORT_MAINTENANCE_MARGIN_PCT) + (borrowed / 1)
+            if is_short and avg_entry_price > 0:
+                quantity = position_value / avg_entry_price
+                total_credit = avg_entry_price * quantity * (1 + SHORT_INITIAL_MARGIN_PCT)
+                req.margin_call_price = total_credit / (quantity * (1 + SHORT_MAINTENANCE_MARGIN_PCT))
             else:
                 req.margin_call_price = position_value * (1 - MARGIN_CALL_PCT)
             req.liquidation_price = position_value * (1 - LIQUIDATION_PCT)
@@ -59,20 +61,21 @@ def compute_portfolio_margin(
     req = MarginRequirements()
     gross_long = sum(p["quantity"] * current_prices.get(p["ticker"], p.get("avg_price", 0)) for p in long_positions)
     gross_short = sum(p["quantity"] * current_prices.get(p["ticker"], p.get("avg_price", 0)) for p in short_positions)
-    req.portfolio_value = cash_balance + gross_long - gross_short
+    req.portfolio_value = cash_balance + gross_long
     long_margin = gross_long * INITIAL_MARGIN_PCT
     short_margin = gross_short * SHORT_INITIAL_MARGIN_PCT
     req.initial_margin = long_margin + short_margin
     long_maintenance = gross_long * MAINTENANCE_MARGIN_PCT
     short_maintenance = gross_short * SHORT_MAINTENANCE_MARGIN_PCT
     req.maintenance_margin = long_maintenance + short_maintenance
-    req.loan_amount = max(0.0, gross_long + req.initial_margin - cash_balance)
-    if req.portfolio_value > 0:
-        equity = req.portfolio_value - req.loan_amount
-        req.leverage = req.portfolio_value / equity if equity > 0 else float("inf")
-    req.free_cash = max(0.0, cash_balance - req.loan_amount - req.maintenance_margin)
-    req.margin_used_pct = (req.initial_margin + req.loan_amount) / req.portfolio_value if req.portfolio_value > 0 else 0
+    borrowed_for_long = max(0.0, gross_long - cash_balance)
+    short_liability = gross_short
+    req.loan_amount = borrowed_for_long + short_liability
     equity = req.portfolio_value - req.loan_amount
+    if req.portfolio_value > 0:
+        req.leverage = req.portfolio_value / equity if equity > 0 else float("inf")
+    req.free_cash = max(0.0, equity - req.initial_margin)
+    req.margin_used_pct = (req.initial_margin + req.loan_amount) / req.portfolio_value if req.portfolio_value > 0 else 0
     if equity < req.maintenance_margin:
         req.margin_status = "margin_call"
     elif equity < req.initial_margin:

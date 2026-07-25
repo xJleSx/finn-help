@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Callable, Optional
+
 from fastapi import HTTPException, Request, status
 from sqlalchemy import select
+
 from src.db.models import User
-from src.interfaces.api.auth import decode_token
+from src.interfaces.api.auth import AuthError, decode_token
 
 
 class Role(str, Enum):
@@ -74,7 +76,10 @@ def get_current_user_role(request: Request, db_session: Optional[object] = None)
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     token = auth_header.removeprefix("Bearer ")
-    payload = decode_token(token)
+    try:
+        payload = decode_token(token)
+    except AuthError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     role_str = payload.get("role", "viewer")
     try:
         role = Role(role_str)

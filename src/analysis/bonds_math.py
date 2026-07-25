@@ -6,6 +6,18 @@ from typing import Optional
 import numpy as np
 
 
+def coupon_period_to_frequency(coupon_period_days: int | None) -> int:
+    if coupon_period_days is None or coupon_period_days <= 0:
+        return 2
+    if coupon_period_days <= 35:
+        return 12
+    if coupon_period_days <= 95:
+        return 4
+    if coupon_period_days <= 200:
+        return 2
+    return 1
+
+
 def compute_accrued_interest(
     coupon_rate: float,
     nominal: float,
@@ -55,7 +67,7 @@ def compute_convexity(
     t = np.arange(1, n + 1)
     cf = np.full(n, c)
     cf[-1] += nominal
-    df = np.exp(-y * t / frequency)
+    df = (1 + y / frequency) ** -t
     weighted_pv = cf * df * (t / frequency) ** 2
     pv_total = np.sum(cf * df)
     if pv_total <= 0:

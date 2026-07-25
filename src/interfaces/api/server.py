@@ -17,13 +17,12 @@ from src.core.executor import get_executor, shutdown_executor
 from src.core.logging import setup_logging
 from src.core.observability import AsyncTraceMiddleware, setup_metrics, setup_tracing
 from src.core.sentry import setup_sentry
+from src.interfaces.api.auth import AuthError
 from src.interfaces.api.rate_limiter import limiter
 from src.interfaces.api.rbac.models import (
     ROLE_PERMISSIONS,
     Permission,
-    Role,
     get_current_user_role,
-    require_permission,
 )
 from src.interfaces.api.routes.alert_preferences import router as alert_prefs_router
 from src.interfaces.api.routes.analysis import router as analysis_router
@@ -191,7 +190,7 @@ async def rbac_middleware(request: Request, call_next):
                         status_code=status.HTTP_403_FORBIDDEN,
                         content={"detail": f"Missing required permission: {perm.value}"},
                     )
-            except HTTPException as exc:
+            except (HTTPException, AuthError) as exc:
                 return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
             break
     return await call_next(request)
@@ -210,6 +209,7 @@ app.include_router(instruments_router)
 app.include_router(portfolio_router)
 app.include_router(market_router)
 from src.interfaces.api.sse import sse_router
+
 app.include_router(sse_router)
 
 

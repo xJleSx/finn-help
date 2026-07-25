@@ -35,29 +35,34 @@ class MarketService:
         self._notifications = notification_service if notification_service is not None else NotificationService(db=self.db)
 
     async def list_instruments(self, type_filter: Optional[str] = None) -> list[dict[str, Any]]:
-        q = select(Instrument)
+        latest_price_subq = (
+            select(Price.instrument_id, func.max(Price.date).label("max_date"))
+            .group_by(Price.instrument_id)
+            .subquery()
+        )
+        q = (
+            select(Instrument, Price.close, Price.date)
+            .outerjoin(latest_price_subq, Instrument.id == latest_price_subq.c.instrument_id)
+            .outerjoin(Price, (Price.instrument_id == latest_price_subq.c.instrument_id) & (Price.date == latest_price_subq.c.max_date))
+        )
         if type_filter:
             q = q.where(Instrument.instrument_type == type_filter)
         q = q.order_by(Instrument.ticker)
         result = await self.db.execute(q)
-        instruments = result.scalars().all()
+        rows = result.all()
 
-        output = []
-        for inst in instruments:
-            price_result = await self.db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date.desc()).limit(1))
-            last_price = price_result.scalar_one_or_none()
-            output.append(
-                {
-                    "id": inst.id,
-                    "ticker": inst.ticker,
-                    "full_name": inst.full_name,
-                    "sector": inst.sector,
-                    "type": inst.instrument_type,
-                    "last_price": last_price.close if last_price else None,
-                    "last_date": last_price.date.isoformat() if last_price else None,
-                }
-            )
-        return output
+        return [
+            {
+                "id": inst.id,
+                "ticker": inst.ticker,
+                "full_name": inst.full_name,
+                "sector": inst.sector,
+                "type": inst.instrument_type,
+                "last_price": close if close else None,
+                "last_date": dt.isoformat() if dt else None,
+            }
+            for inst, close, dt in rows
+        ]
 
     async def get_instrument(self, ticker: str) -> dict[str, Any]:
         result = await self.db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))

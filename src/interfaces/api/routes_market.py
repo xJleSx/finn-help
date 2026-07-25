@@ -12,7 +12,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from src.core.executor import get_executor
 from src.db.connection import get_session
-from src.db.models import Instrument, Signal
+from src.db.models import Instrument, Signal, User
+from src.interfaces.api.auth import require_user
 from src.interfaces.api.dependencies import get_market_service_readonly
 from src.interfaces.api.schemas import (
     DivergenceAlert,
@@ -97,7 +98,7 @@ async def get_rebalance_alerts(
 
 
 @router.get("/api/events")
-async def event_stream() -> EventSourceResponse:
+async def event_stream(user: User = Depends(require_user)) -> EventSourceResponse:
     async def generate() -> AsyncGenerator[dict[str, str], None]:
         while True:
 

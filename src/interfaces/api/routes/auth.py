@@ -8,6 +8,7 @@ from src.config import settings
 from src.db.models import User
 from src.interfaces.api.auth import (
     blacklist_refresh_token,
+    create_refresh_token,
     create_token,
     create_oauth_token,
     decode_refresh_token,
@@ -76,7 +77,8 @@ async def refresh_token(
         if not user_id or not username:
             raise HTTPException(status_code=401, detail="Invalid refresh token")
         new_token = create_token(user_id, username)
-        return {"access_token": new_token, "token_type": "bearer"}
+        new_refresh = create_refresh_token(user_id, username)
+        return {"access_token": new_token, "refresh_token": new_refresh, "token_type": "bearer"}
     except HTTPException:
         raise
     except Exception:
