@@ -20,19 +20,23 @@ def register_shutdown_hook(fn: Callable[[], Any]) -> None:
 
 def _run_hooks() -> None:
     with _hooks_lock:
-        tasks = list(_shutdown_tasks)
-    for fn in tasks:
+        hooks = list(_shutdown_tasks)
+    async_hooks: list[Any] = []
+    for fn in hooks:
         try:
             if asyncio.iscoroutinefunction(fn):
-                try:
-                    loop = asyncio.get_running_loop()
-                    asyncio.ensure_future(fn())
-                except RuntimeError:
-                    logger.warning("No running loop for async shutdown hook %s", fn.__name__)
+                async_hooks.append(fn())
             else:
                 fn()
         except Exception as e:
             logger.warning("Shutdown hook %s failed: %s", fn.__name__, e)
+    if async_hooks:
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                loop.run_until_complete(asyncio.gather(*async_hooks, return_exceptions=True))
+        except RuntimeError:
+            logger.warning("No running loop for async shutdown hooks")
 
 
 def _signal_handler(sig: int, _frame: Any) -> None:

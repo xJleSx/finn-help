@@ -19,13 +19,16 @@ logger = logging.getLogger(__name__)
 _pool: ConnectionPool | None = None
 _memory_cache: dict[str, tuple[float, Any]] = {}
 _lock = threading.Lock()
+_redis_retry_at: float = 0.0
+REDIS_RETRY_INTERVAL: float = 5.0
 
 
 def _get_pool() -> ConnectionPool | None:
-    global _pool
-    if _pool is None or _pool is False:
+    global _pool, _redis_retry_at
+    now = time.time()
+    if _pool is None or (_pool is False and now >= _redis_retry_at):
         with _lock:
-            if _pool is None or _pool is False:
+            if _pool is None or (_pool is False and now >= _redis_retry_at):
                 _pool = None
                 try:
                     url = settings.redis_url or "redis://localhost:6379/0"
@@ -44,6 +47,7 @@ def _get_pool() -> ConnectionPool | None:
                 except Exception as exc:
                     logger.warning("Redis unavailable (%s), using in-memory fallback", exc)
                     _pool = False
+                    _redis_retry_at = now + REDIS_RETRY_INTERVAL
     return _pool if _pool else None
 
 
