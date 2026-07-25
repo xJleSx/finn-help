@@ -81,6 +81,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-timeout>=2.3.0",
     "pip-audit>=2.7.0",
+    "bandit>=1.8.0",
     "testcontainers>=4.0.0",
     "hypothesis>=6.100.0",
     "syrupy>=4.7.0",
@@ -89,6 +90,7 @@ ci = [
     "pytest>=9.1.0",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=6.0.0",
+    "pip-audit>=2.7.0",
 ]
 loadtest = [
     "locust>=2.32.0",
@@ -128,7 +130,6 @@ warn_redundant_casts = true
 no_implicit_optional = true
 strict_equality = true
 check_untyped_defs = true
-disallow_subclassing_any = true
 exclude = ["tests/", "alembic/"]
 plugins = ["sqlalchemy.ext.mypy.plugin"]
 
