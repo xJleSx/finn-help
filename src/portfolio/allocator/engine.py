@@ -61,9 +61,9 @@ class PortfolioAllocator:
                 if row and row.value in PROFILES:
                     self.profile = row.value
                 return
-            from src.db.connection import AsyncSessionLocal
+            from src.db.connection import get_async_session_local
 
-            async with AsyncSessionLocal() as session:
+            async with get_async_session_local()() as session:
                 result = await session.execute(select(UserSetting).where(UserSetting.key == "risk_profile"))
                 row = result.scalar_one_or_none()
                 if row and row.value in PROFILES:
@@ -229,9 +229,9 @@ class PortfolioAllocator:
         await self._load_profile_from_db_async(db)
         should_close = db is None
         if db is None:
-            from src.db.connection import AsyncSessionLocal
+            from src.db.connection import get_async_session_local
 
-            async with AsyncSessionLocal() as session:
+            async with get_async_session_local()() as session:
                 existing = await self._get_current_portfolio_async(session)
                 instruments_data = await self._load_instruments_async(session)
                 return await self._allocate_from_data(capital, existing, instruments_data, session)
@@ -1125,9 +1125,9 @@ class PortfolioAllocator:
     async def allocate_async(self, capital: float, db: AsyncSession | None = None) -> dict[str, Any]:
         await self._load_profile_from_db_async(db)
         if db is None:
-            from src.db.connection import AsyncSessionLocal
+            from src.db.connection import get_async_session_local
 
-            async with AsyncSessionLocal() as session:
+            async with get_async_session_local()() as session:
                 existing = await self._get_current_portfolio_async(session)
                 instruments_data = await self._load_instruments_async(session)
                 return await self._allocate_from_data_async(capital, existing, instruments_data, session)

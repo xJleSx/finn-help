@@ -260,7 +260,7 @@ async def _process_signals() -> None:
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
 
-    from src.db.connection import AsyncSessionLocal
+    from src.db.connection import get_async_session_local
     from src.db.models import Instrument, News, NewsInstrument
     from src.db.models import Portfolio as PortModel
     from src.db.models import Price as PriceModel
@@ -272,7 +272,7 @@ async def _process_signals() -> None:
     total_value = 100000
     last_price_rows: dict[int, float] = {}
 
-    async with AsyncSessionLocal() as db:
+    async with get_async_session_local()() as db:
         today = datetime.now(timezone.utc).date()
         result = await db.execute(
             select(SignalModel).options(joinedload(SignalModel.instrument)).where(SignalModel.date >= today).order_by(SignalModel.confidence.desc())
@@ -404,10 +404,10 @@ async def _process_signals() -> None:
 async def _check_stop_losses() -> None:
     from sqlalchemy import select
 
-    from src.db.connection import AsyncSessionLocal
+    from src.db.connection import get_async_session_local
     from src.db.models import Instrument, Price
 
-    async with AsyncSessionLocal() as db:
+    async with get_async_session_local()() as db:
         result = await db.execute(select(OrderModel).where(OrderModel.status.in_(["filled", "partial"])))
         open_orders = result.scalars().all()
         if not open_orders:
@@ -449,11 +449,11 @@ async def _check_stop_losses() -> None:
 async def _check_daily_pnl() -> None:
     from sqlalchemy import select
 
-    from src.db.connection import AsyncSessionLocal
+    from src.db.connection import get_async_session_local
     from src.db.models import Portfolio as PortModel
     from src.db.models import Price as PriceModel
 
-    async with AsyncSessionLocal() as db:
+    async with get_async_session_local()() as db:
         result = await db.execute(select(PortModel))
         total = result.scalars().all()
         current_value = 0.0

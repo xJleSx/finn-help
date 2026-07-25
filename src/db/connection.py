@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -38,29 +38,42 @@ def _build_async_url(url: str) -> str:
 
 
 _ASYNC_DB_URL: str = _build_async_url(settings.database_url)
-_is_pg = _is_postgres(_ASYNC_DB_URL)
 
-async_engine = create_async_engine(
-    _ASYNC_DB_URL,
-    echo=False,
-    pool_size=settings.db_pool_size if _is_pg else 1,
-    max_overflow=settings.db_max_overflow if _is_pg else 0,
-    pool_pre_ping=settings.db_pool_pre_ping,
-    pool_recycle=settings.db_pool_recycle if _is_pg else -1,
-    pool_timeout=settings.db_pool_timeout if _is_pg else 30,
-    connect_args={"check_same_thread": False} if _is_sqlite(_ASYNC_DB_URL) else {},
-)
+_async_engine: Any = None
+_AsyncSessionLocal: Any = None
+_async_engine_lock = threading.Lock()
 
-AsyncSessionLocal = async_sessionmaker(
-    bind=async_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+
+def _ensure_async() -> None:
+    global _async_engine, _AsyncSessionLocal
+    if _async_engine is not None:
+        return
+    with _async_engine_lock:
+        if _async_engine is not None:
+            return
+        is_pg = _is_postgres(_ASYNC_DB_URL)
+        engine = create_async_engine(
+            _ASYNC_DB_URL,
+            echo=False,
+            pool_size=settings.db_pool_size if is_pg else 1,
+            max_overflow=settings.db_max_overflow if is_pg else 0,
+            pool_pre_ping=settings.db_pool_pre_ping,
+            pool_recycle=settings.db_pool_recycle if is_pg else -1,
+            pool_timeout=settings.db_pool_timeout if is_pg else 30,
+            connect_args={"check_same_thread": False} if _is_sqlite(_ASYNC_DB_URL) else {},
+        )
+        _async_engine = engine
+        _AsyncSessionLocal = async_sessionmaker(
+            bind=engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
 
 
 @asynccontextmanager
 async def get_async_session() -> AsyncIterator[AsyncSession]:
-    async with AsyncSessionLocal() as session:
+    _ensure_async()
+    async with _AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
@@ -70,6 +83,11 @@ async def get_async_session() -> AsyncIterator[AsyncSession]:
             raise
         finally:
             await session.close()
+
+
+def get_async_session_local() -> async_sessionmaker[AsyncSession]:
+    _ensure_async()
+    return _AsyncSessionLocal
 
 
 # ── Read replica async engine (optional) ─────────────────────────────────
@@ -178,12 +196,10 @@ def session_scope() -> Any:
     session = get_session()
     try:
         yield session
-    except Exception as e:
+    except Exception:
         logger.exception("Unhandled exception")
-        try:
+        with suppress(Exception):
             session.rollback()
-        except Exception:
-            pass
         raise
     finally:
         session.close()
@@ -208,7 +224,7 @@ def close_db() -> None:
         logger.info("All database sessions closed")
     except Exception as e:
         logger.warning("Failed to close database sessions: %s", e)
-    global _engine
+    global _engine, _async_engine
     if _engine is not None:
         try:
             _engine.dispose()
@@ -216,3 +232,13 @@ def close_db() -> None:
             logger.info("Sync engine disposed")
         except Exception as e:
             logger.warning("Failed to dispose sync engine: %s", e)
+    if _async_engine is not None:
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(_async_engine.dispose())
+            loop.close()
+            _async_engine = None
+            logger.info("Async engine disposed")
+        except Exception as e:
+            logger.warning("Failed to dispose async engine: %s", e)
