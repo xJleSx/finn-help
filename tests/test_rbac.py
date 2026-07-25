@@ -251,20 +251,24 @@ class TestAuditLogQuery:
 
 
 class TestOAuthLoginFlow:
-    def test_oauth_creates_user(self):
+    @pytest.mark.asyncio
+    async def test_oauth_creates_user(self):
         from src.interfaces.api.auth import oauth_login
 
         mock_db = MagicMock()
         mock_db.query.return_value.filter_by.return_value.first.return_value = None
 
         with patch("src.interfaces.api.auth.get_session", return_value=mock_db):
-            result = oauth_login(provider="google", code="valid_code_123")
+            with patch("src.interfaces.api.auth._verify_oauth_code") as mock_verify:
+                mock_verify.return_value = {"id": "google_test", "email": "test@google.com"}
+                result = await oauth_login(provider="google", code="valid_code_123")
         assert "access_token" in result
         assert result["token_type"] == "bearer"
         mock_db.add.assert_called_once()
         mock_db.commit.assert_called_once()
 
-    def test_oauth_returns_existing_user(self):
+    @pytest.mark.asyncio
+    async def test_oauth_returns_existing_user(self):
         from src.interfaces.api.auth import oauth_login
 
         mock_db = MagicMock()
@@ -274,15 +278,18 @@ class TestOAuthLoginFlow:
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_user
 
         with patch("src.interfaces.api.auth.get_session", return_value=mock_db):
-            result = oauth_login(provider="github", code="existing_code")
+            with patch("src.interfaces.api.auth._verify_oauth_code") as mock_verify:
+                mock_verify.return_value = {"id": "github_test", "email": "test@github.com"}
+                result = await oauth_login(provider="github", code="existing_code")
         assert "access_token" in result
         assert result["user_id"] == 42
 
-    def test_oauth_empty_code_raises(self):
+    @pytest.mark.asyncio
+    async def test_oauth_empty_code_raises(self):
         from src.interfaces.api.auth import oauth_login
 
         with pytest.raises(Exception):
-            oauth_login(provider="google", code="")
+            await oauth_login(provider="google", code="")
 
     def test_create_oauth_token_returns_string(self):
         from src.interfaces.api.auth import create_oauth_token

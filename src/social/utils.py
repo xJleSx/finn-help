@@ -30,9 +30,9 @@ def async_retry(max_attempts: int = 3, base_delay: float = 1.0, backoff: float =
                             delay,
                         )
                         await asyncio.sleep(delay)
-            raise last_exc  # type: ignore[misc]
+            raise last_exc
 
-        return wrapper  # type: ignore[return-value]
+        return wrapper
 
     return decorator
 
@@ -46,6 +46,7 @@ def clean_text(text: str, max_length: int = 2000) -> str:
 
 
 _KNOWN_TICKERS: set[str] | None = None
+_FALLBACK_TICKERS = {"SBER", "GAZP", "LKOH", "YNDX", "TATN", "VTBR", "ROSN", "NVTK", "MOEX"}
 
 
 def _load_tickers() -> set[str]:
@@ -59,10 +60,10 @@ def _load_tickers() -> set[str]:
         db = get_session()
         rows = db.query(Instrument.ticker).all()
         db.close()
-        _KNOWN_TICKERS = {r[0].upper() for r in rows if r[0]}
+        _KNOWN_TICKERS = {r[0].upper() for r in rows if r[0]} | _FALLBACK_TICKERS
     except Exception:
-        logger.exception("Unhandled exception")
-        _KNOWN_TICKERS = {"SBER", "GAZP", "LKOH", "YNDX", "TATN", "VTBR", "ROSN", "NVTK", "MOEX"}
+        logger.debug("Could not load tickers from DB, using fallback set")
+        _KNOWN_TICKERS = _FALLBACK_TICKERS
     return _KNOWN_TICKERS
 
 

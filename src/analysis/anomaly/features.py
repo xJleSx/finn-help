@@ -14,9 +14,10 @@ from src.config import settings
 from src.db.models import Instrument, News, NewsInstrument
 
 
-def article_counts_per_day(db: Session, ticker: str, days_back: int | None = None) -> pd.DataFrame:
+def article_counts_per_day(db: Session, ticker: str, days_back: int | None = None, end_date: datetime | None = None) -> pd.DataFrame:
     days = days_back or settings.ml_anomaly_days_back
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    end = end_date or datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
     rows = (
         db.execute(
             select(
@@ -25,7 +26,8 @@ def article_counts_per_day(db: Session, ticker: str, days_back: int | None = Non
             )
             .join(NewsInstrument, NewsInstrument.news_id == News.id)
             .join(Instrument, Instrument.id == NewsInstrument.instrument_id)
-            .where(News.published_at >= cutoff)
+            .where(News.published_at >= start)
+            .where(News.published_at <= end)
             .where(Instrument.ticker == ticker)
             .group_by(func.date(News.published_at))
             .order_by(func.date(News.published_at))
@@ -37,16 +39,15 @@ def article_counts_per_day(db: Session, ticker: str, days_back: int | None = Non
     if df.empty:
         return pd.DataFrame(columns=["day", "count"])
     df = df.set_index("day")
-    max_date = min(df.index.max(), pd.Timestamp.now(tz=df.index.tz if hasattr(df.index, 'tz') else None))
-    full_idx = pd.date_range(df.index.min(), max_date, freq="D")
+    full_idx = pd.date_range(df.index.min(), df.index.max(), freq="D")
     df = df.reindex(full_idx, fill_value=0)
     df.index.name = "day"
     return df
 
 
-def rolling_volume_features(db: Session, ticker: str, days_back: int | None = None) -> pd.DataFrame:
+def rolling_volume_features(db: Session, ticker: str, days_back: int | None = None, end_date: datetime | None = None) -> pd.DataFrame:
     days = days_back or settings.ml_anomaly_days_back
-    df = article_counts_per_day(db, ticker, days)
+    df = article_counts_per_day(db, ticker, days, end_date=end_date)
     if df.empty or len(df) < 5:
         return pd.DataFrame()
     windows = [int(w) for w in settings.ml_anomaly_window_sizes.split(",")]
@@ -57,9 +58,10 @@ def rolling_volume_features(db: Session, ticker: str, days_back: int | None = No
     return df.fillna(0)
 
 
-def sentiment_features_per_day(db: Session, ticker: str, days_back: int | None = None) -> pd.DataFrame:
+def sentiment_features_per_day(db: Session, ticker: str, days_back: int | None = None, end_date: datetime | None = None) -> pd.DataFrame:
     days = days_back or settings.ml_anomaly_days_back
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    end = end_date or datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
     rows = (
         db.execute(
             select(
@@ -69,7 +71,8 @@ def sentiment_features_per_day(db: Session, ticker: str, days_back: int | None =
             )
             .join(NewsInstrument, NewsInstrument.news_id == News.id)
             .join(Instrument, Instrument.id == NewsInstrument.instrument_id)
-            .where(News.published_at >= cutoff)
+            .where(News.published_at >= start)
+            .where(News.published_at <= end)
             .where(Instrument.ticker == ticker)
             .group_by(func.date(News.published_at))
             .order_by(func.date(News.published_at))
@@ -90,8 +93,7 @@ def sentiment_features_per_day(db: Session, ticker: str, days_back: int | None =
     if df.empty:
         return pd.DataFrame(columns=["day", "sentiment_mean", "article_count"])
     df = df.set_index("day")
-    max_date = min(df.index.max(), pd.Timestamp.now(tz=df.index.tz if hasattr(df.index, 'tz') else None))
-    full_idx = pd.date_range(df.index.min(), max_date, freq="D")
+    full_idx = pd.date_range(df.index.min(), df.index.max(), freq="D")
     df = df.reindex(full_idx).fillna(0)
     df.index.name = "day"
 

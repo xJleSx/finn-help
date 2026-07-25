@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
 import structlog
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from prometheus_client import Counter, Histogram, generate_latest
@@ -17,13 +17,8 @@ from src.core.executor import get_executor, shutdown_executor
 from src.core.logging import setup_logging
 from src.core.observability import AsyncTraceMiddleware, setup_metrics, setup_tracing
 from src.core.sentry import setup_sentry
-from src.interfaces.api.auth import AuthError
 from src.interfaces.api.rate_limiter import limiter
-from src.interfaces.api.rbac.models import (
-    ROLE_PERMISSIONS,
-    Permission,
-    get_current_user_role,
-)
+from src.interfaces.api.rbac.models import Permission
 from src.interfaces.api.routes.alert_preferences import router as alert_prefs_router
 from src.interfaces.api.routes.analysis import router as analysis_router
 from src.interfaces.api.routes.auth import router as auth_router
@@ -174,26 +169,6 @@ RBAC_PROTECTED_PATHS: dict[str, Permission] = {
     "/api/analysis": Permission.VIEW_ANALYSIS,
     "/api/alerts": Permission.MANAGE_ALERTS,
 }
-
-
-@app.middleware("http")
-async def rbac_middleware(request: Request, call_next):
-    path = request.url.path
-    if request.method == "OPTIONS":
-        return await call_next(request)
-    for prefix, perm in RBAC_PROTECTED_PATHS.items():
-        if path.startswith(prefix):
-            try:
-                role = get_current_user_role(request)
-                if perm not in ROLE_PERMISSIONS.get(role, set()):
-                    return JSONResponse(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        content={"detail": f"Missing required permission: {perm.value}"},
-                    )
-            except (HTTPException, AuthError) as exc:
-                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-            break
-    return await call_next(request)
 
 
 app.include_router(auth_router)

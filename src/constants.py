@@ -7,6 +7,8 @@ MIN_PLAN_ROWS = 20  # min rows for trade plan generation
 ANALYSIS_CONCURRENCY = 10  # parallel analysis tasks
 TRADE_PLAN_ATR_MULTIPLIER = 0.02  # ATR multiplier for stop-loss in trade plans
 
+# WARNING: Hardcoded list — will go stale. Update periodically from MOEX data source.
+# See collectors/dividend.py for the refresh mechanism.
 KNOWN_DIVIDEND_STOCKS: dict[str, str] = {
     "SBER": "dividend",
     "GAZP": "dividend",
@@ -41,6 +43,9 @@ SECTOR_NAME_MAP: dict[str, str] = {
     "Машиностроение": "manufacturing",
     "Медицина": "healthcare",
     "Финансы": "banking",
+    "Оборона": "defense",
+    "Сельское хозяйство": "agriculture",
+    "Недвижимость": "real_estate",
 }
 
 SECTOR_NAMES: dict[str, str] = {
@@ -66,6 +71,8 @@ SAFE_BONDS: list[str] = [
     "SU26248RMFS1",
 ]
 
+# Source of truth: compliance_sector_limit_pct in settings (config.py:89)
+# This dict maps sector → override limits; leave empty to rely on settings only
 SECTOR_LIMITS: dict[str, float] = {
     "Нефть и газ": 0.35,
     "Банки": 0.25,

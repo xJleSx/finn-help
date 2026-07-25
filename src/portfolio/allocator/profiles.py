@@ -1,4 +1,8 @@
-PROFILES = {
+from __future__ import annotations
+
+from typing import Any
+
+PROFILES: dict[str, dict[str, Any]] = {
     "conservative": {
         "bond": {"weight": 0.60, "label": "Облигации / ОФЗ", "max": 6},
         "etf": {"weight": 0.15, "label": "БПИФ (ETF)", "max": 2},
@@ -18,3 +22,12 @@ PROFILES = {
         "growth": {"weight": 0.40, "label": "Акции роста", "max": 4},
     },
 }
+
+
+def get_profile(name: str) -> dict[str, Any]:
+    profile = PROFILES.get(name, PROFILES["balanced"])
+    total = sum(v["weight"] for v in profile.values())
+    if abs(total - 1.0) > 1e-6:
+        for v in profile.values():
+            v["weight"] = v["weight"] / total
+    return profile

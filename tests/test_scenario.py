@@ -29,6 +29,7 @@ def db_with_positions(db_session: Session) -> Session:
     db_session.add_all([inst1, inst2, inst3])
     db_session.flush()
 
+    rng = np.random.default_rng(42)
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
     for inst_id in [1, 2, 3]:
         for i in range(252):
@@ -37,8 +38,8 @@ def db_with_positions(db_session: Session) -> Session:
                 Price(
                     instrument_id=inst_id,
                     date=day.date(),
-                    open=100.0 + i * 0.1 + np.random.normal(0, 1),
-                    close=100.0 + i * 0.1 + np.random.normal(0, 1),
+                    open=100.0 + i * 0.1 + rng.normal(0, 1),
+                    close=100.0 + i * 0.1 + rng.normal(0, 1),
                     volume=1000,
                 )
             )

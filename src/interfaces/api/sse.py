@@ -7,8 +7,8 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 
 from src.db.models import User
 from src.interfaces.api.auth import require_user
@@ -44,11 +44,8 @@ async def signal_stream(
 ):
     async with _subscribers_lock:
         if len(_signal_subscribers) >= MAX_SUBSCRIBERS:
-            logger.warning("Max SSE subscribers reached (%d)", MAX_SUBSCRIBERS)
-            return JSONResponse(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                content={"detail": "Too many subscribers. Try again later."},
-            )
+            logger.warning("Max SSE subscribers reached (%d), evicting oldest", MAX_SUBSCRIBERS)
+            _signal_subscribers.pop(0)
         queue: asyncio.Queue = asyncio.Queue()
         _signal_subscribers.append(queue)
     return StreamingResponse(

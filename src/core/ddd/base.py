@@ -4,6 +4,8 @@ import abc
 from dataclasses import dataclass, field
 from typing import Any, Generic, Optional, TypeVar
 
+from sqlalchemy.orm import Session
+
 from src.core.event_bus import DomainEvent, get_event_bus
 
 TId = TypeVar("TId")
@@ -41,7 +43,7 @@ class AggregateRoot(Entity[TId], abc.ABC):
     async def publish_events(self) -> None:
         bus = get_event_bus()
         for event in self.pop_events():
-            await bus.publish_sync(event.event_type, event.data)
+            await bus.publish_async(event.event_type, event.data)
 
 
 class Repository(Generic[TAggregate], abc.ABC):
@@ -77,3 +79,20 @@ class UnitOfWork(abc.ABC):
 
     @abc.abstractmethod
     def rollback(self) -> None: ...
+
+
+class SqlAlchemyUnitOfWork(UnitOfWork):
+    def __init__(self, session: Session | None = None) -> None:
+        from src.db.connection import get_session
+
+        super().__init__()
+        self.session = session or get_session()
+
+    def commit(self) -> None:
+        self.session.commit()
+
+    def rollback(self) -> None:
+        self.session.rollback()
+
+    def close(self) -> None:
+        self.session.close()

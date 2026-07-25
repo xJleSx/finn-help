@@ -11,14 +11,12 @@ class AlertPushService:
         self._subscribers: dict[str, Callable[[dict[str, Any]], None]] = {}
 
     def subscribe(self, client_id: str, handler: Callable[[dict[str, Any]], None] | None = None) -> None:
-        if handler is None:
-            logger.warning(
-                "AlertPushService: client %s subscribed with no handler — push will be a no-op. "
-                "Pass a callable handler to enable real push delivery.",
-                client_id,
-            )
-        self._subscribers[client_id] = handler or (lambda alert: None)
+        self._subscribers[client_id] = handler or self._noop
         logger.info("AlertPushService: client %s subscribed", client_id)
+
+    @staticmethod
+    def _noop(alert: dict[str, Any]) -> None:
+        pass
 
     def unsubscribe(self, client_id: str) -> None:
         self._subscribers.pop(client_id, None)

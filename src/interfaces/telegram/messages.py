@@ -304,7 +304,7 @@ async def _reply_with_allocation(update: Update, capital: float, exclude: set[st
     msg = await update.effective_message.reply_text(f"\U0001f50d Анализирую рынок для {capital:,.0f} ₽...")
 
     try:
-        picks = allocator.recommend(capital=capital, exclude=exclude)
+        picks = await allocator.recommend(capital=capital, exclude=exclude)
         if not picks:
             await msg.edit_text("Не удалось подобрать варианты. Запустите `finn update` для загрузки данных.")
             return

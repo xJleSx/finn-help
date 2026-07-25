@@ -68,13 +68,19 @@ class WalkForwardResult:
 
     @property
     def oos_sharpe(self) -> float:
-        """Weighted out-of-sample Sharpe (all test periods concatenated)."""
+        """Weighted out-of-sample Sharpe (all test periods concatenated via returns)."""
         all_test_returns: list[float] = []
         for f in self.folds:
-            all_test_returns.extend(f.test_metrics.equity_curve)
+            eq = f.test_metrics.equity_curve
+            if len(eq) > 1:
+                fold_rets = [eq[i] / eq[i - 1] - 1 for i in range(1, len(eq))]
+                all_test_returns.extend(fold_rets)
         if len(all_test_returns) < 5:
             return 0.0
-        return compute_metrics(all_test_returns).sharpe
+        oos_equity = [1.0]
+        for r in all_test_returns:
+            oos_equity.append(oos_equity[-1] * (1 + r))
+        return compute_metrics(oos_equity).sharpe
 
     def summary(self) -> str:
         lines = [
@@ -134,8 +140,14 @@ def run_walk_forward(
         if len(train_prices) < config.min_train_size or len(test_prices) < config.test_size:
             continue
 
-        train_equity = [p / train_prices[0] for p in train_prices]
-        test_equity = [p / test_prices[0] for p in test_prices]
+        train_rets = [train_prices[i] / train_prices[i - 1] - 1 for i in range(1, len(train_prices))]
+        test_rets = [test_prices[i] / test_prices[i - 1] - 1 for i in range(1, len(test_prices))]
+        train_equity = [1.0]
+        for r in train_rets:
+            train_equity.append(train_equity[-1] * (1 + r))
+        test_equity = [1.0]
+        for r in test_rets:
+            test_equity.append(test_equity[-1] * (1 + r))
 
         fold = WalkForwardFold(
             fold=i + 1,
@@ -198,8 +210,14 @@ def run_combinatorial_purged_cv(
         if len(train_prices) < min_train_size or len(test_prices) < 5:
             continue
 
-        train_equity = [p / train_prices[0] for p in train_prices]
-        test_equity = [p / test_prices[0] for p in test_prices]
+        train_rets = [train_prices[i] / train_prices[i - 1] - 1 for i in range(1, len(train_prices))]
+        test_rets = [test_prices[i] / test_prices[i - 1] - 1 for i in range(1, len(test_prices))]
+        train_equity = [1.0]
+        for r in train_rets:
+            train_equity.append(train_equity[-1] * (1 + r))
+        test_equity = [1.0]
+        for r in test_rets:
+            test_equity.append(test_equity[-1] * (1 + r))
 
         fold_id += 1
         fold = WalkForwardFold(

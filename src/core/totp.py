@@ -48,8 +48,8 @@ def generate_recovery_codes(count: int = 8) -> list[str]:
 
     codes: list[str] = []
     for _ in range(count):
-        code = secrets.token_hex(8).upper()
-        codes.append(f"{code[:4]}-{code[4:8]}-{code[8:12]}-{code[12:]}")
+        code = secrets.token_hex(32).upper()
+        codes.append(f"{code[:4]}-{code[4:8]}-{code[8:12]}-{code[12:16]}-{code[16:20]}-{code[20:24]}-{code[24:28]}-{code[28:]}")
     return codes
 
 
@@ -58,7 +58,9 @@ def hash_recovery_code(code: str) -> str:
 
 
 def verify_recovery_code(code: str, hashed_codes: list[str]) -> Optional[str]:
+    code_hash = hashlib.sha256(code.encode()).hexdigest()
+    result = None
     for stored in hashed_codes:
-        if hmac.compare_digest(hashlib.sha256(code.encode()).hexdigest(), stored):
-            return stored
-    return None
+        if hmac.compare_digest(code_hash, stored):
+            result = stored
+    return result

@@ -441,6 +441,7 @@ class AnalysisService:
         return ticker_context_builder.build(db, ticker)
 
     def train_models(self, db: Any, ticker: str | None = None) -> dict[str, bool]:
+        """Synchronous model training. Use train_models_async in async contexts."""
         import time
         _train_start = time.monotonic()
         from sqlalchemy import select as sa_select

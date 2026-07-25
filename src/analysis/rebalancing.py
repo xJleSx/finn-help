@@ -65,6 +65,7 @@ class RebalancingEngine:
         user_id: int = 0,
         target_weights: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
+        """Synchronous portfolio analysis. Use async_analyze_portfolio in async contexts."""
         positions = db.query(Portfolio).filter_by(user_id=user_id).all()
         if not positions:
             return []
@@ -320,10 +321,10 @@ class RebalancingEngine:
         sector_breaks = self._check_sector_limits(analysis)
 
         estimated_commission = round(total_turnover * self.commission_rate, 2)
-        estimated_slippage = round(total_turnover * self.slippage_rate, 2)
+        round(total_turnover * self.slippage_rate, 2)
 
         tax_rate = TAX_RATE_LONG_TERM
-        estimated_tax = round(total_turnover * tax_rate * 0.3, 2)
+        round(total_turnover * tax_rate * 0.3, 2)
 
         for a in actions:
             a.estimated_cost += round(a.estimated_cost * (self.commission_rate + self.slippage_rate), 2)

@@ -54,6 +54,8 @@ class PortfolioService:
         return output
 
     async def add_position(self, user_id: int, ticker: str, quantity: float, avg_price: Optional[float] = None) -> dict[str, str]:
+        if quantity <= 0:
+            raise HTTPException(422, "Quantity must be positive")
         result = await self.db.execute(select(Instrument).where(Instrument.ticker == ticker.upper()))
         inst = result.scalar_one_or_none()
         if not inst:

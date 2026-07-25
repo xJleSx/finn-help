@@ -360,7 +360,7 @@ def _get_bert_pipeline() -> Any:
     if _bert_pipeline is not None:
         return _bert_pipeline
     try:
-        from transformers import pipeline  # type: ignore[import-not-found]
+        from transformers import pipeline
 
         _bert_pipeline = pipeline(
             "sentiment-analysis",

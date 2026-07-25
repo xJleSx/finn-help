@@ -62,13 +62,13 @@ async def update_candles_tbank(figi: str, ticker: str, interval: str = "5min", d
                 _close = c.get("close", 0.0)
                 _volume = c.get("volume", 0)
                 if exists.high is None or _high > float(exists.high):
-                    exists.high = _high  # type: ignore[assignment]
+                    exists.high = _high
                 if exists.low is None or _low < float(exists.low):
-                    exists.low = _low  # type: ignore[assignment]
-                exists.close = _close  # type: ignore[assignment]
+                    exists.low = _low
+                exists.close = _close
                 if exists.open is None:
                     exists.open = c.get("open", 0.0)
-                exists.volume = _volume  # type: ignore[assignment]
+                exists.volume = _volume
         logger.info("Added/updated %d candles for %s (%s)", new_count, ticker, interval)
     return new_count
 

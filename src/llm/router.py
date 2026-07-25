@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import re
+import time
 from typing import Any, cast
 
 from src.config import settings
@@ -17,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 LLM_TEMPERATURE = 0.15
 PROMPT_CACHE_MAX = 128
+PROMPT_CACHE_TTL = 3600  # 1 hour
 
 
 class LLMRouter:
@@ -28,7 +31,7 @@ class LLMRouter:
         self._cost_tracker = get_cost_tracker()
         self._groq_cb = get_circuit_breaker("llm_groq")
         self._ollama_cb = get_circuit_breaker("llm_ollama")
-        self._prompt_cache: dict[str, str] = {}
+        self._prompt_cache: dict[str, tuple[str, float]] = {}
         self._prompt_cache_order: list[str] = []
         self._wolfram: WolframAlphaClient | None = (
             WolframAlphaClient(settings.wolfram_app_id) if settings.wolfram_enabled and settings.wolfram_app_id else None
@@ -44,18 +47,18 @@ class LLMRouter:
                 logger.warning("Groq client init failed: %s", e)
 
     async def advise(self, signal: dict[str, object], user_id: str | int | None = None) -> str:
-        self._enrich_with_risk_profile(signal, user_id=user_id)
+        await asyncio.to_thread(self._enrich_with_risk_profile, signal, user_id=user_id)
         await self._enrich_with_wolfram(signal)
-        self._enrich_with_enriched_context(signal)
+        await asyncio.to_thread(self._enrich_with_enriched_context, signal)
         raw = await self._groq_advise(signal)
-        return self._process_output(raw, signal)
+        return await asyncio.to_thread(self._process_output, raw, signal)
 
     async def report(self, signal: dict[str, object], user_id: str | int | None = None) -> str:
-        self._enrich_with_risk_profile(signal, user_id=user_id)
+        await asyncio.to_thread(self._enrich_with_risk_profile, signal, user_id=user_id)
         await self._enrich_with_wolfram(signal)
-        self._enrich_with_enriched_context(signal)
+        await asyncio.to_thread(self._enrich_with_enriched_context, signal)
         raw = await self._groq_report(signal)
-        return self._process_report(raw, signal)
+        return await asyncio.to_thread(self._process_report, raw, signal)
 
     def _enrich_with_risk_profile(self, signal: dict[str, object], user_id: str | int | None = None) -> None:
         try:
@@ -189,6 +192,13 @@ class LLMRouter:
             logger.debug("market_context_block failed: %s", e)
             return ""
 
+    async def _build_ticker_context(self, db, question: str) -> str:
+        found_ticker = await asyncio.to_thread(self._detect_ticker, db, question)
+        if found_ticker:
+            from src.analysis.service import analysis_service
+            return await asyncio.to_thread(analysis_service.load_ticker_context, db, found_ticker)
+        return ""
+
     async def answer_question(
         self,
         question: str,
@@ -199,18 +209,14 @@ class LLMRouter:
 
         from src.db.connection import get_session
 
-        db = get_session()
+        db = await asyncio.to_thread(get_session)
         try:
             if not ticker_context:
-                found_ticker = self._detect_ticker(db, question)
-                if found_ticker:
-                    from src.analysis.service import analysis_service
+                ticker_context = await self._build_ticker_context(db, question)
 
-                    ticker_context = analysis_service.load_ticker_context(db, found_ticker)
-
-            market_ctx = self._market_context_block(db)
+            market_ctx = await asyncio.to_thread(self._market_context_block, db)
         finally:
-            db.close()
+            await asyncio.to_thread(db.close)
 
         system_prompt = prompts.QUESTION_SYSTEM_PROMPT.format(profile=profile)
         user_prompt = prompts.build_question_message(
@@ -289,17 +295,22 @@ class LLMRouter:
         max_tokens: int = 768,
         model: str | None = None,
     ) -> str:
-        cache_key = hashlib.sha256((system + user + str(temperature)).encode()).hexdigest()
+        model = model or self._groq_model
+        cache_key = hashlib.sha256((system + user + str(temperature) + model).encode()).hexdigest()
         cached = self._prompt_cache.get(cache_key)
         if cached is not None:
-            logger.debug("Prompt cache hit (%s)", cache_key[:8])
-            return cached
+            value, ts = cached
+            if time.time() - ts < PROMPT_CACHE_TTL:
+                logger.debug("Prompt cache hit (%s)", cache_key[:8])
+                return value
+            self._prompt_cache.pop(cache_key, None)
+            if cache_key in self._prompt_cache_order:
+                self._prompt_cache_order.remove(cache_key)
 
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
-        model = model or self._groq_model
         last_error: Exception | None = None
 
         if self._use_groq:
@@ -350,7 +361,7 @@ class LLMRouter:
         if len(self._prompt_cache) >= PROMPT_CACHE_MAX:
             oldest = self._prompt_cache_order.pop(0)
             self._prompt_cache.pop(oldest, None)
-        self._prompt_cache[key] = value
+        self._prompt_cache[key] = (value, time.time())
         self._prompt_cache_order.append(key)
 
     async def _groq_question(self, system: str, user: str) -> str:

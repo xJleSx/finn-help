@@ -148,7 +148,7 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.effective_message.reply_text("🏆 Ищу лучшие возможности...")
     try:
-        picks = allocator.recommend(capital=100_000)
+        picks = await allocator.recommend(capital=100_000)
         if not picks:
             await update.effective_message.reply_text("Нет данных. Запустите `finn update`.")
             return

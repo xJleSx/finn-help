@@ -357,6 +357,5 @@ class AdvancedTechnicalAnalyzer:
         df = self.stochastic_oscillator(df)
         df = self.obv(df)
         df = self.williams_r(df)
-        df = self.parabolic_sar(df)
+        return self.parabolic_sar(df)
 
-        return df

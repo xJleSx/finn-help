@@ -50,7 +50,7 @@ class GroqRetryHandler:
                     await asyncio.sleep(delay)
                 else:
                     raise
-        raise last_exc  # type: ignore[misc]
+        raise last_exc
 
 
 _rate_limiter = AsyncRateLimiter(calls_per_minute=25)

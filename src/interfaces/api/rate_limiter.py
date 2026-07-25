@@ -14,12 +14,12 @@ def _rate_limit_key(request: Request) -> str:
             pass
     if user_id:
         return f"user:{user_id}"
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[-1].strip()
     client = request.client
     if client is not None:
         return client.host
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[-1].strip()
     return "127.0.0.1"
 
 

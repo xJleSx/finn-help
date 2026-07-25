@@ -24,6 +24,9 @@ IMPACT_MATRIX = {
         "healthcare": 0.20,
         "transport": 0.40,
         "utilities": 0.60,
+        "telecom": 0.35,
+        "construction": 0.55,
+        "chemicals": 0.55,
     },
     "conflict": {
         "energy": 0.80,
@@ -36,6 +39,9 @@ IMPACT_MATRIX = {
         "metals": 0.70,
         "agriculture": 0.50,
         "retail": 0.30,
+        "telecom": 0.30,
+        "construction": 0.45,
+        "chemicals": 0.40,
     },
     "trade_war": {
         "tech": 0.90,
@@ -48,6 +54,9 @@ IMPACT_MATRIX = {
         "transport": 0.50,
         "utilities": 0.30,
         "healthcare": 0.20,
+        "telecom": 0.50,
+        "construction": 0.65,
+        "chemicals": 0.60,
     },
     "monetary_policy": {
         "banking": 0.90,
@@ -60,6 +69,9 @@ IMPACT_MATRIX = {
         "metals": 0.60,
         "agriculture": 0.30,
         "healthcare": 0.20,
+        "telecom": 0.60,
+        "construction": 0.45,
+        "chemicals": 0.35,
     },
     "inflation": {
         "energy": 0.80,
@@ -72,6 +84,9 @@ IMPACT_MATRIX = {
         "banking": 0.50,
         "tech": 0.40,
         "healthcare": 0.40,
+        "telecom": 0.30,
+        "construction": 0.55,
+        "chemicals": 0.50,
     },
     "geopolitical_risk": {
         "energy": 0.70,
@@ -84,6 +99,9 @@ IMPACT_MATRIX = {
         "utilities": 0.40,
         "agriculture": 0.40,
         "retail": 0.30,
+        "telecom": 0.30,
+        "construction": 0.45,
+        "chemicals": 0.35,
     },
 }
 

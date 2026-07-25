@@ -205,6 +205,7 @@ class BaseMLClassifier(PersistMixin, ABC):
         self._calibrator: Any = None
         self._bootstrap_models: list[Any] = []
         self._ticker = ticker
+        self._train_data_hash: int | None = None
 
     @property
     def _common_model_params(self) -> dict[str, Any]:
@@ -223,6 +224,11 @@ class BaseMLClassifier(PersistMixin, ABC):
         features = prepare_features(df)
         if features.empty or len(features) < settings.ml_min_train_rows:
             return False
+        data_hash = hash(features.values.tobytes())
+        if self._train_data_hash is not None and data_hash == self._train_data_hash:
+            logger.debug("%s — data unchanged, skipping retrain", self.model_name)
+            return True
+        self._train_data_hash = data_hash
         result = self._train_on_the_fly(df, features, anomaly_mask=anomaly_mask)
         if result is None:
             return False

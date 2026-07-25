@@ -27,6 +27,10 @@ def load_personal_settings() -> dict[str, object]:
     return {}
 
 
+def get_personal_settings() -> dict[str, object]:
+    return personal
+
+
 class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
@@ -60,6 +64,7 @@ class Settings(BaseSettings):
     vk_api_version: str = "5.199"
     vk_group_ids: str = "26196417,2676,30574849"
     llm_social_enabled: bool = False
+    newsapi_api_key: str = "demo"
 
     mlflow_tracking_uri: str = ""
     use_mock_data: bool = False
@@ -189,8 +194,17 @@ class Settings(BaseSettings):
     lock_file_path: str = ""
     ml_prometheus_enabled: bool = True
     executor_max_workers: int = 4
+    otlp_endpoint: str = "http://localhost:4317"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "forbid"}
+    oauth_google_client_id: str = ""
+    oauth_google_client_secret: str = ""
+    oauth_github_client_id: str = ""
+    oauth_github_client_secret: str = ""
+    oauth_yandex_client_id: str = ""
+    oauth_yandex_client_secret: str = ""
+    oauth_redirect_uri: str = "http://localhost:3000/auth/callback"
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "forbid"}  # misspelled env vars raise errors (extra=forbid)
 
 
 settings = Settings()
@@ -200,13 +214,21 @@ if not os.environ.get("JWT_SECRET"):
     import logging as _logging
     _logging.warning(
         "JWT_SECRET is not set in environment. Using stable fallback secret — "
-        "change JWT_SECRET in .env for a unique persistent secret."
+        "change JWT_SECRET in .env for a unique persistent secret. "
+        "*** WITHOUT A PERSISTENT JWT_SECRET, ALL SESSIONS WILL BE INVALIDATED AFTER RESTART ***"
     )
 
-if not settings.encryption_key or len(settings.encryption_key) < 16:
+if not settings.encryption_key:
     import logging as _logging
     _logging.warning(
-        "encryption_key is empty or too short (< 16 chars). "
-        "Data at rest is NOT encrypted securely. "
+        "encryption_key is empty. Data at rest is NOT encrypted. "
         "Set a strong encryption_key (32+ chars) in .env."
+    )
+elif len(settings.encryption_key) < 16:
+    import logging as _logging
+    _logging.error(
+        "encryption_key is too short (%d chars < 16). "
+        "Data at rest is NOT encrypted securely. "
+        "Set a strong encryption_key (32+ chars) in .env.",
+        len(settings.encryption_key),
     )

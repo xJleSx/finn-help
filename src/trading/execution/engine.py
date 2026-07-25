@@ -10,8 +10,8 @@ from src.core.context import (
     get_request_id,
     set_request_id,
 )
-from src.core.resilience import CircuitBreakerOpenError, get_circuit_breaker
 from src.core.credential_store import get_broker_token as _get_broker_token_db
+from src.core.resilience import CircuitBreakerOpenError, get_circuit_breaker
 from src.db.connection import session_scope
 from src.trading.brokers.registry import create_broker_client, get_default_broker
 from src.trading.compliance.aml import check_order_aml
@@ -224,7 +224,7 @@ async def execute_order(
         is_short=is_short,
     )
 
-    effective_direction = Direction.SHORT if is_short else Direction(direction.upper())
+    effective_direction = Direction.COVER if (is_short and direction.upper() == "BUY") else Direction.SHORT if is_short else Direction(direction.upper())
 
     if not skip_risk_checks and effective_mode != TradeMode.DRY_RUN:
         from src.db.connection import get_session as _risk_db
@@ -497,7 +497,7 @@ async def execute_order(
 
         _execution_log.append(record)
         record.db_id = save_order(record)
-        if slippage > 0 and executed_shares > 0 and record.db_id:
+        if slippage > 0 and executed_shares > 0:
             log_trade(
                 ticker=ticker,
                 direction=direction,
@@ -505,7 +505,7 @@ async def execute_order(
                 price=record.price,
                 slippage=slippage,
                 reason=record.reason,
-                order_id=record.db_id,
+                order_id=record.db_id or record.order_id or record.idempotency_key,
             )
         await _notify_trade(record, reason)
         return record
@@ -523,25 +523,30 @@ async def execute_order(
     return record
 
 
-async def approve_order(ticker: str, direction: str, quantity: int) -> Optional[OrderRecord]:
+async def approve_order(ticker: str, direction: str, quantity: int, idempotency_key: str = "") -> Optional[OrderRecord]:
     if not settings.enable_trading:
         logger.warning("Cannot approve order — trading disabled (ENABLE_TRADING=true)")
         return None
     reload_execution_log()
     async with _mode_lock:
         for r in reversed(_execution_log):
-            if r.ticker == ticker and r.direction == direction and r.quantity == quantity and r.status == "pending_approval":
-                return await execute_order(
-                    ticker=r.ticker,
-                    direction=r.direction,
-                    quantity=r.quantity,
-                    price=r.price,
-                    reason=r.reason,
-                    mode_override=TradeMode.AUTO,
-                    order_type=r.order_type,
-                    time_in_force=r.time_in_force,
-                    is_short=r.is_short,
-                )
+            if r.status != "pending_approval":
+                continue
+            if r.ticker != ticker or r.direction != direction or r.quantity != quantity:
+                continue
+            if idempotency_key and r.idempotency_key != idempotency_key:
+                continue
+            return await execute_order(
+                ticker=r.ticker,
+                direction=r.direction,
+                quantity=r.quantity,
+                price=r.price,
+                reason=r.reason,
+                mode_override=TradeMode.AUTO,
+                order_type=r.order_type,
+                time_in_force=r.time_in_force,
+                is_short=r.is_short,
+            )
     return None
 
 

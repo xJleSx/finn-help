@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -24,10 +25,10 @@ class AnomalyDetector:
         self.topic = TopicAnomalyDetector()
         self.autoencoder = AutoencoderAnomalyDetector()
 
-    def train_all(self, db: Session) -> dict[str, Any]:
+    def train_all(self, db: Session, cutoff_date: datetime | None = None) -> dict[str, Any]:
         results: dict[str, Any] = {}
-        results["volume"] = self.volume.train(db, self.ticker)
-        results["sentiment"] = self.sentiment.train(db, self.ticker)
+        results["volume"] = self.volume.train(db, self.ticker, cutoff_date=cutoff_date)
+        results["sentiment"] = self.sentiment.train(db, self.ticker, cutoff_date=cutoff_date)
         results["source"] = self.source.train(db)
         results["topic"] = self.topic.train(db)
         results["autoencoder"] = self.autoencoder.train(db, self.ticker)
@@ -41,6 +42,12 @@ class AnomalyDetector:
             "topic": settings.ml_anomaly_weight_topic,
             "autoencoder": settings.ml_anomaly_weight_autoencoder,
         }
+
+        # Use expanding window: retrain with data only up to the article's date
+        # to prevent future leakage
+        article_date = getattr(news_article, "published_at", datetime.now(timezone.utc))
+        self.train_all(db, cutoff_date=article_date)
+
         scores: dict[str, float] = {}
         scores["volume"] = self.volume.predict_article(db, news_article) if self.volume.trained else 0.0
         scores["sentiment"] = self.sentiment.predict_article(db, news_article) if self.sentiment.trained else 0.0

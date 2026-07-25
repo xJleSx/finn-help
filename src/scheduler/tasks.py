@@ -3,7 +3,7 @@ import logging
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 
 from src.alerts.generators import async_generate_all_alerts, async_store_alerts
 from src.analysis.fundamental.base import async_refresh_sector_benchmarks

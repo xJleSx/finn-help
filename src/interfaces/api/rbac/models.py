@@ -86,13 +86,17 @@ def get_current_user_role(request: Request, db_session: Optional[object] = None)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Unknown role: {role_str}")
 
-    if role == Role.ADMIN and db_session is not None:
+    if db_session is not None:
         user_id = int(payload.get("sub", 0))
         if user_id:
             user = db_session.execute(select(User).where(User.id == user_id, User.is_active)).scalar_one_or_none()
             if not user:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
-            if user.role != Role.ADMIN.value:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Stale admin role — DB role has changed")
+            db_role_str = user.role
+            if db_role_str != role_str:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Stale role — JWT says '{role_str}', DB says '{db_role_str}'",
+                )
 
     return role

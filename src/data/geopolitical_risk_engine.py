@@ -244,7 +244,10 @@ class GeopoliticalRiskEngine:
         x = list(range(len(history)))
         y = history
         n = len(x)
-        slope = (n * sum(a * b for a, b in zip(x, y)) - sum(x) * sum(y)) / (n * sum(a**2 for a in x) - sum(x) ** 2)
+        denom = n * sum(a**2 for a in x) - sum(x) ** 2
+        if abs(denom) < 1e-12:
+            return history[-1]
+        slope = (n * sum(a * b for a, b in zip(x, y)) - sum(x) * sum(y)) / denom
         return max(0.0, min(10.0, history[-1] + slope * days_forward))
 
     # ── Daily calculation ───────────────────────────────────────────────────

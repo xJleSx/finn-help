@@ -106,9 +106,11 @@ class BondOfferingCollector(BaseCollector):
 
         # Calculate duration if not provided by MOEX
         if "duration_years" not in result and result.get("maturity_date") and result.get("yield_to_maturity"):
+            amort_schedule = result.get("coupon_schedule") if result.get("amortizing") else None
             result["duration_years"] = _estimate_duration(
                 maturity_date=result["maturity_date"],
                 ytm=result.get("yield_to_maturity"),
+                amortizing_schedule=amort_schedule,
             )
 
         # Fetch coupon schedule in parallel
@@ -223,8 +225,8 @@ def _estimate_duration(maturity_date: date, ytm: Optional[float], amortizing_sch
     today = date.today()
     if maturity_date <= today:
         return 0.0
-    # TODO: support amortizing bonds with varying notional
     if amortizing_schedule:
+        logger.info("Computing duration for amortizing bond (weighted average across %d payments)", len(amortizing_schedule))
         # For amortizing bonds, compute weighted average duration across principal repayments
         total_weight = 0.0
         weighted = 0.0

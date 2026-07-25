@@ -27,7 +27,7 @@ def get_broker_token(user_id: int, broker_name: str, db: Session | None = None) 
                 .where(
                     BrokerCredential.user_id == user_id,
                     BrokerCredential.broker_name == broker_name,
-                    BrokerCredential.is_active == True,
+                    BrokerCredential.is_active,
                 )
                 .order_by(BrokerCredential.updated_at.desc())
                 .limit(1)

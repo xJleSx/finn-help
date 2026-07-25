@@ -12,6 +12,8 @@ from src.scheduler.tasks import daily_update, weekly_update
 
 
 def _acquire_instance_lock(name: str = "scheduler") -> bool:
+    # WARNING: PID-based file lock does NOT work in distributed environments (K8s, multi-replica).
+    # Use a DB-based lock or Redis lock for production HA deployments.
     lock_dir = Path(os.environ.get("FINN_LOCK_DIR", tempfile.gettempdir()))
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_path = lock_dir / f"finn_{name}.lock"
@@ -80,7 +82,8 @@ def _retry_failed_receipts() -> None:
         for receipt in pending:
             try:
                 to_email = getattr(receipt, "to_email", None)
-                if receipt.channel == "email" and receipt.title and to_email:
+                import re as _re
+                if receipt.channel == "email" and receipt.title and to_email and _re.match(r"[^@\s]+@[^@\s]+\.[^@\s]+$", to_email):
                     from src.notifications.channels import EmailPushChannel, PushMessage
 
                     channel = EmailPushChannel(db=db)
@@ -223,11 +226,23 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
 
                             ns = NotificationService()
                             for uid, cid in ns.get_subscribers("daily"):
-                                target = f"chat:{cid}" if cid else f"user:{uid}"
+                                chat_id = cid
+                                if not chat_id:
+                                    from src.db.connection import get_session
+                                    from src.db.models import Subscription
+                                    db = get_session()
+                                    try:
+                                        sub = db.query(Subscription).filter_by(user_id=uid).first()
+                                        chat_id = sub.chat_id if sub else None
+                                    finally:
+                                        db.close()
+                                if not chat_id:
+                                    logger.warning("No chat_id for user %d, skipping daily report", uid)
+                                    continue
                                 try:
-                                    await bot_app.bot.send_message(chat_id=target, text=report.report_text, parse_mode="HTML")
+                                    await bot_app.bot.send_message(chat_id=chat_id, text=report.report_text, parse_mode="HTML")
                                 except Exception as e:
-                                    logger.warning("Failed to send daily report to %d: %s", target, e)
+                                    logger.warning("Failed to send daily report to chat %d: %s", chat_id, e)
                         else:
                             logger.info("Daily report:\n%s", report.report_text)
 

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import hmac
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-import hmac
-
 import structlog
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 

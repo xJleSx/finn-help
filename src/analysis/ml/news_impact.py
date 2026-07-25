@@ -252,7 +252,7 @@ class NewsImpactModel(BaseRegressor):
                 if lstm_path.exists():
                     lstm_cls = self._get_lstm_class()
                     lstm_model = lstm_cls(input_dim=len(self._feature_names))
-                    lstm_model.load_state_dict(torch.load(str(lstm_path)))
+                    lstm_model.load_state_dict(torch.load(str(lstm_path), weights_only=True))
                     self._lstm_models[horizon_days] = lstm_model
             except Exception as e:
                 logger.debug("LSTM model load failed for horizon %d: %s", horizon_days, e)

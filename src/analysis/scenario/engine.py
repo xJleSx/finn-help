@@ -15,7 +15,7 @@ from src.db.models import Instrument, Portfolio, Price
 
 logger = logging.getLogger(__name__)
 
-SIMULATION_TIMEOUT = 120  # seconds
+SIMULATION_TIMEOUT = 30  # seconds (default for sync methods)
 
 
 @dataclass
@@ -143,12 +143,12 @@ class ScenarioEngine:
             sector_map[p["sector"]] += p["amount"]
         return dict(sector_map)
 
-    def run_monte_carlo(self, n_simulations: int = 10000, periods: int = 252) -> ScenarioResult:
+    def run_monte_carlo(self, n_simulations: int = 10000, periods: int = 252, timeout: float = 30.0) -> ScenarioResult:
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             fut = pool.submit(self._run_monte_carlo_impl, n_simulations, periods)
             try:
-                result = fut.result(timeout=SIMULATION_TIMEOUT)
+                result = fut.result(timeout=timeout)
                 if result is None or (isinstance(result, ScenarioResult) and result.loss_pct == 0.0 and result.total_after == 0.0):
                     return ScenarioResult(
                         name="Monte Carlo",
@@ -158,13 +158,29 @@ class ScenarioEngine:
                     )
                 return result
             except concurrent.futures.TimeoutError:
-                logger.warning("Monte Carlo simulation timed out after %ds", SIMULATION_TIMEOUT)
+                logger.warning("Monte Carlo simulation timed out after %.0fs", timeout)
                 return ScenarioResult(
                     name="Monte Carlo (timeout)",
                     total_before=self._total,
                     loss_pct=0.0,
                     scenario_type="monte_carlo",
                 )
+
+    async def run_monte_carlo_async(self, n_simulations: int = 10000, periods: int = 252, timeout: float = 30.0) -> ScenarioResult:
+        loop = asyncio.get_running_loop()
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, self._run_monte_carlo_impl, n_simulations, periods),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Monte Carlo simulation timed out after %.0fs (async)", timeout)
+            return ScenarioResult(
+                name="Monte Carlo (timeout)",
+                total_before=self._total,
+                loss_pct=0.0,
+                scenario_type="monte_carlo",
+            )
 
     def _run_monte_carlo_impl(self, n_simulations: int = 10000, periods: int = 252) -> ScenarioResult | None:
         if self._cov_matrix is None or self._weights is None:
@@ -197,12 +213,12 @@ class ScenarioEngine:
             scenario_type="monte_carlo",
         )
 
-    def run_historical_bootstrap(self, n_simulations: int = 10000, periods: int = 252) -> ScenarioResult:
+    def run_historical_bootstrap(self, n_simulations: int = 10000, periods: int = 252, timeout: float = 30.0) -> ScenarioResult:
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             fut = pool.submit(self._run_bootstrap_impl, n_simulations, periods)
             try:
-                result = fut.result(timeout=SIMULATION_TIMEOUT)
+                result = fut.result(timeout=timeout)
                 if result is None:
                     return ScenarioResult(
                         name="Historical Bootstrap",
@@ -212,13 +228,29 @@ class ScenarioEngine:
                     )
                 return result
             except concurrent.futures.TimeoutError:
-                logger.warning("Historical bootstrap timed out after %ds", SIMULATION_TIMEOUT)
+                logger.warning("Historical bootstrap timed out after %.0fs", timeout)
                 return ScenarioResult(
                     name="Historical Bootstrap (timeout)",
                     total_before=self._total,
                     loss_pct=0.0,
                     scenario_type="bootstrap",
                 )
+
+    async def run_historical_bootstrap_async(self, n_simulations: int = 10000, periods: int = 252, timeout: float = 30.0) -> ScenarioResult:
+        loop = asyncio.get_running_loop()
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, self._run_bootstrap_impl, n_simulations, periods),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Historical bootstrap timed out after %.0fs (async)", timeout)
+            return ScenarioResult(
+                name="Historical Bootstrap (timeout)",
+                total_before=self._total,
+                loss_pct=0.0,
+                scenario_type="bootstrap",
+            )
 
     def _run_bootstrap_impl(self, n_simulations: int = 10000, periods: int = 252) -> ScenarioResult | None:
         if not self._tickers:

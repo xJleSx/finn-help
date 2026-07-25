@@ -79,12 +79,12 @@ def _save_daily_counters() -> None:
     try:
         existing = db.query(UserSetting).filter(UserSetting.key == _KEY_TRADES).first()
         if existing:
-            existing.value = str(_trades_today)  # type: ignore[assignment]
+            existing.value = str(_trades_today)
         else:
             db.add(UserSetting(key=_KEY_TRADES, value=str(_trades_today)))
         existing2 = db.query(UserSetting).filter(UserSetting.key == _KEY_RESET_DAY).first()
         if existing2:
-            existing2.value = str(_last_reset_day or "")  # type: ignore[assignment]
+            existing2.value = str(_last_reset_day or "")
         else:
             db.add(UserSetting(key=_KEY_RESET_DAY, value=str(_last_reset_day or "")))
         db.commit()
@@ -187,7 +187,7 @@ async def _check_var_async(db: AsyncSession) -> tuple[bool, str]:
         vals = [r[0] for r in result.all() if r[0] is not None]
         if len(vals) < 20:
             continue
-        rets = [(vals[i] - vals[i + 1]) / vals[i + 1] for i in range(len(vals) - 1)]
+        rets = [(vals[i + 1] - vals[i]) / vals[i] for i in range(len(vals) - 1)]
         all_returns.extend(rets)
     if len(all_returns) < 20:
         return True, "ok"

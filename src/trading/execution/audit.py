@@ -3,15 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
-
-from sqlalchemy import inspect
 from sqlalchemy.exc import OperationalError
 
 from src.core.context import context_extra
@@ -47,7 +44,7 @@ def _rotate_if_needed(file_path: Path) -> None:
                 if not rotated.exists():
                     break
                 index += 1
-            shutil.move(str(file_path), str(rotated))
+            os.replace(str(file_path), str(rotated))
             logger.info("audit_rotated", src=str(file_path), dst=str(rotated))
     except OSError as e:
         logger.error("audit_rotation_failed: %s", e)

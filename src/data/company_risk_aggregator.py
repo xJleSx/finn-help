@@ -39,6 +39,9 @@ SECTOR_BASELINE_RISK: dict[str, float] = {
     "chemicals": 4.5,
     "manufacturing": 5.0,
     "healthcare": 3.5,
+    "defense": 6.5,
+    "agriculture": 5.0,
+    "real_estate": 5.0,
 }
 
 CONTAGION_COEFFICIENT = 0.15  # spillover from peer risk
@@ -81,12 +84,14 @@ class CompanyRiskAggregator:
         vol = float(np.std(returns) * np.sqrt(252) * 100)  # annualised %
         return min(10.0, vol / 4.0)  # scale: 40% vol → 10
 
-    @staticmethod
-    def _get_market_regime(db_session: Any) -> str:
-        """Determine broad market regime (normal / stress)."""
+    def _get_market_regime(self, db_session: Any) -> str:
+        """Determine broad market regime (normal / stress) — cached per day."""
         from src.db.models import GeopoliticalRiskHistory, SectorRiskHistory
 
         today = datetime.now(timezone.utc).date()
+        cache_key = f"regime_{today}"
+        if hasattr(self, "_regime_cache") and cache_key in self._regime_cache:
+            return self._regime_cache[cache_key]
         geo = db_session.query(GeopoliticalRiskHistory).filter(GeopoliticalRiskHistory.date == today).first()
         # average sector risk across all sectors today
         sectors = db_session.query(SectorRiskHistory).filter(SectorRiskHistory.date == today).all()
@@ -94,10 +99,15 @@ class CompanyRiskAggregator:
         geo_score = geo.risk_score if geo else 5.0
         combined = avg_sector * 0.5 + geo_score * 0.5
         if combined >= 7.0:
-            return "stress"
-        if combined >= 5.0:
-            return "elevated"
-        return "normal"
+            regime = "stress"
+        elif combined >= 5.0:
+            regime = "elevated"
+        else:
+            regime = "normal"
+        if not hasattr(self, "_regime_cache"):
+            self._regime_cache: dict[str, str] = {}
+        self._regime_cache[cache_key] = regime
+        return regime
 
     def _adjust_weights(self, regime: str) -> dict[str, float]:
         if regime == "stress":

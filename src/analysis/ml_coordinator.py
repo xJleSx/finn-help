@@ -296,17 +296,13 @@ class MLCoordinator:
                     train_df = train_df.drop(columns=["is_anomaly"])
 
             ensemble = self.get_ensemble(sym)
-            ensemble_ok = await loop.run_in_executor(
-                None,
-                ensemble.train_all,
-                train_df,
-                anomaly_mask,
-            )
-
             prophet = self.get_prophet(sym)
-            prophet_ok = await loop.run_in_executor(get_executor(), prophet.train, df)
 
-            news_ok = await loop.run_in_executor(get_executor(), _train_news_impact_sync, sym)
+            ensemble_fut = loop.run_in_executor(None, ensemble.train_all, train_df, anomaly_mask)
+            prophet_fut = loop.run_in_executor(get_executor(), prophet.train, df)
+            news_fut = loop.run_in_executor(get_executor(), _train_news_impact_sync, sym)
+
+            ensemble_ok, prophet_ok, news_ok = await asyncio.gather(ensemble_fut, prophet_fut, news_fut)
 
             ok = all(ensemble_ok.values()) and prophet_ok
 

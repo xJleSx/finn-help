@@ -26,8 +26,14 @@ class AlertDeduplicator:
         self._seen[key] = now
         return False
 
+    def __len__(self) -> int:
+        return len(self._seen)
+
+    @property
+    def seen_count(self) -> int:
+        return len(self._seen)
+
     def reset(self) -> None:
-        # TODO: add test coverage for reset()
         self._seen.clear()
 
 
@@ -43,6 +49,9 @@ class AlertTimer:
             return False
         self._last_sent[ticker] = now
         return True
+
+    def __len__(self) -> int:
+        return len(self._last_sent)
 
     def reset(self) -> None:
         self._last_sent.clear()

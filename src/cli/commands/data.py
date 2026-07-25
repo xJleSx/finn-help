@@ -6,13 +6,12 @@ from typing import Optional
 import typer
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+from sqlalchemy import delete, select
 
 from src.cli.output import console
 from src.collectors.cbr import CBRCollector
 from src.collectors.financials import FinancialReportCollector
 from src.collectors.moex import MOEXCollector
-from sqlalchemy import delete, select
-
 from src.db.connection import get_async_session, get_session
 from src.db.models import BondCouponSchedule, BondOffering, Dividend, FinancialReport, Instrument, Price
 
@@ -560,8 +559,9 @@ def discover_bonds(
     """Найти новые облигации на MOEX, добавить в БД, показать рейтинг"""
 
     async def _run() -> None:
-        from src.analysis.bonds.new_bond_locator import discover_new_bonds
         from rich.table import Table
+
+        from src.analysis.bonds.new_bond_locator import discover_new_bonds
 
         async with get_async_session() as db:
             results = await discover_new_bonds(

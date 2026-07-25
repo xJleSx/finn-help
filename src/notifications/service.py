@@ -22,7 +22,7 @@ from src.notifications import (
     RebalanceAlert,
     SignalNotification,
 )
-from src.notifications.preferences import FrequencyController, NotificationPreferencesEngine
+from src.notifications.preferences import NotificationPreferencesEngine
 
 logger = structlog.get_logger(__name__)
 
@@ -227,16 +227,15 @@ class NotificationService:
         return self._prefs_engine.get_preferred_channels(user_id)
 
     def was_signal_sent_today(self, ticker: str, notif_type: str = "signal") -> bool:
+        from sqlalchemy import Date, cast
         db = self._get_sync_db()
         try:
             today = date.today()
-            from datetime import datetime
-            today_start = datetime.combine(today, datetime.min.time())
             count = (
                 db.query(Notification)
                 .filter(
                     Notification.type == notif_type,
-                    Notification.created_at >= today_start,
+                    cast(Notification.created_at, Date) >= today,
                     Notification.title == ticker,
                 )
                 .count()

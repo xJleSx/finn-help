@@ -49,8 +49,10 @@ def parkinson_volatility(
     out = np.full_like(highs, np.nan)
     if len(highs) < period:
         return out
-    rolling = pd.Series(squared).rolling(period, min_periods=period).mean().to_numpy()
-    out[period - 1:] = np.sqrt(rolling[period - 1:] / divisor)
+    kernel = np.ones(period)
+    rolling_sum = np.convolve(squared, kernel, mode='valid')
+    rolling = rolling_sum / period
+    out[period - 1:] = np.sqrt(rolling / divisor)
     if annualize:
         out *= np.sqrt(TRADING_DAYS)
     return out

@@ -19,7 +19,7 @@ def generate_portfolio_csv(positions: list[dict[str, Any]]) -> str:
                 p.get("avg_price", 0),
                 p.get("current_price", 0),
                 p.get("value", 0),
-                f"{p.get('allocation_pct', 0):.1f}%" if "allocation_pct" in p else "",
+                f"{(p.get('allocation_pct') or 0):.1f}%" if "allocation_pct" in p else "",
                 f"{p.get('profit_pct', 0):.1f}%",
             ]
         )
@@ -67,6 +67,9 @@ def generate_analysis_csv(ticker: str, signal: dict[str, Any], prices: list[dict
 def generate_backtest_csv(result: Any) -> str:
     output = StringIO()
     writer = csv.writer(output)
+    if not hasattr(result, "portfolio_return"):
+        writer.writerow(["Ошибка", "Некорректный результат бэктеста"])
+        return output.getvalue()
     writer.writerow(["Параметр", "Значение"])
     writer.writerow(["Доходность", f"{result.portfolio_return:.2%}"])
     writer.writerow(["Benchmark", f"{result.benchmark_return:.2%}"])

@@ -45,12 +45,8 @@ async def enqueue_collector_tasks(
         results.append({"ticker": t.ticker, "source": source, **result})
     for _ in workers:
         await r.lpush(REDIS_QUEUE_KEY, b"")
-    for w in workers:
-        w.cancel()
-        try:
-            await w
-        except asyncio.CancelledError:
-            pass
+    # Let workers finish via sentinel instead of cancel — avoids lost Redis state
+    await asyncio.gather(*workers, return_exceptions=True)
     logger.info("Shut down %d collector workers", len(workers))
     return results
 

@@ -130,15 +130,27 @@ def check_order_aml(
         check.checks.append({"check": "volume_threshold", "volume_rub": volume_rub})
         volume_warnings = _check_volume_threshold(ticker, volume_rub, user_id)
         check.warnings.extend(volume_warnings)
+    except Exception as e:
+        logger.error("AML volume check error (db): %s", e)
+        check.warnings.append(f"AML volume check db error: {e}")
 
+    try:
         check.checks.append({"check": "structuring", "volume_rub": volume_rub})
         structuring_warnings = _check_round_trip(ticker, user_id, volume_rub)
         check.warnings.extend(structuring_warnings)
+    except Exception as e:
+        logger.error("AML structuring check error (db): %s", e)
+        check.warnings.append(f"AML structuring check db error: {e}")
 
+    try:
         check.checks.append({"check": "velocity"})
         velocity_warnings = _check_velocity(user_id)
         check.warnings.extend(velocity_warnings)
+    except Exception as e:
+        logger.error("AML velocity check error (db): %s", e)
+        check.warnings.append(f"AML velocity check db error: {e}")
 
+    try:
         if user_risk_profile == "insane" and volume_rub > HIGH_RISK_THRESHOLD_RUB * 5:
             check.blocks.append(f"Insane profile blocked for volume {volume_rub:,.0f} RUB")
             check.passed = False

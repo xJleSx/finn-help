@@ -403,16 +403,8 @@ Return JSON with 'type' (news/spam/press_release/opinion/scam) and 'confidence' 
         """
         from src.db.models import News
 
-        stats = {
-            "total": len(articles),
-            "kept": 0,
-            "spam": 0,
-            "scam": 0,
-            "press_release": 0,
-            "opinion": 0,
-            "low_quality": 0,
-            "low_quality_source": 0,
-        }
+        stats: dict[str, int] = defaultdict(int)
+        stats["total"] = len(articles)
 
         article_ids = [a.get("id") for a in articles if a.get("id")]
         news_map: dict[int, Any] = {}
@@ -436,7 +428,7 @@ Return JSON with 'type' (news/spam/press_release/opinion/scam) and 'confidence' 
                 # Count by type
                 if not evaluation["is_relevant"]:
                     article_type = evaluation["article_type"]
-                    stats[article_type] = stats.get(article_type, 0) + 1
+                    stats[article_type] += 1
                 else:
                     stats["kept"] += 1
 

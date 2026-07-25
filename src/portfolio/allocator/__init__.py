@@ -1,4 +1,5 @@
 import threading
+
 from src.portfolio.allocator.engine import PortfolioAllocator
 
 allocator = PortfolioAllocator()

@@ -101,7 +101,7 @@ def compute_position_size(
     else:
         max_risk_amount = capital * risk_per_trade_pct / 100
 
-    if stop_loss_pct is not None and stop_loss_pct > 0:
+    if stop_loss_pct is not None and stop_loss_pct != 0:
         risk_per_share = price * abs(stop_loss_pct) / 100
         shares = int(max_risk_amount / risk_per_share) if risk_per_share > 0 else 0
     else:
@@ -120,14 +120,14 @@ def compute_position_size(
 def compute_vol_adjusted_size(
     account_value: float,
     risk_per_trade: float,
-    risk_per_share: float,
+    atr: float,
     entry_price: float,
     atr_multiplier: float = 2.0,
 ) -> int:
-    if risk_per_share <= 0 or entry_price <= 0 or account_value <= 0 or risk_per_trade <= 0:
+    if atr <= 0 or entry_price <= 0 or account_value <= 0 or risk_per_trade <= 0:
         return 0
     risk_amount = account_value * risk_per_trade
-    position_value = risk_amount / (risk_per_share * atr_multiplier)
+    position_value = risk_amount / (atr * atr_multiplier)
     shares = int(position_value / entry_price)
     return max(shares, 0)
 

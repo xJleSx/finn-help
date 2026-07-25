@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 from typing import Any, Optional
-
-import asyncio
 
 import pandas as pd
 import structlog
@@ -168,7 +167,9 @@ class MarketService:
         if not inst:
             raise HTTPException(404, "Instrument not found")
 
-        price_result = await self.db.execute(select(Price).where(Price.instrument_id == inst.id).order_by(Price.date))
+        price_result = await self.db.execute(
+            select(Price).where(Price.instrument_id == inst.id).order_by(Price.date).limit(500)
+        )
         prices = price_result.scalars().all()
         if len(prices) < 20:
             raise HTTPException(400, "Not enough price data")

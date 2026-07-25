@@ -52,6 +52,7 @@ def check_sector_limit(ticker: str, sector: str, position_value: float, portfoli
     db = get_session()
     try:
         from sqlalchemy import func
+
         from src.db.models import Instrument, Price
 
         latest_price = (

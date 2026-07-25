@@ -119,8 +119,17 @@ app.conf.task_routes = {
     "train_model": {"queue": "ml"},
     "train_all_models": {"queue": "ml"},
     "collect_prices": {"queue": "data"},
+    "check_smart_rules": {"queue": "default"},
+    "retry_failed_receipts": {"queue": "default"},
+    "take_daily_snapshot": {"queue": "default"},
+    "take_weekly_snapshot": {"queue": "default"},
+    "take_monthly_snapshot": {"queue": "default"},
+    "clear_stale_feature_cache": {"queue": "maintenance"},
+    "run_daily_report": {"queue": "reports"},
+    "run_weekly_report": {"queue": "reports"},
+    "run_monthly_report": {"queue": "reports"},
 }
 
-if app.conf.task_always_eager and not settings.log_level == "DEBUG":
+if app.conf.task_always_eager and settings.log_level != "DEBUG":
     import warnings
     warnings.warn("task_always_eager=True in non-DEBUG mode — tasks run synchronously in the main process")

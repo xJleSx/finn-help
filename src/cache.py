@@ -78,15 +78,15 @@ def cached(
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 key = make_key(prefix or func.__name__, *args, **kwargs)
                 r = get_redis()
-                if r:
-                    try:
-                        data = r.get(key)
-                        if data is not None:
-                            return json.loads(data)
-                    except Exception as exc:
-                        logger.debug("Redis get failed: %s", exc)
-                else:
-                    with _lock:
+                with _lock:
+                    if r:
+                        try:
+                            data = r.get(key)
+                            if data is not None:
+                                return json.loads(data)
+                        except Exception as exc:
+                            logger.debug("Redis get failed: %s", exc)
+                    else:
                         entry = _memory_cache.get(key)
                         if entry and time.time() - entry[0] < ttl:
                             return entry[1]
@@ -98,24 +98,23 @@ def cached(
                         r.setex(key, ttl, json.dumps(result, default=str))
                     except Exception as exc:
                         logger.debug("Redis set failed: %s", exc)
-                else:
-                    with _lock:
-                        _memory_cache[key] = (time.time(), result)
+                with _lock:
+                    _memory_cache[key] = (time.time(), result)
 
                 return result
         else:
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 key = make_key(prefix or func.__name__, *args, **kwargs)
                 r = get_redis()
-                if r:
-                    try:
-                        data = r.get(key)
-                        if data is not None:
-                            return json.loads(data)
-                    except Exception as exc:
-                        logger.debug("Redis get failed: %s", exc)
-                else:
-                    with _lock:
+                with _lock:
+                    if r:
+                        try:
+                            data = r.get(key)
+                            if data is not None:
+                                return json.loads(data)
+                        except Exception as exc:
+                            logger.debug("Redis get failed: %s", exc)
+                    else:
                         entry = _memory_cache.get(key)
                         if entry and time.time() - entry[0] < ttl:
                             return entry[1]
@@ -127,9 +126,8 @@ def cached(
                         r.setex(key, ttl, json.dumps(result, default=str))
                     except Exception as exc:
                         logger.debug("Redis set failed: %s", exc)
-                else:
-                    with _lock:
-                        _memory_cache[key] = (time.time(), result)
+                with _lock:
+                    _memory_cache[key] = (time.time(), result)
 
                 return result
 
@@ -143,6 +141,8 @@ def _sanitize_glob(pattern: str) -> str:
 
 
 def invalidate(pattern: str) -> None:
+    if not re.match(r"^[a-zA-Z0-9_*?]+$", pattern):
+        raise ValueError(f"Invalid glob pattern: {pattern!r}")
     safe = _sanitize_glob(pattern)
     key = f"finn:{safe}"
     r = get_redis()

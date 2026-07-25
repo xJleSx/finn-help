@@ -27,6 +27,12 @@ def compute_tax_lots(trades: list[dict[str, Any]]) -> list[TaxLot]:
     for t in sorted(trades, key=lambda x: x.get("date", "")):
         ticker = t.get("ticker", "")
         direction = t.get("direction", "")
+        is_short = t.get("is_short", False)
+        if is_short:
+            if direction == "BUY":
+                direction = "COVER"
+            elif direction == "SELL":
+                direction = "SHORT"
         qty = int(t.get("quantity", 0))
         price = float(t.get("price", 0))
         date_str = str(t.get("date", ""))

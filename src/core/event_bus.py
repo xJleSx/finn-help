@@ -48,7 +48,7 @@ class EventBus:
             results = await asyncio.gather(*[coro for _, coro in handler_tasks], return_exceptions=True)
             for (handler, _), result in zip(handler_tasks, results):
                 if isinstance(result, Exception):
-                    logger.exception("Handler %s failed for event %s: %s", handler, event.event_type, result)
+                    logger.error("Handler %s failed for event %s: %s", handler, event.event_type, result, exc_info=result)
 
     async def publish_async(self, event_type: str, data: Optional[dict[str, Any]] = None) -> None:
         """Publish a domain event (awaits all handlers asynchronously)."""

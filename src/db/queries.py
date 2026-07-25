@@ -85,46 +85,6 @@ def bulk_upsert(
     return processed
 
 
-async def async_bulk_upsert(
-    db: AsyncSession,
-    model: Any,
-    rows: list[dict[str, Any]],
-    conflict_columns: list[str],
-    update_columns: list[str] | None = None,
-    chunk_size: int = 500,
-) -> int:
-    if not rows:
-        return 0
-
-    table: Table = model.__table__
-    dialect_insert = _get_dialect_insert()
-    pk_cols = [c.name for c in table.primary_key.columns]
-    actual_conflict = [c for c in conflict_columns if c not in pk_cols and c in [col.name for col in table.columns]]
-    if not actual_conflict:
-        actual_conflict = conflict_columns
-
-    processed = 0
-    for i in range(0, len(rows), chunk_size):
-        chunk = rows[i : i + chunk_size]
-        stmt = _build_upsert_stmt(dialect_insert, model, chunk, actual_conflict, update_columns)
-
-        try:
-            await db.execute(stmt)
-            processed += len(chunk)
-        except Exception as e:
-            logger.warning("async_bulk_upsert chunk failed for %s: %s", model.__tablename__, e)
-            for row in chunk:
-                try:
-                    fallback = _build_upsert_stmt(dialect_insert, model, [row], actual_conflict, update_columns)
-                    await db.execute(fallback)
-                    processed += 1
-                except Exception as inner:
-                    logger.error("async_bulk_upsert individual row failed for %s: %s", model.__tablename__, inner)
-                    raise
-
-    return processed
-
-
 def normalize_ticker(ticker: str) -> str:
     return ticker.upper().strip()
 
@@ -171,6 +131,7 @@ async def async_bulk_upsert(
     update_columns: list[str] | None = None,
     chunk_size: int = 500,
 ) -> int:
+    """Idempotent upsert using INSERT ... ON CONFLICT (async version)."""
     if not rows:
         return 0
 
@@ -184,19 +145,7 @@ async def async_bulk_upsert(
     processed = 0
     for i in range(0, len(rows), chunk_size):
         chunk = rows[i : i + chunk_size]
-        stmt = dialect_insert(model).values(chunk)
-
-        if update_columns:
-            update_dict = {col: stmt.excluded[col] for col in update_columns if col in stmt.excluded}
-            if update_dict:
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=actual_conflict,
-                    set_=update_dict,
-                )
-            else:
-                stmt = stmt.on_conflict_do_nothing(index_elements=actual_conflict)
-        else:
-            stmt = stmt.on_conflict_do_nothing(index_elements=actual_conflict)
+        stmt = _build_upsert_stmt(dialect_insert, model, chunk, actual_conflict, update_columns)
 
         try:
             await db.execute(stmt)
@@ -205,11 +154,12 @@ async def async_bulk_upsert(
             logger.warning("async_bulk_upsert chunk failed for %s: %s", model.__tablename__, e)
             for row in chunk:
                 try:
-                    fallback = dialect_insert(model).values([row]).on_conflict_do_nothing(index_elements=actual_conflict)
+                    fallback = _build_upsert_stmt(dialect_insert, model, [row], actual_conflict, update_columns)
                     await db.execute(fallback)
                     processed += 1
                 except Exception as inner:
-                    logger.debug("async_bulk_upsert individual row failed: %s", inner)
+                    logger.error("async_bulk_upsert individual row failed for %s: %s", model.__tablename__, inner)
+                    raise
 
     return processed
 

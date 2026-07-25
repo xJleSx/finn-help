@@ -9,11 +9,7 @@ from src.core.container import container, wire
 from src.db.connection import get_async_session
 
 if TYPE_CHECKING:
-    from src.analysis.service import AnalysisService
-    from src.core.auth_service import AuthService
-    from src.market.service import MarketService
-    from src.notifications.service import NotificationService
-    from src.portfolio.service import PortfolioService
+    pass
 
 wire()
 

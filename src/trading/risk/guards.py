@@ -281,9 +281,11 @@ def set_max_leverage(n: float) -> None:
 
 
 def check_leverage(current_leverage: float) -> tuple[bool, str]:
-    if current_leverage > _MAX_LEVERAGE:
-        return False, f"Плечо {current_leverage:.1f}x > лимит {_MAX_LEVERAGE:.1f}x"
-    return True, f"Плечо {current_leverage:.1f}x в пределах {_MAX_LEVERAGE:.1f}x"
+    with _thread_lock:
+        limit = _MAX_LEVERAGE
+    if current_leverage > limit:
+        return False, f"Плечо {current_leverage:.1f}x > лимит {limit:.1f}x"
+    return True, f"Плечо {current_leverage:.1f}x в пределах {limit:.1f}x"
 
 
 def set_var_limit(pct: float) -> None:
@@ -293,9 +295,11 @@ def set_var_limit(pct: float) -> None:
 
 
 def check_var_limit(var_95: float) -> tuple[bool, str]:
-    if var_95 > VAR_LIMIT:
-        return False, f"VaR(95%) {var_95:.1%} > лимит {VAR_LIMIT:.1%}"
-    return True, f"VaR(95%) {var_95:.1%} в пределах {VAR_LIMIT:.1%}"
+    with _thread_lock:
+        limit = VAR_LIMIT
+    if var_95 > limit:
+        return False, f"VaR(95%) {var_95:.1%} > лимит {limit:.1%}"
+    return True, f"VaR(95%) {var_95:.1%} в пределах {limit:.1%}"
 
 
 MIN_DAILY_VOLUME: float = 1_000_000.0
@@ -653,6 +657,7 @@ class CircuitBreaker:
     def reset(self) -> None:
         self._triggered = False
         self._triggered_at = None
+        self.reset_pnl()
 
 
 # ═══════════════════════════════════════════════════════════════

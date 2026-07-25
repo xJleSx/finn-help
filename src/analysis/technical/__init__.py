@@ -1,10 +1,10 @@
 import logging
 from typing import Any
 
-from src.analysis.technical.advanced import AdvancedTechnicalAnalyzer as AdvancedTechnicalAnalyzer
-
 import numpy as np
 import pandas as pd
+
+from src.analysis.technical.advanced import AdvancedTechnicalAnalyzer as AdvancedTechnicalAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +24,15 @@ class TechnicalAnalyzer:
 
         df = df.sort_values("date")
 
-        df = self.sma(df, 20)
-        df = self.sma(df, 50)
-        df = self.sma(df, 200)
-        df = self.rsi(df, 14)
-        df = self.macd(df)
-        df = self.bollinger_bands(df, 20)
-        df = self.volume_sma(df, 20)
-        return self.atr(df, 14)
+        self.sma(df, 20)
+        self.sma(df, 50)
+        self.sma(df, 200)
+        self.rsi(df, 14)
+        self.macd(df)
+        self.bollinger_bands(df, 20)
+        self.volume_sma(df, 20)
+        self.atr(df, 14)
+        return df
 
 
     def sma(self, df: pd.DataFrame, period: int) -> pd.DataFrame:

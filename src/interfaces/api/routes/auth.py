@@ -10,7 +10,6 @@ from src.interfaces.api.auth import (
     blacklist_refresh_token,
     create_refresh_token,
     create_token,
-    create_oauth_token,
     decode_refresh_token,
     is_refresh_token_blacklisted,
     require_user,
@@ -178,4 +177,4 @@ async def oauth(
 
     from src.interfaces.api.auth import oauth_login
 
-    return oauth_login(provider, body.code)
+    return await oauth_login(provider, body.code)

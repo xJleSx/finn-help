@@ -172,6 +172,7 @@ def optimize_weights(
 
 def run_fusion_walk_forward(db_session: Any = None) -> OptimizationResult:
     from sqlalchemy import select
+
     from src.db.models import Signal as SignalModel
 
     if db_session is None:

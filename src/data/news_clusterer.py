@@ -80,7 +80,7 @@ class NewsClusterer:
     def _fallback_embedding(text: str) -> list[float]:
         import hashlib
 
-        h = int(hashlib.md5(text.lower().encode()).hexdigest(), 16)  # noqa: S324
+        h = int(hashlib.sha256(text.lower().encode()).hexdigest(), 16)
         np.random.seed(h % (2**32))
         return np.random.randn(768).tolist()
 

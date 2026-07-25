@@ -5,6 +5,8 @@ from typing import Any
 
 import httpx
 
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
 WORLD_BANK_BASE = "https://api.worldbank.org/v2/country/{code}/indicator/{indicator}"
@@ -51,7 +53,7 @@ class WorldBankCollector:
         results: list[dict[str, Any]] = []
         client = self._client or httpx.AsyncClient(timeout=15.0)
         try:
-            api_key = "demo"
+            api_key = getattr(settings, "newsapi_api_key", "demo")
             if api_key == "demo":
                 logger.warning("Using demo API key for NewsAPI — requests will be rate-limited")
             for keyword in sanctions_keywords:

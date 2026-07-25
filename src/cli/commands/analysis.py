@@ -6,6 +6,7 @@ import pandas as pd
 import typer
 from rich.progress import Progress
 from rich.table import Table
+from sqlalchemy import select
 
 from src.analysis.personal_backtest import run_personal_backtest
 from src.analysis.service import analysis_service
@@ -13,8 +14,6 @@ from src.cli.output import console
 from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.config import personal
-from sqlalchemy import select
-
 from src.db.connection import get_async_session
 from src.db.models import Instrument, Price
 from src.llm.router import llm

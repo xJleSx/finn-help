@@ -13,15 +13,14 @@ from src.constants import (
     ALLOCATOR_RECOMMEND_MAX_PICKS,
     ALLOCATOR_RECOMMEND_TIER_PICKS,
     ALLOCATOR_SECTOR_LIMIT_MIN_CAPITAL,
-    KNOWN_DIVIDEND_STOCKS,
     SAFE_BONDS,
     SAFE_ETFS,
     SECTOR_LIMITS,
     SECTOR_NAMES,
 )
-from src.db.connection import get_session, session_scope
+from src.db.connection import get_async_session_local
 from src.db.models import CorporateEvent, Dividend, FundamentalMetric, Instrument, Price
-from src.portfolio.allocator.profiles import PROFILES
+from src.portfolio.allocator.profiles import PROFILES, get_profile
 from src.portfolio.risk import item_risk, item_risk_async
 
 logger = logging.getLogger(__name__)
@@ -35,22 +34,6 @@ class PortfolioAllocator:
         if profile in PROFILES:
             self.profile = profile
 
-    def _load_profile_from_db(self, db: Any = None) -> None:
-        try:
-            from src.db.models import UserSetting
-
-            if db is not None:
-                row = db.query(UserSetting).filter_by(key="risk_profile").first()
-                if row and row.value in PROFILES:
-                    self.profile = row.value
-                return
-            with session_scope() as s:
-                row = s.query(UserSetting).filter_by(key="risk_profile").first()
-                if row and row.value in PROFILES:
-                    self.profile = row.value
-        except Exception as e:
-            logger.warning("Failed to load risk profile from DB: %s", e)
-
     async def _load_profile_from_db_async(self, db: AsyncSession | None = None) -> None:
         try:
             from src.db.models import UserSetting
@@ -61,8 +44,6 @@ class PortfolioAllocator:
                 if row and row.value in PROFILES:
                     self.profile = row.value
                 return
-            from src.db.connection import get_async_session_local
-
             async with get_async_session_local()() as session:
                 result = await session.execute(select(UserSetting).where(UserSetting.key == "risk_profile"))
                 row = result.scalar_one_or_none()
@@ -72,7 +53,7 @@ class PortfolioAllocator:
             logger.warning("Failed to load risk profile from DB: %s", e)
 
     def _weights(self) -> dict[str, Any]:
-        return PROFILES.get(self.profile, PROFILES["balanced"])
+        return get_profile(self.profile)
 
     async def _get_current_portfolio_async(self, db: AsyncSession) -> list[dict[str, Any]]:
         from src.db.models import Portfolio as PortModel
@@ -201,15 +182,6 @@ class PortfolioAllocator:
             "sector_allocation": sector_allocation,
         }
 
-    async def _allocate_from_data(
-        self,
-        capital: float,
-        existing: list[dict[str, Any]],
-        instruments_data: list[dict[str, Any]],
-        db: AsyncSession,
-    ) -> dict[str, Any]:
-        return await self._allocate_from_data_async(capital, existing, instruments_data, db)
-
     async def _allocate_from_data_async(
         self,
         capital: float,
@@ -227,17 +199,14 @@ class PortfolioAllocator:
 
     async def allocate(self, capital: float, db: AsyncSession | None = None) -> dict[str, Any]:
         await self._load_profile_from_db_async(db)
-        should_close = db is None
         if db is None:
-            from src.db.connection import get_async_session_local
-
             async with get_async_session_local()() as session:
                 existing = await self._get_current_portfolio_async(session)
                 instruments_data = await self._load_instruments_async(session)
-                return await self._allocate_from_data(capital, existing, instruments_data, session)
+                return await self._allocate_from_data_async(capital, existing, instruments_data, session)
         existing = await self._get_current_portfolio_async(db)
         instruments_data = await self._load_instruments_async(db)
-        return await self._allocate_from_data(capital, existing, instruments_data, db)
+        return await self._allocate_from_data_async(capital, existing, instruments_data, db)
 
     def _get_current_portfolio(self, db: Any) -> list[dict[str, Any]]:
         from src.db.models import Portfolio as PortModel
@@ -1056,81 +1025,72 @@ class PortfolioAllocator:
             logger.warning("Failed to get liquidity score", exc_info=True)
             return 0.0
 
-    def recommend(self, capital: float = 0, db: Any = None, exclude: set[str] | None = None) -> list[dict[str, Any]]:
-        self._load_profile_from_db()
-        should_close = db is None
+    async def recommend(self, capital: float = 0, db: AsyncSession | None = None, exclude: set[str] | None = None) -> list[dict[str, Any]]:
+        await self._load_profile_from_db_async()
         if db is None:
-            db = get_session()
-        try:
-            instruments = self._load_instruments(db)
-            existing = self._get_current_portfolio(db)
+            async with get_async_session_local()() as session:
+                return await self._recommend_core(capital, session, exclude)
+        return await self._recommend_core(capital, db, exclude)
 
-            max_picks = ALLOCATOR_RECOMMEND_MAX_PICKS
-            for tier in ALLOCATOR_RECOMMEND_TIER_PICKS:
-                if capital < tier["max_capital"]:
-                    max_picks = tier["max_picks"]
-                    break
+    async def _recommend_core(
+        self, capital: float, db: AsyncSession, exclude: set[str] | None = None
+    ) -> list[dict[str, Any]]:
+        instruments = await self._load_instruments_async(db)
+        existing = await self._get_current_portfolio_async(db)
 
-            weights = self._weights()
-            seen_tickers: set[str] = set()
-            all_picks: list[dict[str, Any]] = []
-            leftovers: list[dict[str, Any]] = []
+        max_picks = ALLOCATOR_RECOMMEND_MAX_PICKS
+        for tier in ALLOCATOR_RECOMMEND_TIER_PICKS:
+            if capital < tier["max_capital"]:
+                max_picks = tier["max_picks"]
+                break
 
-            for cat, cfg in weights.items():
-                candidates = self._score_candidates(instruments, cat, capital or 100_000, existing, db)
-                cat_picks = []
-                for c in candidates:
-                    if exclude and c["ticker"] in exclude:
-                        continue
-                    if self._downtrend_excluded(c["ticker"], db):
-                        continue
-                    last_price = c.get("last_price")
-                    if last_price and capital > 0 and last_price > capital * 0.8:
-                        continue
-                    entry = c.copy()
-                    entry["category"] = cfg["label"]
-                    entry["score"] = round(entry.get("score", 0), 2)
-                    risk = item_risk(c, db, capital)
-                    entry["risk"] = risk
-                    cat_picks.append(entry)
+        weights = self._weights()
+        seen_tickers: set[str] = set()
+        all_picks: list[dict[str, Any]] = []
+        leftovers: list[dict[str, Any]] = []
 
-                cat_picks.sort(key=lambda x: x["score"], reverse=True)
-                cat_max = cfg.get("max", 3)
-                cat_added = 0
-                for pick in cat_picks:
-                    if pick["ticker"] in seen_tickers:
-                        continue
-                    seen_tickers.add(pick["ticker"])
-                    if cat_added < cat_max:
-                        all_picks.append(pick)
-                        cat_added += 1
-                    elif len(leftovers) < max_picks * 2:
-                        leftovers.append(pick)
+        for cat, cfg in weights.items():
+            candidates = await self._score_candidates_async(instruments, cat, capital or 100_000, existing, db)
+            cat_picks = []
+            for c in candidates:
+                if exclude and c["ticker"] in exclude:
+                    continue
+                if await self._downtrend_excluded_async(c["ticker"], db):
+                    continue
+                last_price = c.get("last_price")
+                if last_price and capital > 0 and last_price > capital * 0.8:
+                    continue
+                entry = c.copy()
+                entry["category"] = cfg["label"]
+                entry["score"] = round(entry.get("score", 0), 2)
+                risk = await item_risk_async(c, db, capital)
+                entry["risk"] = risk
+                cat_picks.append(entry)
 
-            if leftovers:
-                leftovers.sort(key=lambda x: x["score"], reverse=True)
-                slots_left = max_picks - len(all_picks)
-                if slots_left > 0:
-                    for pick in leftovers:
-                        all_picks.append(pick)
-                        if len(all_picks) >= max_picks:
-                            break
+            cat_picks.sort(key=lambda x: x["score"], reverse=True)
+            cat_max = cfg.get("max", 3)
+            cat_added = 0
+            for pick in cat_picks:
+                if pick["ticker"] in seen_tickers:
+                    continue
+                seen_tickers.add(pick["ticker"])
+                if cat_added < cat_max:
+                    all_picks.append(pick)
+                    cat_added += 1
+                elif len(leftovers) < max_picks * 2:
+                    leftovers.append(pick)
 
-            all_picks.sort(key=lambda x: x["score"], reverse=True)
-            return all_picks[:max_picks]
-        finally:
-            if should_close:
-                db.close()
+        if leftovers:
+            leftovers.sort(key=lambda x: x["score"], reverse=True)
+            slots_left = max_picks - len(all_picks)
+            if slots_left > 0:
+                for pick in leftovers:
+                    all_picks.append(pick)
+                    if len(all_picks) >= max_picks:
+                        break
+
+        all_picks.sort(key=lambda x: x["score"], reverse=True)
+        return all_picks[:max_picks]
 
     async def allocate_async(self, capital: float, db: AsyncSession | None = None) -> dict[str, Any]:
-        await self._load_profile_from_db_async(db)
-        if db is None:
-            from src.db.connection import get_async_session_local
-
-            async with get_async_session_local()() as session:
-                existing = await self._get_current_portfolio_async(session)
-                instruments_data = await self._load_instruments_async(session)
-                return await self._allocate_from_data_async(capital, existing, instruments_data, session)
-        existing = await self._get_current_portfolio_async(db)
-        instruments_data = await self._load_instruments_async(db)
-        return await self._allocate_from_data_async(capital, existing, instruments_data, db)
+        return await self.allocate(capital, db)

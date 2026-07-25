@@ -1,28 +1,41 @@
 from __future__ import annotations
 
 import math
-from collections import deque
+from dataclasses import dataclass
+
+
+@dataclass
+class _Bucket:
+    size: int = 0
+    total: float = 0.0
 
 
 class ADWINDetector:
     def __init__(self, delta: float = 0.05) -> None:
         self.delta = delta
-        self._window: deque[float] = deque()
+        self._buckets: list[_Bucket] = []
+        self._total: float = 0.0
+        self._width: int = 0
 
     def add_element(self, value: float) -> bool:
-        self._window.append(value)
+        self._buckets.insert(0, _Bucket(size=1, total=value))
+        self._total += value
+        self._width += 1
+        self._merge_buckets()
         return self._detect()
 
     def get_width(self) -> int:
-        return len(self._window)
+        return self._width
 
     def get_mean(self) -> float:
-        if not self._window:
+        if self._width == 0:
             return 0.0
-        return sum(self._window) / len(self._window)
+        return self._total / self._width
 
     def reset(self) -> None:
-        self._window.clear()
+        self._buckets.clear()
+        self._total = 0.0
+        self._width = 0
 
     def detect_batch(self, values: list[float]) -> list[int]:
         indices: list[int] = []
@@ -31,27 +44,41 @@ class ADWINDetector:
                 indices.append(i)
         return indices
 
+    def _merge_buckets(self) -> None:
+        i = 0
+        while i < len(self._buckets) - 1:
+            if self._buckets[i].size == self._buckets[i + 1].size:
+                sz = self._buckets[i].size + self._buckets[i + 1].size
+                tot = self._buckets[i].total + self._buckets[i + 1].total
+                self._buckets[i] = _Bucket(size=sz, total=tot)
+                del self._buckets[i + 1]
+            i += 1
+
     def _detect(self) -> bool:
-        n = len(self._window)
-        if n < 5:
+        if self._width < 5:
             return False
 
-        total = sum(self._window)
-        left_sum = 0.0
+        left_total = 0.0
+        left_width = 0
 
-        for cut in range(1, n):
-            left_sum += self._window[cut - 1]
-            n0 = cut
-            n1 = n - cut
-            mean0 = left_sum / n0
-            mean1 = (total - left_sum) / n1
+        for i in range(len(self._buckets) - 1):
+            left_total += self._buckets[i].total
+            left_width += self._buckets[i].size
+            right_total = self._total - left_total
+            right_width = self._width - left_width
+
+            mean0 = left_total / left_width
+            mean1 = right_total / right_width
             diff = abs(mean0 - mean1)
 
-            m = 1.0 / (1.0 / n0 + 1.0 / n1)
-            eps = math.sqrt(math.log(4.0 / self.delta) / (2.0 * m))
+            m = left_width * right_width / (left_width + right_width)
+            delta_prime = self.delta / math.log(max(self._width, math.e))
+            eps = math.sqrt(2.0 / m * math.log(2.0 / delta_prime))
 
             if diff > eps:
-                self._window = deque([self._window[i] for i in range(cut, n)])
+                self._width = right_width
+                self._total = right_total
+                self._buckets = self._buckets[i + 1:]
                 return True
 
         return False

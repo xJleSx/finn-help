@@ -101,11 +101,23 @@ def _generate_and_send_report() -> None:
         from src.notifications.service import NotificationService
         ns = NotificationService()
         for uid, cid in ns.get_subscribers("daily"):
-            target = cid or uid
+            chat_id = cid
+            if not chat_id:
+                from src.db.connection import get_session
+                from src.db.models import Subscription
+                _db = get_session()
+                try:
+                    sub = _db.query(Subscription).filter_by(user_id=uid).first()
+                    chat_id = sub.chat_id if sub else None
+                finally:
+                    _db.close()
+            if not chat_id:
+                logger.warning("No chat_id for user %d, skipping daily report", uid)
+                continue
             try:
-                _run_async(bot_app.bot.send_message(chat_id=target, text=report.report_text, parse_mode="HTML"))
+                _run_async(bot_app.bot.send_message(chat_id=chat_id, text=report.report_text, parse_mode="HTML"))
             except Exception as e:
-                logger.warning("Failed to send daily report to %d: %s", target, e)
+                logger.warning("Failed to send daily report to %d: %s", chat_id, e)
     else:
         logger.info("Daily report:\n%s", report.report_text)
 
@@ -209,42 +221,42 @@ def retry_failed_receipts(self) -> dict[str, Any]:
         count = 0
         for receipt in pending:
             try:
-                if receipt.title:
-                    from src.notifications.channels import EmailPushChannel, PushMessage
+                from src.notifications.channels import PushMessage
+                msg = PushMessage(
+                    title=receipt.title or "",
+                    body=receipt.message or "",
+                    ticker="",
+                    priority=0,
+                    alert_type=receipt.notification_type or "general",
+                )
+                if receipt.channel == "email":
+                    from src.notifications.channels import EmailPushChannel
                     channel = EmailPushChannel(db=db)
-                    msg = PushMessage(
-                        title=receipt.title or "",
-                        body=receipt.message or "",
-                        ticker="",
-                        priority=0,
-                        alert_type=receipt.notification_type or "general",
-                    )
-                    if receipt.channel == "email":
-                        success = channel.send("", msg)
-                    elif receipt.channel == "telegram":
-                        from src.interfaces.telegram import app as bot_app
-                        success = False
-                        if bot_app is not None:
-                            try:
-                                import asyncio
-                                asyncio.run(bot_app.bot.send_message(
-                                    chat_id=receipt.user_id,
-                                    text=receipt.message or "",
-                                ))
-                                success = True
-                            except Exception:
-                                success = False
-                    elif receipt.channel == "web":
-                        from src.notifications.channels import WebPushChannel
-                        web = WebPushChannel()
-                        success = web.send(receipt.user_id, msg)
-                    else:
-                        success = False
-                    if success:
-                        mgr.mark_sent(receipt.id)
-                    else:
-                        mgr.mark_failed(receipt.id, "send returned False")
-                    count += 1
+                    success = channel.send("", msg)
+                elif receipt.channel == "telegram":
+                    from src.interfaces.telegram import app as bot_app
+                    success = False
+                    if bot_app is not None:
+                        try:
+                            import asyncio
+                            asyncio.run(bot_app.bot.send_message(
+                                chat_id=receipt.user_id,
+                                text=receipt.message or "",
+                            ))
+                            success = True
+                        except Exception:
+                            success = False
+                elif receipt.channel == "web":
+                    from src.notifications.channels import WebPushChannel
+                    web = WebPushChannel()
+                    success = web.send(receipt.user_id, msg)
+                else:
+                    success = False
+                if success:
+                    mgr.mark_sent(receipt.id)
+                else:
+                    mgr.mark_failed(receipt.id, "send returned False")
+                count += 1
             except Exception as exc:
                 logger.exception("receipt_retry_failed", receipt_id=receipt.id)
                 mgr.mark_failed(receipt.id, str(exc)[:500], schedule_retry=True)

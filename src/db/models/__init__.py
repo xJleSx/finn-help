@@ -1,3 +1,4 @@
+from src.db.models.audit import AuditLog
 from src.db.models.base import Base
 from src.db.models.instrument import (
     BondCouponSchedule,
@@ -47,7 +48,6 @@ from src.db.models.portfolio import (
     TradeLog,
     Transaction,
 )
-from src.db.models.audit import AuditLog
 from src.db.models.risk import (
     AMLState,
     CompanyRiskHistory,

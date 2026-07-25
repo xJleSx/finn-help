@@ -7,14 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from src.db.connection import get_session
-from src.interfaces.api.auth import decode_token
-from src.interfaces.api.rbac.audit import AuditTrail
 from src.db.models import (
     ComplianceEvent,
     MarginAccount,
     Order,
     ShortPosition,
+    User,
 )
+from src.interfaces.api.auth import decode_token, require_user
+from src.interfaces.api.rbac.audit import AuditTrail
 from src.trading.execution.engine import execute_compliance_check, execute_order
 from src.trading.margin import (
     compute_leverage_info,
@@ -120,7 +121,7 @@ class ComplianceEventResponse(BaseModel):
 
 
 @router.post("/order", response_model=OrderResponse)
-async def place_order(req: OrderRequest, request: Request):
+async def place_order(req: OrderRequest, request: Request, user: User = Depends(require_user)):
     try:
         result = await execute_order(
             ticker=req.ticker.upper(),
@@ -132,10 +133,9 @@ async def place_order(req: OrderRequest, request: Request):
             time_in_force=req.time_in_force.lower(),
             is_short=req.is_short,
         )
-        user_id = _get_user_id(request)
         ip = request.client.host if request.client else "unknown"
         AuditTrail.log(
-            user_id=str(user_id),
+            user_id=str(user.id),
             action="execute_order",
             resource=f"order:{result.ticker}",
             details=f"direction={result.direction} quantity={result.quantity} status={result.status}",
@@ -191,10 +191,10 @@ async def run_compliance_check(
 
 
 @router.get("/margin", response_model=MarginResponse)
-async def get_margin_info(user_id: int = Query(0)):
+async def get_margin_info(user: User = Depends(require_user)):
     db = get_session()
     try:
-        margin = db.query(MarginAccount).filter_by(user_id=user_id).first()
+        margin = db.query(MarginAccount).filter_by(user_id=user.id).first()
         if not margin:
             return MarginResponse(
                 portfolio_value=0,
@@ -223,17 +223,17 @@ async def get_margin_info(user_id: int = Query(0)):
             margin_status=info.margin_status,
         )
     except Exception:
-        logger.exception("trading_v2.margin_failed", user_id=user_id)
+        logger.exception("trading_v2.margin_failed", user_id=user.id)
         raise
     finally:
         db.close()
 
 
 @router.get("/short-positions", response_model=list[ShortPositionResponse])
-async def get_short_positions(user_id: int = Query(0)):
+async def get_short_positions(user: User = Depends(require_user)):
     db = get_session()
     try:
-        positions = db.query(ShortPosition).filter_by(user_id=user_id).all()
+        positions = db.query(ShortPosition).filter_by(user_id=user.id).all()
         return [
             ShortPositionResponse(
                 ticker=p.ticker,
@@ -348,7 +348,7 @@ async def get_compliance_events(
 
 
 @router.post("/order/cancel")
-async def cancel_order(order_id: int, request: Request):
+async def cancel_order(order_id: int, request: Request, user: User = Depends(require_user)):
     db = get_session()
     try:
         order = db.query(Order).filter_by(id=order_id).first()
@@ -356,10 +356,9 @@ async def cancel_order(order_id: int, request: Request):
             raise HTTPException(status_code=404, detail="Order not found")
         order.status = "cancelled"
         db.commit()
-        user_id = _get_user_id(request)
         ip = request.client.host if request.client else "unknown"
         AuditTrail.log(
-            user_id=str(user_id),
+            user_id=str(user.id),
             action="cancel_order",
             resource=f"order:{order_id}",
             details=f"ticker={order.ticker} direction={order.direction}",

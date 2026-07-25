@@ -58,13 +58,16 @@ def _build_view_matrices(
         P[i, idx] = 1.0
         Q[i] = v.magnitude / 100.0
     tau_scaled = tau * cov
-    Omega = P @ tau_scaled @ P.T
+    Omega = np.zeros((k, k))
     for i, v in enumerate(views):
         c = v.confidence
+        scaled_var = float(P[i] @ tau_scaled @ P[i])
         if c <= 0:
             Omega[i, i] = 1e12
-        elif c < 1.0:
-            Omega[i, i] = Omega[i, i] * (1.0 / c - 1.0) + 1e-10
+        elif c >= 1.0:
+            Omega[i, i] = scaled_var * 1e-6
+        else:
+            Omega[i, i] = scaled_var * (1.0 / c - 1.0)
     return P, Q, Omega
 
 

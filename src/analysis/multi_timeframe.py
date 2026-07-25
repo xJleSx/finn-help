@@ -43,8 +43,9 @@ class MultiTimeframeAnalyzer:
             volume=("volume", "sum"),
         )
         agg = agg.dropna(subset=["open"])
-        agg = agg.reset_index()
-        return agg
+        if agg.empty:
+            return None
+        return agg.reset_index()
 
     def _compute_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         d = df.copy()

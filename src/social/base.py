@@ -27,7 +27,7 @@ class SocialDataSource(ABC):
     async def fetch_author_stats(self, author_nick: str) -> dict[str, Any] | None: ...
 
     def normalize(self, raw: dict[str, Any]) -> RawPost:
-        result = super().normalize(raw)
+        result = RawPost(source=self.source_name, external_id="", author_nick="")
         result.source = self.source_name
         result.external_id = str(raw.get("id", ""))
         result.author_nick = str(raw.get("author", {}).get("nick", ""))

@@ -90,9 +90,7 @@ class SmartAlertEngine:
             scheduled_today = now.replace(hour=target_hour, minute=target_min, second=0, microsecond=0)
             if now < scheduled_today:
                 return False
-            if rule.last_triggered is not None and rule.last_triggered >= scheduled_today:
-                return False
-            return True
+            return not (rule.last_triggered is not None and rule.last_triggered >= scheduled_today)
 
         if interval == "weekly":
             if len(parts) < 3:
@@ -104,9 +102,7 @@ class SmartAlertEngine:
             scheduled_this_week = now.replace(hour=target_hour, minute=target_min, second=0, microsecond=0)
             if now < scheduled_this_week:
                 return False
-            if rule.last_triggered is not None and rule.last_triggered >= scheduled_this_week:
-                return False
-            return True
+            return not (rule.last_triggered is not None and rule.last_triggered >= scheduled_this_week)
 
         if interval == "hourly":
             if rule.last_triggered is None:

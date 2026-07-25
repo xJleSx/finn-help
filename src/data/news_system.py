@@ -36,7 +36,7 @@ class NewsSystemFactory:
                 from src.data.batch_processor import NewsBatchProcessor
                 from src.data.company_risk_aggregator import CompanyRiskAggregator
                 from src.data.dashboard_provider import DashboardDataProvider
-                from src.data.event_detector import EventDetector, DataSentimentDivergenceDetector
+                from src.data.event_detector import DataSentimentDivergenceDetector, EventDetector
                 from src.data.geopolitical_risk_engine import GeopoliticalRiskEngine
                 from src.data.impact_matrix import ImpactMatrix
                 from src.data.news_classifier import NewsClassifier

@@ -57,11 +57,14 @@ class Hook:
         return results
 
 
+_PLUGIN_HOOKS_ATTR = "__plugin_hooks__"
+
+
 def hook(name: str, priority: HookPriority = HookPriority.NORMAL) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        hooks = getattr(func, "_hooks", [])
+        hooks = getattr(func, _PLUGIN_HOOKS_ATTR, [])
         hooks.append((name, priority))
-        func._hooks = hooks
+        setattr(func, _PLUGIN_HOOKS_ATTR, hooks)
         return func
     return decorator
 
@@ -162,8 +165,8 @@ class PluginManager:
 
     def _scan_plugin_hooks(self, plugin: PluginBase) -> None:
         for name, method in inspect.getmembers(plugin, inspect.ismethod):
-            if hasattr(method, "_hooks"):
-                for hook_name, priority in method._hooks:
+            if hasattr(method, _PLUGIN_HOOKS_ATTR):
+                for hook_name, priority in getattr(method, _PLUGIN_HOOKS_ATTR):
                     h = self.register_hook(hook_name)
                     h.add(method, priority)
                     logger.debug("Registered hook %s for %s.%s", hook_name, plugin.name, method.__name__)

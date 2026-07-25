@@ -46,9 +46,7 @@ def _paid_coupon_count(schedule_rows: list[BondCouponSchedule]) -> int:
     for row in schedule_rows:
         if row.coupon_number is not None and row.coupon_number <= 0:
             continue
-        if row.paid is True:
-            count += 1
-        elif row.coupon_date <= today:
+        if row.paid is True or row.coupon_date <= today:
             count += 1
     return count
 

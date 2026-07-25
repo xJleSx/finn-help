@@ -3,11 +3,11 @@ import hashlib
 import json
 import logging
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import cloudpickle  # type: ignore[import-untyped]
+import cloudpickle
 
 from src.core.executor import get_executor
 
@@ -74,7 +74,7 @@ def save_model(
     with open(model_path, "wb") as f:
         cloudpickle.dump(model, f)
 
-    model_hash = hashlib.md5(model_path.read_bytes()).hexdigest()  # noqa: S324
+    model_hash = hashlib.md5(model_path.read_bytes(), usedforsecurity=False).hexdigest()
     meta["hash"] = model_hash
 
     registry = _load_registry()
@@ -116,7 +116,7 @@ def load_model(name: str, version: Optional[str] = None) -> Any:
         raise FileNotFoundError(f"Model file not found: {path}")
 
     if "hash" in meta:
-        actual_hash = hashlib.md5(path.read_bytes()).hexdigest()  # noqa: S324
+        actual_hash = hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()
         if actual_hash != meta["hash"]:
             raise ValueError(f"Model hash mismatch for '{name}' version {version}: expected {meta['hash']}, got {actual_hash}")
 

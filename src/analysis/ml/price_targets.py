@@ -2,6 +2,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -156,9 +157,8 @@ def build_trade_plan(
 ) -> TradePlan:
     entry_zone = compute_entry_zone(close, sma20, atr)
     if current_idx is None and "close" in df.columns:
-        matches = df.index[df["close"] == close].tolist()
-        if matches:
-            current_idx = matches[-1]
+        idx = int(np.argmin(np.abs(df["close"].values - close)))
+        current_idx = idx
     support, resistance = compute_support_resistance(df, current_idx=current_idx)
     entry_price = close
 

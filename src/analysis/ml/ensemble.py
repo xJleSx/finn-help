@@ -326,9 +326,18 @@ class EnsemblePredictor:
 
         meta_x = np.column_stack(oof_probs)
 
+        if meta_x.size == 0 or meta_x.shape[1] < 2:
+            logger.debug("OOF predictions empty or too few columns, skipping")
+            return
+
         try:
             from sklearn.linear_model import LogisticRegression
             from sklearn.preprocessing import StandardScaler
+
+            col_std = np.std(meta_x, axis=0)
+            if np.any(col_std < 1e-10):
+                logger.debug("Constant OOF predictions detected, skipping meta-learner training")
+                return
 
             self._scaler = StandardScaler()
             meta_x_scaled = self._scaler.fit_transform(meta_x)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import copy
+import dataclasses
 import logging
 from typing import Any, Optional
 from urllib.parse import urlencode
@@ -41,13 +41,17 @@ class ResilientClient:
         self._max_wait = max_wait
         self._timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
-        cb = get_circuit_breaker(name)
-        self._circuit_breaker_config = copy.copy(cb.config)
-        self._circuit_breaker_config.failure_threshold = circuit_breaker_failure_threshold
-        self._circuit_breaker_config.recovery_timeout = circuit_breaker_recovery_timeout
+        self._closed: bool = False
+        self._circuit_breaker_config = dataclasses.replace(
+            get_circuit_breaker(name).config,
+            failure_threshold=circuit_breaker_failure_threshold,
+            recovery_timeout=circuit_breaker_recovery_timeout,
+        )
         self._circuit_breaker: CircuitBreaker = CircuitBreaker(self._circuit_breaker_config)
 
     async def _get_client(self) -> httpx.AsyncClient:
+        if self._closed:
+            raise RuntimeError("Client has been closed")
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=self._timeout)
         return self._client
@@ -95,6 +99,7 @@ class ResilientClient:
         return resp.text
 
     async def close(self) -> None:
+        self._closed = True
         if self._client and not self._client.is_closed:
             await self._client.aclose()
             self._client = None

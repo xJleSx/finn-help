@@ -66,6 +66,8 @@ def walk_forward_validate(
     f1_scores = []
     folds = 0
 
+    x_len = len(x)
+
     for i in range(n_splits):
         test_end = n - i * fold_size
         test_start = max(test_end - fold_size, min_train_size + gap)
@@ -77,15 +79,15 @@ def walk_forward_validate(
         x_train, x_test = x[:train_end], x[test_start:test_end]
 
         if close_series is not None:
-            train_labels, train_mask = build_labels(close_series[:train_end], lookahead=lookahead, threshold=threshold)
+            cs = close_series.iloc[:x_len]
+            train_labels, train_mask = build_labels(cs.iloc[:train_end], lookahead=lookahead, threshold=threshold)
             train_mask = train_mask[:train_end]
             y_train = train_labels[:train_end][train_mask[:len(train_labels)]].astype(int)
             x_train = x_train[train_mask[:len(x_train)]]
 
-            test_labels, test_mask = build_labels(close_series[:test_end], lookahead=lookahead, threshold=threshold)
-            test_mask_slice = test_mask[test_start:test_end]
-            y_test = test_labels[test_start:test_end][test_mask_slice].astype(int)
-            x_test = x_test[test_mask_slice]
+            test_labels, test_mask = build_labels(cs.iloc[test_start:test_end], lookahead=lookahead, threshold=threshold)
+            y_test = test_labels[:test_end - test_start][test_mask[:test_end - test_start]].astype(int)
+            x_test = x_test[test_mask[:test_end - test_start]]
         else:
             y_train = y[:train_end]
             y_test = y[test_start:test_end]

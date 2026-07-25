@@ -1,12 +1,20 @@
 import logging
+import random
 import re
 from typing import Any, Optional, Self
 
-from bs4 import BeautifulSoup  # type: ignore[import-not-found]
+from bs4 import BeautifulSoup
 
 from src.collectors.base import BaseCollector
 
 logger = logging.getLogger(__name__)
+
+_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+    "FinnHelp/1.0 (+https://finn-help.ai)",
+]
 
 SMARTLAB_URL = "https://smart-lab.ru/q/{ticker}/f/y/MSFO/"
 
@@ -82,7 +90,7 @@ class FinancialReportCollector(BaseCollector):
         """
         url = SMARTLAB_URL.format(ticker=ticker.upper())
         try:
-            html = await self._fetch_text(url, headers={"User-Agent": "FinnHelp/1.0 (+https://finn-help.ai)"})
+            html = await self._fetch_text(url, headers={"User-Agent": random.choice(_USER_AGENTS)})
         except Exception as e:
             logger.warning("SmartLab fetch failed for %s: %s", ticker, e)
             return {}

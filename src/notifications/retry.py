@@ -43,9 +43,9 @@ def retry_sync(
                         )
                         time.sleep(actual_delay)
                         delay *= backoff
-            raise last_exc  # type: ignore
+            raise last_exc
 
-        return wrapper  # type: ignore
+        return wrapper
 
     return decorator
 
@@ -78,9 +78,9 @@ def retry_async(
                         )
                         await asyncio.sleep(actual_delay)
                         delay *= backoff
-            raise last_exc  # type: ignore
+            raise last_exc
 
-        return wrapper  # type: ignore
+        return wrapper
 
     return decorator
 

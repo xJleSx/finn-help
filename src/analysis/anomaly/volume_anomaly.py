@@ -21,11 +21,11 @@ class VolumeAnomalyDetector:
         self._trained = False
         self._feature_cols: list[str] = []
 
-    def train(self, db: Session, ticker: str | None = None) -> dict[str, Any]:
+    def train(self, db: Session, ticker: str | None = None, cutoff_date: datetime | None = None) -> dict[str, Any]:
         t = ticker or self.ticker
         if not t:
             return {"trained": False, "reason": "no ticker"}
-        df = rolling_volume_features(db, t)
+        df = rolling_volume_features(db, t, end_date=cutoff_date)
         if df.empty or len(df) < settings.ml_anomaly_min_samples:
             return {"trained": False, "reason": "insufficient data"}
         self._feature_cols = [c for c in df.columns if c != "count"]

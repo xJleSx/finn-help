@@ -281,11 +281,13 @@ def backtest_allocation(
     lookback_days: int = 365,
     config: Optional[BacktestConfig] = None,
 ) -> BacktestResult:
+    import asyncio
+
     if config is None:
         config = BacktestConfig(capital=capital, lookback_days=lookback_days)
     db = get_session()
     try:
-        picks = allocator.recommend(capital=capital)
+        picks = asyncio.run(allocator.recommend(capital=capital))
         result = BacktestResult(capital=capital, config=config)
 
         has_bonds = any(
@@ -393,7 +395,7 @@ def backtest_allocation(
                         should_rebalance = True
 
             if should_rebalance and i > 1:
-                active_picks = allocator.recommend(capital=capital)
+                active_picks = asyncio.run(allocator.recommend(capital=capital))
                 new_weights = {}
                 for p2 in active_picks[: config.max_positions]:
                     t2 = p2["ticker"]

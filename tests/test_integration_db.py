@@ -19,7 +19,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-pytestmark = [pytest.mark.slow, pytest.mark.skipif(os.environ.get("CI") == "true", reason="Requires Docker")]
+pytestmark = [pytest.mark.slow, pytest.mark.skipif(os.environ.get("CI") == "true", reason="Skipped in CI; requires Docker runtime")]
 
 
 @pytest.fixture(scope="module")

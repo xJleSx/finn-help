@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from contextlib import asynccontextmanager, contextmanager, suppress
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -16,12 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 def _is_postgres(url: str) -> bool:
-    return url.startswith("postgresql")
+    from sqlalchemy.engine import make_url
+    return make_url(url).get_dialect().name == "postgresql"
 
 
 
 def _is_sqlite(url: str) -> bool:
-    return "sqlite" in url
+    from sqlalchemy.engine import make_url
+    return make_url(url).get_dialect().name == "sqlite"
 
 
 # ── Async engine (PostgreSQL primary) ────────────────────────────────────
@@ -94,35 +96,39 @@ def get_async_session_local() -> async_sessionmaker[AsyncSession]:
 
 _read_replica_engine: Any = None
 _ReadReplicaSessionLocal: Any = None
+_read_replica_lock = threading.Lock()
 
 
 def _init_read_replica() -> bool:
     global _read_replica_engine, _ReadReplicaSessionLocal
     if _read_replica_engine is not None:
         return True
-    replica_url = settings.db_read_replica_url
-    if not replica_url:
-        return False
-    try:
-        url = _build_async_url(replica_url)
-        _read_replica_engine = create_async_engine(
-            url,
-            echo=False,
-            pool_size=settings.db_pool_size,
-            max_overflow=settings.db_max_overflow,
-            pool_pre_ping=True,
-            pool_recycle=settings.db_pool_recycle,
-        )
-        _ReadReplicaSessionLocal = async_sessionmaker(
-            bind=_read_replica_engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-        logger.info("Read replica engine initialized: %s", replica_url)
-        return True
-    except Exception as e:
-        logger.warning("Failed to init read replica: %s", e)
-        return False
+    with _read_replica_lock:
+        if _read_replica_engine is not None:
+            return True
+        replica_url = settings.db_read_replica_url
+        if not replica_url:
+            return False
+        try:
+            url = _build_async_url(replica_url)
+            _read_replica_engine = create_async_engine(
+                url,
+                echo=False,
+                pool_size=settings.db_pool_size,
+                max_overflow=settings.db_max_overflow,
+                pool_pre_ping=True,
+                pool_recycle=settings.db_pool_recycle,
+            )
+            _ReadReplicaSessionLocal = async_sessionmaker(
+                bind=_read_replica_engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
+            logger.info("Read replica engine initialized: %s", replica_url)
+            return True
+        except Exception as e:
+            logger.warning("Failed to init read replica: %s", e)
+            return False
 
 
 @asynccontextmanager
@@ -196,13 +202,13 @@ def session_scope() -> Any:
     session = get_session()
     try:
         yield session
-    except Exception:
+    except Exception as exc:
         logger.exception("Unhandled exception")
-        with suppress(Exception):
+        try:
             session.rollback()
+        except Exception as rb_exc:
+            raise exc from rb_exc
         raise
-    finally:
-        session.close()
 
 
 def init_db() -> None:

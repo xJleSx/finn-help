@@ -64,7 +64,7 @@ async def stress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if amount:
         await update.effective_message.reply_text(f"🔬 Рассчитываю сценарии для {amount:,.0f} ₽...")
-        picks = allocator.recommend(capital=amount)
+        picks = await allocator.recommend(capital=amount)
         plan = {"recommendation": {"items": picks}}
         positions = format_portfolio_for_stress(plan)
     else:

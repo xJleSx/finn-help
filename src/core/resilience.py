@@ -110,16 +110,18 @@ class CircuitBreaker:
                     raise CircuitBreakerOpenError(f"Circuit breaker '{self.config.name}' is HALF_OPEN, max probe calls reached")
                 self._half_open_calls += 1
 
-            try:
-                result = await fn(*args, **kwargs)
-            except Exception as e:
+        try:
+            result = await fn(*args, **kwargs)
+        except Exception as e:
+            async with self._lock:
                 self._failure_count += 1
                 self._consecutive_successes = 0
                 self._last_failure_time = time.monotonic()
                 if self._state is CircuitState.HALF_OPEN or self._failure_count >= self.config.failure_threshold:
                     self._transition(CircuitState.OPEN)
-                raise e
+            raise e
 
+        async with self._lock:
             if self._state is CircuitState.HALF_OPEN:
                 self._consecutive_successes += 1
                 if self._consecutive_successes >= self.config.success_threshold:
@@ -128,7 +130,7 @@ class CircuitBreaker:
                     self._consecutive_successes = 0
                     self._transition(CircuitState.CLOSED)
 
-            return result
+        return result
 
     async def reset(self) -> None:
         async with self._lock:

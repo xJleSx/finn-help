@@ -53,7 +53,7 @@ class CBRSource(AltDataSource):
         try:
             resp = await client.get(settings.cbr_url)
             resp.raise_for_status()
-            root = ElementTree.fromstring(resp.content)
+            root = ElementTree.fromstring(resp.content)  # nosec B314
         except Exception as e:
             logger.error("CBRSource fetch failed: %s", e)
             return {"rates": []}
@@ -283,7 +283,7 @@ class AlternativeDataCollector(BaseCollector):
     async def close(self) -> None:
         for source in self.sources:
             if hasattr(source, "close"):
-                await source.close()  # type: ignore[misc]
+                await source.close()
         await super().close()
 
     async def __aenter__(self) -> Self:

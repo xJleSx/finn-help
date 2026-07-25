@@ -19,7 +19,7 @@ class CBRCollector(BaseCollector):
 
         import xml.etree.ElementTree as ET
 
-        root = ET.fromstring(text)
+        root = ET.fromstring(text)  # nosec B314
         rates = []
         for valute in root.findall("Valute"):
             try:

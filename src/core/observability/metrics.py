@@ -11,6 +11,7 @@ try:
 except ImportError:
     _OTEL_AVAILABLE = False
 
+# Configurable via settings.otlp_endpoint (default in config.py)
 OTLP_METRICS_ENDPOINT = "http://localhost:4318/v1/metrics"
 
 _setup_done = False

@@ -26,9 +26,11 @@ FINANCIAL_QUERIES: dict[str, list[str]] = {
 
 
 class WolframAlphaClient:
+    _class_lock: asyncio.Lock = asyncio.Lock()
+
     def __init__(self, app_id: str, rate_limiter: asyncio.Lock | None = None) -> None:
         self._app_id = app_id
-        self._lock = rate_limiter or asyncio.Lock()
+        self._lock = rate_limiter or self._class_lock
         self._circuit_breaker: CircuitBreaker = get_circuit_breaker("wolfram")
 
     async def enrich_signal(self, ticker: str, queries: list[str]) -> dict[str, str]:

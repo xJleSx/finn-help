@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def item_risk(item: dict[str, Any], db: Session, capital: float = 100_000) -> dict[str, Any]:
-    prices = db.query(Price).filter_by(instrument_id=item["id"]).order_by(Price.date.desc()).limit(60).all()
+    prices = db.query(Price).filter_by(instrument_id=item.get("id")).order_by(Price.date.desc()).limit(60).all()
     if len(prices) < 10:
         return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}
 
@@ -23,7 +23,7 @@ def item_risk(item: dict[str, Any], db: Session, capital: float = 100_000) -> di
 
 
 async def item_risk_async(item: dict[str, Any], db: AsyncSession, capital: float = 100_000) -> dict[str, Any]:
-    result = await db.execute(select(Price).where(Price.instrument_id == item["id"]).order_by(Price.date.desc()).limit(60))
+    result = await db.execute(select(Price).where(Price.instrument_id == item.get("id")).order_by(Price.date.desc()).limit(60))
     prices = result.scalars().all()
     if len(prices) < 10:
         return {"var_95": 0.0, "stop_loss_pct": 0.0, "position_limit_pct": 5.0}

@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-import feedparser  # type: ignore[import-untyped]
+import feedparser
 
 from src.collectors.base import BaseCollector
 from src.collectors.sentiment import analyze_sentiment

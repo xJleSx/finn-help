@@ -114,6 +114,10 @@ class BayesianGeoRisk:
         for row in rows:
             country = _derive_country_from_row(row)
             if country:
+                # Map score [0,1] to Beta(α,β) prior parameters.
+                # α = score * 10 + 2  ⇒  strong prior centered on observed score
+                # β = (1-score) * 10 + 2  ⇒  symmetric concentration
+                # Minimum α,β = 2  ⇒  weak prior when no data.
                 self._countries[country] = CountryState(
                     alpha=row.score * 10.0 + 2.0,
                     beta=(1.0 - row.score) * 10.0 + 2.0,

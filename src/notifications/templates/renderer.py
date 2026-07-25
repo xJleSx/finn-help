@@ -40,13 +40,13 @@ class AlertTemplateRenderer:
         )
         self._text_env = Environment(
             loader=loader,
-            autoescape=False,
+            autoescape=False,  # nosec B701 — plain text for Telegram
             trim_blocks=True,
             lstrip_blocks=True,
         )
         self._inline_env = Environment(
             loader=BaseLoader(),
-            autoescape=False,
+            autoescape=False,  # nosec B701 — inline text fragments
         )
 
     def render_telegram(self, template_name: str, **kwargs: Any) -> str:

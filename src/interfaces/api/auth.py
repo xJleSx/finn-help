@@ -1,8 +1,10 @@
 import hashlib
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import bcrypt
+import httpx
 import structlog
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -12,11 +14,73 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.cache import get_redis
 from src.config import settings
-from src.db.models import User
 from src.db.connection import get_session
-from src.interfaces.api.dependencies import get_db, get_read_db
+from src.db.models import User
+from src.interfaces.api.dependencies import get_db
 
 logger = structlog.get_logger(__name__)
+
+
+OAUTH_PROVIDERS: dict[str, dict[str, str]] = {
+    "google": {
+        "client_id": settings.oauth_google_client_id,
+        "client_secret": settings.oauth_google_client_secret,
+        "token_url": "https://oauth2.googleapis.com/token",
+        "userinfo_url": "https://www.googleapis.com/oauth2/v2/userinfo",
+    },
+    "github": {
+        "client_id": settings.oauth_github_client_id,
+        "client_secret": settings.oauth_github_client_secret,
+        "token_url": "https://github.com/login/oauth/access_token",
+        "userinfo_url": "https://api.github.com/user",
+    },
+    "yandex": {
+        "client_id": settings.oauth_yandex_client_id,
+        "client_secret": settings.oauth_yandex_client_secret,
+        "token_url": "https://oauth.yandex.ru/token",
+        "userinfo_url": "https://login.yandex.ru/info",
+    },
+}
+
+
+async def _verify_oauth_code(provider: str, code: str) -> dict:
+    cfg = OAUTH_PROVIDERS.get(provider)
+    if not cfg:
+        raise AuthError(f"Unsupported OAuth provider: {provider}")
+
+    if not cfg["client_id"] or not cfg["client_secret"]:
+        logger.warning("OAuth provider %s not configured — skipping code verification", provider)
+        return {}
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        token_resp = await client.post(
+            cfg["token_url"],
+            data={
+                "client_id": cfg["client_id"],
+                "client_secret": cfg["client_secret"],
+                "code": code,
+                "redirect_uri": settings.oauth_redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            headers={"Accept": "application/json"},
+        )
+        if token_resp.status_code != 200:
+            logger.error("OAuth token exchange failed for %s: %s", provider, token_resp.text)
+            raise AuthError(f"OAuth provider {provider} rejected the authorization code")
+
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            raise AuthError(f"No access_token in {provider} response")
+
+        user_resp = await client.get(
+            cfg["userinfo_url"],
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if user_resp.status_code != 200:
+            raise AuthError(f"Failed to fetch user info from {provider}")
+
+        return user_resp.json()
 
 
 class AuthError(Exception):
@@ -47,7 +111,9 @@ ALGORITHM = "HS256"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 _REFRESH_BLACKLIST_PREFIX = "finn:refresh_blacklist:"
-_refresh_blacklist_fallback: set[str] = set()
+_refresh_blacklist_fallback: dict[str, float] = {}
+_REFRESH_BLACKLIST_MAX = 10_000
+_REFRESH_BLACKLIST_TTL = 86400 * 31
 
 
 def _blacklist_key(token: str) -> str:
@@ -100,6 +166,14 @@ def decode_refresh_token(token: str) -> dict[str, Any]:
         raise AuthError("Invalid refresh token")
 
 
+def _evict_old_blacklist_entries() -> None:
+    now = time.time()
+    cutoff = now - _REFRESH_BLACKLIST_TTL
+    stale = [k for k, ts in _refresh_blacklist_fallback.items() if ts < cutoff]
+    for k in stale:
+        _refresh_blacklist_fallback.pop(k, None)
+
+
 def blacklist_refresh_token(token: str) -> None:
     r = get_redis()
     if r is not None:
@@ -109,7 +183,11 @@ def blacklist_refresh_token(token: str) -> None:
         except Exception:
             logger.exception("Unhandled exception")
             logger.warning("Redis set failed for refresh token blacklist, using in-memory fallback")
-    _refresh_blacklist_fallback.add(token)
+    _evict_old_blacklist_entries()
+    if len(_refresh_blacklist_fallback) >= _REFRESH_BLACKLIST_MAX:
+        oldest = min(_refresh_blacklist_fallback, key=_refresh_blacklist_fallback.get)
+        _refresh_blacklist_fallback.pop(oldest, None)
+    _refresh_blacklist_fallback[token] = time.time()
 
 
 def is_refresh_token_blacklisted(token: str) -> bool:
@@ -120,7 +198,13 @@ def is_refresh_token_blacklisted(token: str) -> bool:
         except Exception:
             logger.exception("Unhandled exception")
             logger.warning("Redis get failed for refresh token blacklist, using in-memory fallback")
-    return token in _refresh_blacklist_fallback
+    ts = _refresh_blacklist_fallback.get(token)
+    if ts is None:
+        return False
+    if time.time() - ts > _REFRESH_BLACKLIST_TTL:
+        _refresh_blacklist_fallback.pop(token, None)
+        return False
+    return True
 
 
 
@@ -165,16 +249,16 @@ def create_oauth_token(provider: str, provider_user_id: str, email: str) -> str:
     )
 
 
-def oauth_login(provider: str, code: str) -> dict:
-    # TODO: use async session / DI instead of sync get_session()
+async def oauth_login(provider: str, code: str) -> dict:
     if not code or not code.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Authorization code is required")
 
-    provider_user_id = f"{provider}_{hashlib.sha256(code.encode()).hexdigest()[:16]}"
-    email = f"{provider_user_id}@{provider}.oauth"
+    user_info = await _verify_oauth_code(provider, code)
+    provider_user_id = user_info.get("id") or user_info.get("sub") or f"{provider}_{hashlib.sha256(code.encode()).hexdigest()[:16]}"
+    email = user_info.get("email") or f"{provider_user_id}@{provider}.oauth"
 
     db = get_session()
-    from src.db.models.user import User  # noqa
+    from src.db.models.user import User  # noqa: F811
     try:
         user = db.query(User).filter_by(username=provider_user_id).first()
         if not user:

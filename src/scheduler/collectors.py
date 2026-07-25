@@ -119,8 +119,7 @@ async def fetch_price_history_for_instrument(ticker: str, instrument_type: str) 
             logger.warning("Instrument %s not found in DB, cannot fetch price history", ticker)
             return 0
         async with MOEXCollector() as moex:
-            new_count = await _fetch_prices_for_instrument(db, inst, from_date, moex)
-        return new_count
+            return await _fetch_prices_for_instrument(db, inst, from_date, moex)
 
 
 async def collect_prices(db: AsyncSession) -> set[int]:
@@ -553,8 +552,8 @@ async def collect_social_sentiment() -> None:
         logger.info("Social sentiment: %d signals created", count)
 
         # Compute social features for all tickers
-        from src.social.features import compute_social_features
         from src.core.executor import get_executor
+        from src.social.features import compute_social_features
 
         async with get_async_session() as db:
             result = await db.execute(select(Instrument.ticker))
