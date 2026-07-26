@@ -63,7 +63,7 @@ def test_compute_leverage_info_liquidation():
 def test_borrow_cost():
     cost = compute_borrow_cost(position_value=100_000, borrow_rate=0.15, days_held=30)
     assert cost > 0
-    assert cost == 100_000 * (0.15 / 100) * (30 / 365)
+    assert cost == 100_000 * 0.15 * (30 / 365)
 
 
 def test_compute_interest():

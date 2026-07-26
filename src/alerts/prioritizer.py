@@ -50,5 +50,5 @@ class AlertAggregator:
             try:
                 return datetime.fromisoformat(raw)
             except (ValueError, TypeError):
-                pass
+                logger.debug("Failed to parse date string: %s", raw)
         return datetime.now(timezone.utc)

@@ -35,7 +35,7 @@ def _warn_if_writable() -> None:
                 _PLUGIN_DIR,
             )
     except OSError:
-        pass
+        logger.debug("Could not stat plugin directory: %s", _PLUGIN_DIR)
 
 
 _warn_if_writable()

@@ -33,7 +33,7 @@ def _acquire_instance_lock(name: str = "scheduler") -> bool:
                     lock_path.unlink(missing_ok=True)
                     return _acquire_instance_lock(name)
         except (ValueError, OSError):
-            pass
+            logger.warning("Could not acquire instance lock: %s", lock_path)
         return False
 
 
@@ -317,4 +317,4 @@ def stop() -> None:
         if loop.is_running():
             loop.call_later(2, lambda: None)
     except RuntimeError:
-        pass
+        logger.debug("No event loop available during scheduler stop")

@@ -96,8 +96,13 @@ class PaperState:
 class PaperTradingEngine:
     def __init__(self, user_id: int = 0) -> None:
         self.user_id = user_id
+        if not isinstance(user_id, int) or user_id < 0:
+            raise ValueError(f"Invalid user_id: {user_id}")
         self._state: PaperState | None = None
-        self._state_path = os.path.join(PAPER_DIR, f"user_{user_id}.json")
+        resolved = (Path(PAPER_DIR) / f"user_{user_id}.json").resolve()
+        if not str(resolved).startswith(str(Path(PAPER_DIR).resolve())):
+            raise ValueError("Invalid user_id path")
+        self._state_path = str(resolved)
 
     # ── State management ──────────────────────────────────────────────
 

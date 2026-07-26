@@ -135,7 +135,7 @@ class SignalFusionEngine:
                 from src.user_profile import profile_manager
                 return profile_manager.get_weights(user_id)
             except Exception:
-                pass
+                logger.exception("Failed to get user profile weights for %s", user_id)
         return dict(BASE_WEIGHTS)
 
     def _apply_volatility_adjustment(

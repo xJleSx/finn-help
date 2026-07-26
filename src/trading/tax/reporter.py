@@ -78,7 +78,7 @@ def compute_tax_lots(trades: list[dict[str, Any]]) -> list[TaxLot]:
                         sd = datetime.fromisoformat(date_str)
                         holding_days = (sd - bd).days
                     except (ValueError, TypeError):
-                        pass
+                        logger.debug("Could not parse dates: buy_date=%s, date_str=%s", buy_date, date_str)
                 is_short_term = holding_days < LONG_TERM_HOLDING_DAYS
                 tax_rate = LONG_TERM_TAX_RATE if not is_short_term else CAPITAL_GAINS_TAX_RATE
                 tax_amount = max(0.0, pnl * tax_rate) if pnl > 0 else 0.0
@@ -119,7 +119,7 @@ def compute_tax_lots(trades: list[dict[str, Any]]) -> list[TaxLot]:
                         sd = datetime.fromisoformat(date_str)
                         holding_days = (sd - bd).days
                     except (ValueError, TypeError):
-                        pass
+                        logger.debug("Could not parse dates: short_date=%s, date_str=%s", short_date, date_str)
                 is_short_term = holding_days < LONG_TERM_HOLDING_DAYS
                 tax_rate = LONG_TERM_TAX_RATE if not is_short_term else CAPITAL_GAINS_TAX_RATE
                 tax_amount = max(0.0, pnl * tax_rate) if pnl > 0 else 0.0

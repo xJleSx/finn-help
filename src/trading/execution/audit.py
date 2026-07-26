@@ -61,7 +61,7 @@ def _read_last_entry_hash(file_path: Path) -> str:
             last_entry = json.loads(last_line)
             return last_entry.get("_hash", "")
     except (OSError, json.JSONDecodeError, IndexError):
-        pass
+        logger.debug("Could not read audit trail last entry from %s", AUDIT_DIR)
     return ""
 
 
@@ -214,7 +214,10 @@ def save_order(order: "OrderRecord") -> int:
         }
         if order.order_id:
             audit_entry["exchange_order_id"] = order.order_id
-        audit_log_order(audit_entry)
+        try:
+            audit_log_order(audit_entry)
+        except Exception:
+            logger.exception("audit_log_order_failed after successful DB save", order_id=o.id)
 
         return int(o.id)
     except Exception as e:

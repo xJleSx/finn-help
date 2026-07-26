@@ -70,7 +70,7 @@ async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 await update.effective_message.reply_text("Минимальная сумма — 500 ₽")
                 return
         except ValueError:
-            pass
+            logger.debug("Invalid amount argument: %s", context.args[0])
 
     await update.effective_message.reply_text(f"🕰 Прогоняю стратегию для {amount:,.0f} ₽ за последний год...")
     result = backtest_allocation(capital=amount)

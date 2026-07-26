@@ -127,9 +127,6 @@ class PositionTracker:
             self._persist_sl_tp(ticker)
 
     def _persist_sl_tp(self, ticker: str) -> None:
-        pos = self._positions.get(ticker)
-        if not pos:
-            return
         for attempt in range(3):
             db = get_session()
             try:
@@ -142,8 +139,10 @@ class PositionTracker:
                     .all()
                 )
                 for o in orders:
-                    o.stop_loss = pos.get("sl")
-                    o.take_profit = pos.get("tp")
+                    pos = self._positions.get(ticker) if not o.is_short else self._short_positions.get(ticker)
+                    if pos:
+                        o.stop_loss = pos.get("sl")
+                        o.take_profit = pos.get("tp")
                 db.commit()
                 return
             except Exception as e:

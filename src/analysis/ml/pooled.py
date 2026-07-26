@@ -38,18 +38,14 @@ class PooledMLClassifier:
         return self._ticker_map.get(ticker, 0)
 
     def train_pooled(self, ticker_data: dict[str, pd.DataFrame]) -> bool:
-        """Train a single model on all tickers' price data.
-
-        Each ticker is processed independently through the technical indicator
-        pipeline before concatenation to avoid cross-ticker boundary artifacts.
-        """
         if not ticker_data:
             return False
 
         self._ticker_map = {t: i for i, t in enumerate(sorted(ticker_data))}
         tech = TechnicalAnalyzer()
-        feature_parts: list[pd.DataFrame] = []
-        label_parts: list[tuple[np.ndarray, np.ndarray]] = []
+        train_parts: list[pd.DataFrame] = []
+        val_parts: list[pd.DataFrame] = []
+        label_info: list[tuple[np.ndarray, np.ndarray]] = []
 
         for ticker, df in ticker_data.items():
             d = tech.compute_all(df.copy())
@@ -60,34 +56,35 @@ class PooledMLClassifier:
             if f.empty:
                 continue
             f = self._drop_abs(f)
-            feature_parts.append(f)
 
             threshold = compute_threshold(d["close"], fallback=settings.ml_threshold)
             y_raw, mask = build_labels(d["close"], lookahead=settings.ml_lookahead, threshold=threshold)
             n = min(len(f), len(y_raw))
-            label_parts.append((y_raw[:n], mask[:n]))
 
-        if not feature_parts:
+            split = int(n * 0.8)
+            train_parts.append(f.iloc[:split])
+            val_parts.append(f.iloc[split:n])
+            label_info.append((y_raw[:n], mask[:n], split))
+
+        if not train_parts:
             return False
 
-        all_y: list[np.ndarray] = []
-        all_x: list[np.ndarray] = []
-        for i, (y_raw, mask) in enumerate(label_parts):
-            fp = feature_parts[i]
-            n = len(fp)
-            y_aligned = y_raw[:n]
-            m = mask[:n]
+        x_train_list: list[np.ndarray] = []
+        y_train_list: list[np.ndarray] = []
+        for i, (y_raw, mask, split) in enumerate(label_info):
+            fp = train_parts[i]
+            m = mask[:split]
             if m.sum() < 5:
                 continue
-            all_x.append(fp[m].values)
-            all_y.append(y_aligned[m].astype(int))
+            x_train_list.append(fp[m].values)
+            y_train_list.append(y_raw[:split][m].astype(int))
 
-        if not all_x:
+        if not x_train_list:
             return False
 
-        x_all = np.concatenate(all_x, axis=0)
-        y_all = np.concatenate(all_y, axis=0)
-        self._feature_cols = [c for c in feature_parts[0].columns if c != "ticker_id"]
+        x_all = np.concatenate(x_train_list, axis=0)
+        y_all = np.concatenate(y_train_list, axis=0)
+        self._feature_cols = [c for c in train_parts[0].columns if c != "ticker_id"]
 
         if len(x_all) < settings.ml_min_train_rows:
             return False

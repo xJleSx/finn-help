@@ -784,7 +784,7 @@ def _parse_coupon_date(val: Any) -> Optional[date]:
         try:
             return date.fromisoformat(val[:10])
         except (ValueError, TypeError):
-            pass
+            logger.debug("Could not parse date: %s", val[:10])
     return None
 
 

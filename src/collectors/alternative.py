@@ -159,7 +159,7 @@ def _parse_rosstat_value(data: Any, key: str) -> float | None:
             try:
                 return float(val)
             except (ValueError, TypeError):
-                pass
+                logger.debug("Could not parse float: %s", val)
     if isinstance(data, list) and len(data) > 0:
         entry = data[0]
         if isinstance(entry, dict):
@@ -168,7 +168,7 @@ def _parse_rosstat_value(data: Any, key: str) -> float | None:
                 try:
                     return float(val)
                 except (ValueError, TypeError):
-                    pass
+                    logger.debug("Could not parse float from list entry: %s", val)
     return None
 
 

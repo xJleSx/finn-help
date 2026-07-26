@@ -134,7 +134,8 @@ def check_overall_portfolio_limits(portfolio_value: float, total_short_value: fl
     check = ComplianceCheck()
     if portfolio_value <= 0:
         return check
-    leverage = (portfolio_value + total_loan) / portfolio_value if portfolio_value > 0 else 1.0
+    equity = portfolio_value - total_loan
+    leverage = portfolio_value / equity if equity > 0 else float("inf")
     check.checks.append(
         {
             "check": "leverage_limit",

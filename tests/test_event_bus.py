@@ -67,7 +67,7 @@ async def test_unsubscribe(bus):
 @pytest.mark.asyncio
 async def test_unsubscribe_unknown_type(bus):
     bus.unsubscribe("nonexistent", lambda e: None)
-    assert True  # should not raise
+    # should not raise
 
 
 @pytest.mark.asyncio
@@ -87,7 +87,7 @@ async def test_publish_sync(bus):
 @pytest.mark.asyncio
 async def test_publish_no_handlers(bus):
     await bus.publish(DomainEvent(event_type="orphan"))
-    assert True  # should not raise
+    # should not raise
 
 
 @pytest.mark.asyncio

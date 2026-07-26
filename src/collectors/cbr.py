@@ -31,11 +31,6 @@ class CBRCollector(BaseCollector):
                 if None in (char_code_el, num_code_el, name_el, vunit_rate_el, nominal_el):
                     logger.warning("Skipping malformed Valute element")
                     continue
-                assert char_code_el is not None
-                assert num_code_el is not None
-                assert name_el is not None
-                assert vunit_rate_el is not None
-                assert nominal_el is not None
                 char_code = char_code_el.text or ""
                 num_code = num_code_el.text or ""
                 name = name_el.text or ""

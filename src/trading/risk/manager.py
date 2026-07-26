@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -332,38 +333,41 @@ class RiskManager:
         if var_data is not None:
             var_95 = float(var_data.get("var_95", 0)) / 100
         else:
-            try:
-                from src.db.connection import get_session
-                from src.db.models.instrument import Instrument, Price
-
-                db = get_session()
-                try:
-                    inst = db.query(Instrument).filter_by(ticker=ticker).first()
-                    if inst:
-                        prices_list = [
-                            float(p.close) for p in db.query(Price)
-                            .filter_by(instrument_id=int(inst.id))
-                            .order_by(Price.date.desc())
-                            .limit(100).all()
-                            if p.close
-                        ]
-                        if len(prices_list) > 20:
-                            var_data = compute_var(prices_list)
-                            self._var_cache[ticker] = var_data
-                            var_95 = float(var_data.get("var_95", 0)) / 100
-                        else:
-                            var_95 = 0.0
-                    else:
-                        var_95 = 0.0
-                finally:
-                    db.close()
-            except Exception:
-                var_95 = 0.0
+            var_data = await asyncio.to_thread(self._load_var_data, ticker)
+            if var_data is not None:
+                self._var_cache[ticker] = var_data
+            var_95 = float(var_data.get("var_95", 0)) / 100 if var_data else 0.0
 
         ok, msg = check_var_limit(var_95)
         if not ok:
             return False, f"VaR limit: {msg}"
         return True, msg
+
+    @staticmethod
+    def _load_var_data(ticker: str) -> dict[str, float] | None:
+        try:
+            from src.db.connection import get_session
+            from src.db.models.instrument import Instrument, Price
+
+            db = get_session()
+            try:
+                inst = db.query(Instrument).filter_by(ticker=ticker).first()
+                if inst:
+                    prices_list = [
+                        float(p.close) for p in db.query(Price)
+                        .filter_by(instrument_id=int(inst.id))
+                        .order_by(Price.date.desc())
+                        .limit(100).all()
+                        if p.close
+                    ]
+                    if len(prices_list) > 20:
+                        return compute_var(prices_list)
+                    return None
+                return None
+            finally:
+                db.close()
+        except Exception:
+            return None
 
     async def _check_daily_loss(self, portfolio_value: float) -> _TradeCheckResult:
         from src.trading.risk.guards import check_daily_loss
@@ -402,40 +406,43 @@ class RiskManager:
 
         scores = self._sentiment_cache.get(ticker)
         if scores is None:
-            try:
-                from datetime import datetime, timedelta, timezone
-
-                from src.db.connection import get_session
-
-                db = get_session()
-                try:
-                    from src.db.models import Instrument, News, NewsInstrument
-                    inst = db.query(Instrument).filter_by(ticker=ticker).first()
-                    if inst:
-                        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
-                        news_list = (
-                            db.query(News)
-                            .join(NewsInstrument)
-                            .filter(
-                                NewsInstrument.instrument_id == int(inst.id),
-                                News.published_at >= cutoff,
-                                News.sentiment_score.isnot(None),
-                            )
-                            .all()
-                        )
-                        scores = [float(n.sentiment_score) for n in news_list if n.sentiment_score is not None]
-                        self._sentiment_cache[ticker] = scores
-                    else:
-                        scores = []
-                finally:
-                    db.close()
-            except Exception:
-                scores = []
+            scores = await asyncio.to_thread(self._load_sentiment_scores, ticker)
+            self._sentiment_cache[ticker] = scores
 
         ok, msg = check_news_sentiment(scores)
         if not ok:
             return False, f"Sentiment check: {msg}"
         return True, msg
+
+    @staticmethod
+    def _load_sentiment_scores(ticker: str) -> list[float]:
+        try:
+            from datetime import datetime, timedelta, timezone
+
+            from src.db.connection import get_session
+            from src.db.models import Instrument, News, NewsInstrument
+
+            db = get_session()
+            try:
+                inst = db.query(Instrument).filter_by(ticker=ticker).first()
+                if inst:
+                    cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+                    news_list = (
+                        db.query(News)
+                        .join(NewsInstrument)
+                        .filter(
+                            NewsInstrument.instrument_id == int(inst.id),
+                            News.published_at >= cutoff,
+                            News.sentiment_score.isnot(None),
+                        )
+                        .all()
+                    )
+                    return [float(n.sentiment_score) for n in news_list if n.sentiment_score is not None]
+                return []
+            finally:
+                db.close()
+        except Exception:
+            return []
 
     async def compute_position_size(
         self,
@@ -457,6 +464,14 @@ class RiskManager:
         sl_pct = min(5.0, max(1.0, var_95 * 3))
         pos = compute_vol_adjusted_size(capital, risk_pt, price * sl_pct / 100, price)
 
+        avg_vol = await asyncio.to_thread(self._compute_liquidity, ticker)
+        if avg_vol > 0:
+            pos = compute_liquidity_constrained_size(pos, avg_vol)
+
+        return max(pos, 1)
+
+    @staticmethod
+    def _compute_liquidity(ticker: str) -> float:
         try:
             import numpy as np
 
@@ -469,14 +484,13 @@ class RiskManager:
                 if inst:
                     prices_list = [float(p.close) for p in db.query(Price).filter_by(instrument_id=int(inst.id)).order_by(Price.date.desc()).limit(20).all() if p.close]
                     if prices_list:
-                        avg_vol = float(np.mean(prices_list)) * 1000  # placeholder: price as proxy for volume
-                        pos = compute_liquidity_constrained_size(pos, avg_vol)
+                        return float(np.mean(prices_list)) * 1000
+                return 0.0
             finally:
                 db.close()
         except Exception as e:
-            logger.debug("Position size calc unavailable for %s: %s", ticker, e)
-
-        return max(pos, 1)
+            logger.debug("Liquidity calc unavailable for %s: %s", ticker, e)
+            return 0.0
 
     def invalidate_cache(self, ticker: str | None = None) -> None:
         if ticker:

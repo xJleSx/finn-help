@@ -180,15 +180,6 @@ class EnsemblePredictor:
                 results[name] = False
 
         self._train_meta_oof(df, anomaly_mask=anomaly_mask)
-
-        for name in ("xgb", "lgb", "cat"):
-            try:
-                model = getattr(self, name)
-                if results.get(name):
-                    model.train(df, anomaly_mask=anomaly_mask)
-            except Exception as e:
-                logger.warning("Ensemble %s retrain after OOF failed: %s", name, e)
-                results[name] = False
         return results
 
     def save_meta(self, metrics: Optional[dict[str, Any]] = None) -> str:

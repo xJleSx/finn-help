@@ -78,7 +78,7 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
                 if days > 2:
                     checks["staleness"] = f"Последняя цена от {dt_str}, {days}д назад"
             except TypeError:
-                pass
+                logger.debug("Could not compute price staleness for row: %s", price_row)
     except Exception:
         logger.exception("Unhandled exception")
         components["last_price_date"] = None

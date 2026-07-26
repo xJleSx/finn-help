@@ -40,7 +40,7 @@ def _get_user_id(request: Request) -> int:
             payload = decode_token(auth[7:])
             return int(payload.get("sub", 0))
         except Exception:
-            pass
+            logger.exception("Failed to decode auth token in _get_user_id")
     return 0
 
 

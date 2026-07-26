@@ -81,7 +81,7 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
 
     close_arr = df["close"].values
     returns = pd.Series(close_arr).pct_change(fill_method=None)
-    hist_vol = returns.rolling(20).std()
+    hist_vol = returns.rolling(20).std().shift(1)
     result["hist_vol_20"] = hist_vol.values
 
     for c in EVENT_FEATURE_COLS:

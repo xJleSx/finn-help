@@ -142,7 +142,7 @@ class MOEXCorporateEventCollector(BaseCollector):
                     parsed = datetime.strptime(raw_val[:10], "%Y-%m-%d").date()
                     event[date_field] = parsed.isoformat()
                 except ValueError:
-                    pass
+                    logger.debug("Could not parse event date: %s", raw_val[:10])
 
         event["description"] = raw.get("description") or raw.get("name", "")
         event["extra"] = raw

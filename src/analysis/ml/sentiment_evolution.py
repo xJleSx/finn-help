@@ -104,9 +104,9 @@ class SentimentEvolutionModel(BaseRegressor):
         daily = daily.sort_values("date").reset_index(drop=True)
         daily["sentiment_std"] = daily["sentiment_std"].fillna(0.0)
 
-        daily["sentiment_ma_3d"] = daily["sentiment_mean"].rolling(3, min_periods=1).mean()
-        daily["sentiment_ma_7d"] = daily["sentiment_mean"].rolling(7, min_periods=1).mean()
-        daily["sentiment_std_5d"] = daily["sentiment_mean"].rolling(5, min_periods=1).std().fillna(0.0)
+        daily["sentiment_ma_3d"] = daily["sentiment_mean"].rolling(3, min_periods=1).mean().shift(1)
+        daily["sentiment_ma_7d"] = daily["sentiment_mean"].rolling(7, min_periods=1).mean().shift(1)
+        daily["sentiment_std_5d"] = daily["sentiment_mean"].rolling(5, min_periods=1).std().shift(1).fillna(0.0)
         daily["sentiment_change_1d"] = daily["sentiment_mean"].diff(1).fillna(0.0)
         daily["sentiment_change_3d"] = daily["sentiment_mean"].diff(3).fillna(0.0)
         daily["sentiment_change_7d"] = daily["sentiment_mean"].diff(7).fillna(0.0)

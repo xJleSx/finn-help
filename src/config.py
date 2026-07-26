@@ -1,4 +1,3 @@
-import hashlib
 import os
 from pathlib import Path
 
@@ -7,8 +6,6 @@ from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
 load_dotenv()
-
-_DEFAULT_JWT = hashlib.sha256(b"finn-help-stable-secret").hexdigest()
 
 
 PERSONAL_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "personal_settings.yaml"
@@ -37,7 +34,7 @@ class Settings(BaseSettings):
     social_groq_model: str = "llama-3.1-8b-instant"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
-    jwt_secret: str = _DEFAULT_JWT
+    jwt_secret: str = ""
     jwt_refresh_secret: str = ""
     jwt_expire_minutes: int = 15
     password_min_length: int = 8
@@ -213,9 +210,9 @@ personal = load_personal_settings()
 if not os.environ.get("JWT_SECRET"):
     import logging as _logging
     _logging.warning(
-        "JWT_SECRET is not set in environment. Using stable fallback secret — "
-        "change JWT_SECRET in .env for a unique persistent secret. "
-        "*** WITHOUT A PERSISTENT JWT_SECRET, ALL SESSIONS WILL BE INVALIDATED AFTER RESTART ***"
+        "JWT_SECRET is not set in environment. Authentication will use an empty secret — "
+        "this is a SECURITY RISK. Set JWT_SECRET in .env. "
+        "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(48))'"
     )
 
 if not settings.encryption_key:

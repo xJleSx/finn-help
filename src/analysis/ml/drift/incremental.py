@@ -88,7 +88,7 @@ class ConceptDriftPipeline:
     ) -> dict[str, Any]:
         from sklearn.model_selection import train_test_split
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
 
         self.trainer.partial_fit(self.model, X_train, y_train, feature_names=feature_names)
         metrics = self.trainer.evaluate(self.model, X_test, y_test)

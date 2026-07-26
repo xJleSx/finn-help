@@ -215,7 +215,7 @@ def _parse_date(value: Any) -> Optional[date]:
         try:
             return date.fromisoformat(value)
         except (ValueError, TypeError):
-            pass
+            logger.debug("Could not parse date: %s", value)
     return None
 
 

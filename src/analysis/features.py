@@ -22,7 +22,7 @@ def abs_return(close: pd.Series) -> pd.Series:
 
 
 def return_volatility(close: pd.Series, window: int = 20) -> pd.Series:
-    return log_return(close).rolling(window=window).std()
+    return log_return(close).rolling(window=window).std().shift(1)
 
 
 def momentum(close: pd.Series, window: int = 5) -> pd.Series:
@@ -39,11 +39,11 @@ def close_position(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Seri
 
 
 def rolling_skew(close: pd.Series, window: int = 20) -> pd.Series:
-    return log_return(close).rolling(window=window).skew()
+    return log_return(close).rolling(window=window).skew().shift(1)
 
 
 def rolling_kurtosis(close: pd.Series, window: int = 20) -> pd.Series:
-    return log_return(close).rolling(window=window).kurt()
+    return log_return(close).rolling(window=window).kurt().shift(1)
 
 
 # ──────────────────────────────────────────────
@@ -52,12 +52,12 @@ def rolling_kurtosis(close: pd.Series, window: int = 20) -> pd.Series:
 
 
 def volume_ratio(volume: pd.Series, window: int = 20) -> pd.Series:
-    return volume / volume.rolling(window=window).mean()
+    return volume / volume.rolling(window=window).mean().shift(1)
 
 
 def volume_ma_ratio(volume: pd.Series, short_window: int = 5, long_window: int = 20) -> pd.Series:
-    short_ma = volume.rolling(window=short_window).mean()
-    long_ma = volume.rolling(window=long_window).mean()
+    short_ma = volume.rolling(window=short_window).mean().shift(1)
+    long_ma = volume.rolling(window=long_window).mean().shift(1)
     return short_ma / long_ma.replace(0, np.nan)
 
 
@@ -72,7 +72,7 @@ def obv_slope(close: pd.Series, volume: pd.Series, window: int = 10) -> pd.Serie
         slope, _ = np.polyfit(x[mask], y[mask], 1)
         return slope
 
-    return obv.rolling(window=window).apply(_slope, raw=False)
+    return obv.rolling(window=window).apply(_slope, raw=False).shift(1)
 
 
 def vwap_deviation(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series) -> pd.Series:
@@ -91,8 +91,8 @@ def dollar_volume(close: pd.Series, volume: pd.Series) -> pd.Series:
 
 
 def _bollinger_bands(close: pd.Series, window: int = 20, std_dev: float = 2.0) -> tuple[pd.Series, pd.Series, pd.Series]:
-    mid = close.rolling(window=window).mean()
-    std = close.rolling(window=window).std()
+    mid = close.rolling(window=window).mean().shift(1)
+    std = close.rolling(window=window).std().shift(1)
     upper = mid + std_dev * std
     lower = mid - std_dev * std
     return upper, mid, lower
@@ -195,20 +195,20 @@ def _adf_pvalue(t_stat: float, n: int) -> float:
 
 
 def rolling_zscore(series: pd.Series, window: int = 60) -> pd.Series:
-    mean = series.rolling(window=window).mean()
-    std = series.rolling(window=window).std()
+    mean = series.rolling(window=window).mean().shift(1)
+    std = series.rolling(window=window).std().shift(1)
     return (series - mean) / std.replace(0, np.nan)
 
 
 def rolling_minmax(series: pd.Series, window: int = 60) -> pd.Series:
-    min_val = series.rolling(window=window).min()
-    max_val = series.rolling(window=window).max()
+    min_val = series.rolling(window=window).min().shift(1)
+    max_val = series.rolling(window=window).max().shift(1)
     denom = max_val - min_val
     return (series - min_val) / denom.replace(0, np.nan)
 
 
 def rolling_rank(series: pd.Series, window: int = 60) -> pd.Series:
-    return series.rolling(window=window).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False)
+    return series.rolling(window=window).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False).shift(1)
 
 
 # ──────────────────────────────────────────────

@@ -1,5 +1,9 @@
+import logging
+
 from fastapi import Request
 from slowapi import Limiter
+
+logger = logging.getLogger(__name__)
 
 
 def _rate_limit_key(request: Request) -> str:
@@ -11,7 +15,7 @@ def _rate_limit_key(request: Request) -> str:
             payload = decode_token(auth[7:])
             user_id = payload.get("sub")
         except Exception:
-            pass
+            logger.exception("Failed to decode auth token for rate limit key")
     if user_id:
         return f"user:{user_id}"
     client = request.client

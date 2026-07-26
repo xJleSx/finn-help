@@ -40,7 +40,7 @@ class TechnicalAnalyzer:
         if period < 1:
             df[col] = np.nan
             return df
-        df[col] = df["close"].rolling(window=period).mean()
+        df[col] = df["close"].rolling(window=period).mean().shift(1)
         return df
 
     def rsi(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
@@ -70,14 +70,14 @@ class TechnicalAnalyzer:
         return df
 
     def bollinger_bands(self, df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
-        df["bb_mid"] = df["close"].rolling(window=period).mean()
-        std = df["close"].rolling(window=period).std()
+        df["bb_mid"] = df["close"].rolling(window=period).mean().shift(1)
+        std = df["close"].rolling(window=period).std().shift(1)
         df["bb_upper"] = df["bb_mid"] + (std * 2)
         df["bb_lower"] = df["bb_mid"] - (std * 2)
         return df
 
     def volume_sma(self, df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
-        df["volume_sma_20"] = df["volume"].rolling(window=period).mean()
+        df["volume_sma_20"] = df["volume"].rolling(window=period).mean().shift(1)
         return df
 
     def atr(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:

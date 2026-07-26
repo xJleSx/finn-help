@@ -288,7 +288,8 @@ async def run_bot() -> None:
 
     polling_retry_delay = 10
     poll_attempt = 0
-    assert app is not None and app.updater is not None
+    if app is None or app.updater is None:
+        raise RuntimeError("Telegram app or updater is None after initialization")
     while True:
         try:
             await app.updater.start_polling()

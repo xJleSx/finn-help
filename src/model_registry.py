@@ -74,7 +74,7 @@ def save_model(
     with open(model_path, "wb") as f:
         cloudpickle.dump(model, f)
 
-    model_hash = hashlib.md5(model_path.read_bytes(), usedforsecurity=False).hexdigest()
+    model_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
     meta["hash"] = model_hash
 
     registry = _load_registry()
@@ -111,12 +111,15 @@ def load_model(name: str, version: Optional[str] = None) -> Any:
     if not meta:
         raise ValueError(f"Version '{version}' not found for model '{name}'")
 
-    path = Path(meta["path"])
+    path = Path(meta["path"]).resolve()
+    model_dir = MODEL_DIR.resolve()
+    if not str(path).startswith(str(model_dir)):
+        raise ValueError(f"Model path {path} is outside model directory {model_dir}")
     if not path.exists():
         raise FileNotFoundError(f"Model file not found: {path}")
 
     if "hash" in meta:
-        actual_hash = hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()
+        actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual_hash != meta["hash"]:
             raise ValueError(f"Model hash mismatch for '{name}' version {version}: expected {meta['hash']}, got {actual_hash}")
 
