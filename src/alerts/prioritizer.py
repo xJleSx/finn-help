@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class AlertAggregator:
@@ -45,10 +48,11 @@ class AlertAggregator:
     def _parse_ts(alert: dict[str, Any]) -> datetime:
         raw = alert.get("timestamp", alert.get("created_at", alert.get("published_at", "")))
         if isinstance(raw, datetime):
-            return raw
+            return raw if raw.tzinfo is not None else raw.replace(tzinfo=timezone.utc)
         if isinstance(raw, str):
             try:
-                return datetime.fromisoformat(raw)
+                dt = datetime.fromisoformat(raw)
+                return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
             except (ValueError, TypeError):
                 logger.debug("Failed to parse date string: %s", raw)
         return datetime.now(timezone.utc)
