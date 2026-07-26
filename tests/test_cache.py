@@ -92,7 +92,7 @@ class TestCachedDecorator:
             return 42
 
         with patch("src.cache.time") as mock_time:
-            mock_time.time.side_effect = [100.0, 100.5, 200.0]
+            mock_time.time.side_effect = [100.0, 100.5, 200.0, 200.5, 201.0]
             v1 = fn()
             assert v1 == 42
             v2 = fn()  # second call, TTL=0, time diff >0

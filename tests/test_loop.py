@@ -417,7 +417,7 @@ class TestCheckStopLosses:
         mock_session = AsyncMock()
         mock_session.__aenter__.return_value = mock_db
 
-        with patch("src.db.connection.AsyncSessionLocal", return_value=mock_session):
+        with patch("src.db.connection._AsyncSessionLocal", return_value=mock_session):
             await loop._check_stop_losses()
 
     @pytest.mark.asyncio
@@ -434,7 +434,7 @@ class TestCheckStopLosses:
         mock_session = AsyncMock()
         mock_session.__aenter__.return_value = mock_db
 
-        with patch("src.db.connection.AsyncSessionLocal", return_value=mock_session):
+        with patch("src.db.connection._AsyncSessionLocal", return_value=mock_session):
             await loop._check_stop_losses()
 
     @pytest.mark.asyncio
@@ -453,7 +453,7 @@ class TestCheckStopLosses:
         mock_session = AsyncMock()
         mock_session.__aenter__.return_value = mock_db
 
-        with patch("src.db.connection.AsyncSessionLocal", return_value=mock_session):
+        with patch("src.db.connection._AsyncSessionLocal", return_value=mock_session):
             await loop._check_stop_losses()
 
     @pytest.mark.asyncio
@@ -477,7 +477,7 @@ class TestCheckStopLosses:
         tracker.execute_triggers = AsyncMock()
 
         with (
-            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
+            patch("src.db.connection._AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.position_tracker", tracker),
         ):
             await loop._check_stop_losses()
@@ -498,7 +498,7 @@ class TestCheckDailyPnl:
         mock_session.__aenter__.return_value = mock_db
 
         with (
-            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
+            patch("src.db.connection._AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.async_update_day_value") as mock_update_val,
             patch("src.trading.execution.loop.async_update_drawdown") as mock_update_dd,
             patch("src.trading.execution.loop.get_day_pnl", return_value=(0.0, 0.0)),
@@ -529,7 +529,7 @@ class TestCheckDailyPnl:
         mock_session.__aenter__.return_value = mock_db
 
         with (
-            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
+            patch("src.db.connection._AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.async_update_day_value") as mock_update_val,
             patch("src.trading.execution.loop.async_update_drawdown") as mock_update_dd,
             patch("src.trading.execution.loop.get_day_pnl", return_value=(150.0, 0.05)),
@@ -555,7 +555,7 @@ class TestCheckDailyPnl:
         mock_session.__aenter__.return_value = mock_db
 
         with (
-            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
+            patch("src.db.connection._AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.async_update_day_value") as mock_update_val,
             patch("src.trading.execution.loop.async_update_drawdown") as mock_update_dd,
             patch("src.trading.execution.loop.get_day_pnl", return_value=(0.0, 0.0)),
@@ -788,7 +788,7 @@ class TestProcessSignals:
         mock_result.status = "filled"
 
         with (
-            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
+            patch("src.db.connection._AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.market_hours_check", return_value=True),
             patch("src.trading.execution.loop.can_trade", return_value=(True, "ok")),
             patch("src.trading.execution.loop._check_var", return_value=(True, "ok")),
@@ -828,7 +828,7 @@ class TestProcessSignals:
         mock_result.status = "filled"
 
         with (
-            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
+            patch("src.db.connection._AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.market_hours_check", return_value=True),
             patch("src.trading.execution.loop.can_trade", return_value=(True, "ok")),
             patch("src.trading.execution.loop._check_var", return_value=(True, "ok")),
@@ -867,7 +867,7 @@ class TestProcessSignals:
         mock_result.status = "filled"
 
         with (
-            patch("src.db.connection.AsyncSessionLocal", return_value=mock_session),
+            patch("src.db.connection._AsyncSessionLocal", return_value=mock_session),
             patch("src.trading.execution.loop.market_hours_check", return_value=True),
             patch("src.trading.execution.loop.can_trade", return_value=(True, "ok")),
             patch("src.trading.execution.loop._check_var", return_value=(True, "ok")),

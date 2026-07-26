@@ -7,7 +7,7 @@ from src.db.models import News
 
 
 def _content_hash(article: News) -> str:
-    raw = (article.title or "") + (article.content or "")
+    raw = (article.title or "") + (article.summary or "")
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 

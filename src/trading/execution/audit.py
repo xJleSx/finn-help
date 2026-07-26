@@ -101,7 +101,8 @@ def audit_log_order(entry: dict[str, object]) -> None:
             f.write(line + "\n")
             f.flush()
             os.fsync(f.fileno())
-        logger.info("audit.order", **entry)
+        log_entry = {k: v for k, v in entry.items() if k != "event"}
+        logger.info("audit.order", **log_entry)
     except Exception as e:
         logger.error("Failed to write audit log", error=str(e))
 

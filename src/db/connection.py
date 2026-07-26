@@ -43,15 +43,16 @@ _ASYNC_DB_URL: str = _build_async_url(settings.database_url)
 
 _async_engine: Any = None
 _AsyncSessionLocal: Any = None
+AsyncSessionLocal: Any = None
 _async_engine_lock = threading.Lock()
 
 
 def _ensure_async() -> None:
-    global _async_engine, _AsyncSessionLocal
-    if _async_engine is not None:
+    global _async_engine, _AsyncSessionLocal, AsyncSessionLocal
+    if _AsyncSessionLocal is not None:
         return
     with _async_engine_lock:
-        if _async_engine is not None:
+        if _AsyncSessionLocal is not None:
             return
         is_pg = _is_postgres(_ASYNC_DB_URL)
         engine = create_async_engine(
@@ -70,6 +71,7 @@ def _ensure_async() -> None:
             class_=AsyncSession,
             expire_on_commit=False,
         )
+        AsyncSessionLocal = _AsyncSessionLocal
 
 
 @asynccontextmanager

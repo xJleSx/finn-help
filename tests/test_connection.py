@@ -44,7 +44,7 @@ class TestInitDb:
 class TestGetAsyncSession:
     @pytest.mark.asyncio
     async def test_yields_session_and_commits(self):
-        with patch("src.db.connection.AsyncSessionLocal") as mock_session_local:
+        with patch("src.db.connection._AsyncSessionLocal") as mock_session_local:
             mock_session = AsyncMock()
             mock_session_local.return_value.__aenter__.return_value = mock_session
 
@@ -59,7 +59,7 @@ class TestGetAsyncSession:
 
     @pytest.mark.asyncio
     async def test_rollback_on_error(self):
-        with patch("src.db.connection.AsyncSessionLocal") as mock_session_local:
+        with patch("src.db.connection._AsyncSessionLocal") as mock_session_local:
             mock_session = AsyncMock()
             mock_session_local.return_value.__aenter__.return_value = mock_session
 

@@ -123,7 +123,7 @@ def reload_execution_log() -> None:
             .limit(1000)
             .all()
         )
-        for o in pending:
+        for o in reversed(pending):
             rec = OrderRecord(
                 ticker=o.ticker,
                 direction=o.direction,
@@ -143,7 +143,7 @@ def reload_execution_log() -> None:
             rec.remaining_quantity = o.remaining_quantity or o.quantity
             rec.executed_price = o.executed_price
             rec.commission = o.commission or 0.0
-            _execution_log.append(rec)
+            _execution_log.appendleft(rec)
         _log_loaded = True
         if pending:
             logger.info("Loaded %d pending orders from DB into execution log", len(pending))
