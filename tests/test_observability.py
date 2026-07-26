@@ -4,9 +4,6 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -89,6 +86,8 @@ def test_traced_decorator_error_sets_status():
 
 
 def test_middleware_captures_method_and_path():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
     from src.core.observability.tracing import AsyncTraceMiddleware
 
     mock_span = MagicMock()
@@ -122,6 +121,9 @@ def test_middleware_captures_method_and_path():
 
 
 def test_middleware_sets_status_code():
+    from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
+    from fastapi.testclient import TestClient
     from src.core.observability.tracing import AsyncTraceMiddleware
 
     mock_span = MagicMock()

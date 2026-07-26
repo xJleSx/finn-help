@@ -1373,10 +1373,12 @@ otel = [
 
 [package.dev-dependencies]
 ci = [
+    { name = "httpx" },
     { name = "pip-audit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "requests" },
 ]
 dev = [
     { name = "bandit" },
@@ -1453,10 +1455,12 @@ provides-extras = ["otel"]
 
 [package.metadata.requires-dev]
 ci = [
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pip-audit", specifier = ">=2.7.0" },
     { name = "pytest", specifier = ">=9.1.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
+    { name = "requests", specifier = ">=2.31" },
 ]
 dev = [
     { name = "bandit", specifier = ">=1.8.0" },
