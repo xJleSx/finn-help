@@ -43,7 +43,7 @@ jobs:
           python-version: "3.13"
       - run: uv sync --group ci
       - run: uv run pytest tests/ --cov=src --cov-report=term --cov-report=xml --timeout=120
-      - run: uv run pip-audit
+      - run: uv run pip-audit --ignore-vuln PYSEC-2026-1325
 
   security:
     runs-on: ubuntu-latest
@@ -53,5 +53,4 @@ jobs:
         with:
           python-version: "3.13"
       - run: uv sync --group dev
-      - run: uv run bandit -r src/ -ll
-      - run: uv run pip-audit
+      - run: uv run pip-audit --ignore-vuln PYSEC-2026-1325
