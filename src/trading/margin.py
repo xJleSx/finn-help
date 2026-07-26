@@ -60,8 +60,8 @@ def compute_margin_requirements(
         elif margin_deficit > 0 and avg_entry_price > 0:
             quantity = position_value / avg_entry_price
             loan_per_share = borrowed / quantity if quantity > 0 else 0
-            req.margin_call_price = loan_per_share / (1 - _maintenance_margin_pct())
-            req.liquidation_price = loan_per_share / (1 - _init_margin_pct())
+            req.margin_call_price = loan_per_share / (1 - _init_margin_pct())
+            req.liquidation_price = loan_per_share / (1 - _maintenance_margin_pct())
         else:
             req.margin_call_price = 0
             req.liquidation_price = 0

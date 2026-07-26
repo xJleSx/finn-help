@@ -6,6 +6,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from src.trading.metrics import PerformanceMetrics, compute_metrics
@@ -272,7 +273,7 @@ class PaperTradingEngine:
                     total_cost = gross_value + commission + slippage
                 cost_basis = quantity * short_pos.avg_price
                 pnl = cost_basis - gross_value
-                new_balance = balance_before + (cost_basis - gross_value - commission - slippage)
+                new_balance = balance_before - gross_value - commission - slippage
                 remaining = short_pos.quantity - quantity
                 if remaining < 1e-10:
                     state.short_positions.pop(ticker, None)
@@ -306,7 +307,7 @@ class PaperTradingEngine:
                 if balance_before < margin_required:
                     return {"status": "error", "error": f"Insufficient margin for short: need {margin_required:.2f}, have {balance_before:.2f}"}
                 proceeds = gross_value
-                new_balance = balance_before + proceeds - total_cost
+                new_balance = balance_before + proceeds - commission - slippage
                 existing_short = state.short_positions.get(ticker)
                 if existing_short:
                     total_qty = existing_short.quantity + quantity
@@ -321,16 +322,16 @@ class PaperTradingEngine:
                 pos = state.positions.get(ticker)
                 if not pos or pos.quantity < 1e-10:
                     return {"status": "error", "error": f"No position in {ticker} to sell"}
+                cost_basis = quantity * pos.avg_price
                 if quantity > pos.quantity:
                     quantity = pos.quantity
                     gross_value = quantity * price
                     commission = gross_value * com_pct
                     slippage = gross_value * (slip_bps / 10_000)
-                    total_cost = commission + slippage
-                cost_basis = quantity * pos.avg_price
-                proceeds = gross_value - total_cost
-                pnl = proceeds - cost_basis
-                new_balance = balance_before + proceeds
+                    cost_basis = quantity * pos.avg_price
+                net_proceeds = gross_value - commission - slippage
+                pnl = net_proceeds - cost_basis
+                new_balance = balance_before + net_proceeds
                 remaining = pos.quantity - quantity
                 if remaining < 1e-10:
                     state.positions.pop(ticker, None)
