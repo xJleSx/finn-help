@@ -147,10 +147,73 @@ def _is_first_of_month() -> bool:
 _LAST_SNAPSHOT_DAY: int | None = None
 _LAST_WEEKLY_WEEK: int | None = None
 _LAST_MONTHLY_MONTH: int | None = None
+_LAST_BRIEF_DAY: int | None = None
+_LAST_COUPON_CHECK_DAY: int | None = None
+_LAST_RATING_CHECK_DAY: int | None = None
+_LAST_BENCHMARK_WEEK: int | None = None
+_LAST_TAX_MONTH: int | None = None
+_LAST_PURCHASE_PLAN_DAY: int | None = None
+_LAST_DRAWDOWN_CHECK: float = 0.0
+
+_NOTIFICATION_LAST_SENT: dict[str, float] = {}
+_QUIET_MODE_ENABLED = True
+QUIET_START_HOUR = 23
+QUIET_END_HOUR = 9
+
+
+def _is_quiet_time() -> bool:
+    if not _QUIET_MODE_ENABLED:
+        return False
+    hour = _msk_now().hour
+    return hour >= QUIET_START_HOUR or hour < QUIET_END_HOUR
+
+
+def _can_send_now(notify_type: str, min_interval: float = 1800.0) -> bool:
+    last_sent = _NOTIFICATION_LAST_SENT.get(notify_type, 0.0)
+    now = _msk_now().timestamp()
+    if now - last_sent < min_interval:
+        return False
+    _NOTIFICATION_LAST_SENT[notify_type] = now
+    return True
+
+
+async def _send_notification(text: str, notify_type: str = "general", min_interval: float = 1800.0) -> None:
+    if _is_quiet_time() and notify_type not in ("redemption", "default"):
+        logger.info("Quiet mode: skipping notification %s", notify_type)
+        return
+    if not _can_send_now(notify_type, min_interval):
+        logger.info("Throttled: skipping notification %s (interval %.0fs)", notify_type, min_interval)
+        return
+    from src.interfaces.telegram import app as bot_app
+    if bot_app is None:
+        logger.info("Notification (%s):\n%s", notify_type, text)
+        return
+    from src.notifications.service import NotificationService
+    ns = NotificationService()
+    for uid, cid in ns.get_subscribers(notify_type):
+        chat_id = cid
+        if not chat_id:
+            from src.db.connection import get_session
+            from src.db.models import Subscription
+            db = get_session()
+            try:
+                sub = db.query(Subscription).filter_by(user_id=uid).first()
+                chat_id = sub.chat_id if sub else None
+            finally:
+                db.close()
+        if not chat_id:
+            logger.warning("No chat_id for user %d, skipping %s", uid, notify_type)
+            continue
+        try:
+            await bot_app.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        except Exception as e:
+            logger.warning("Failed to send %s to chat %d: %s", notify_type, chat_id, e)
 
 
 async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
     global _running, _LAST_SNAPSHOT_DAY, _LAST_WEEKLY_WEEK, _LAST_MONTHLY_MONTH, _INSTANCE_LOCK_HELD
+    global _LAST_BRIEF_DAY, _LAST_COUPON_CHECK_DAY, _LAST_RATING_CHECK_DAY, _LAST_DRAWDOWN_CHECK
+    global _LAST_BENCHMARK_WEEK, _LAST_PURCHASE_PLAN_DAY, _LAST_TAX_MONTH
     if not _acquire_instance_lock("scheduler"):
         logger.error("Another scheduler instance is already running (lock file exists)")
         return
@@ -292,6 +355,112 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
                         await take_snapshot("monthly")
                     except Exception as e:
                         logger.error("Monthly snapshot failed: %s", e)
+
+            # ── Morning Brief at 9:00 MSK ──────────────────────────────
+            if _is_time(9, 0):
+                today_num = date.today().toordinal()
+                if today_num != _LAST_BRIEF_DAY:
+                    _LAST_BRIEF_DAY = today_num
+                    try:
+                        from src.notifications.morning_brief import build_morning_brief
+                        brief_text = await asyncio.to_thread(build_morning_brief)
+                        await _send_notification(brief_text, "brief", min_interval=3600)
+                    except Exception as e:
+                        logger.error("Morning brief failed: %s", e)
+
+            # ── Coupon & Redemption check daily at 10:00 ───────────────
+            if _is_time(10, 0):
+                today_num = date.today().toordinal()
+                if today_num != _LAST_COUPON_CHECK_DAY:
+                    _LAST_COUPON_CHECK_DAY = today_num
+                    try:
+                        from src.notifications.calendar_checker import (
+                            format_coupon_alert,
+                            format_redemption_alert,
+                            get_upcoming_events,
+                        )
+                        cal = await asyncio.to_thread(get_upcoming_events, 14)
+                        for ev in cal.coupons:
+                            if ev.days_until in (3, 1, 0):
+                                text = format_coupon_alert(ev, ev.days_until)
+                                nt = "redemption" if ev.days_until == 0 else "coupon"
+                                await _send_notification(text, nt, min_interval=86400)
+                        for ev in cal.redemptions:
+                            if ev.days_until in (7, 3, 1, 0):
+                                text = format_redemption_alert(ev, ev.days_until)
+                                await _send_notification(text, "redemption", min_interval=86400)
+                    except Exception as e:
+                        logger.error("Coupon/redemption check failed: %s", e)
+
+            # ── Rating change check daily at 11:00 ────────────────────
+            if _is_time(11, 0):
+                today_num = date.today().toordinal()
+                if today_num != _LAST_RATING_CHECK_DAY:
+                    _LAST_RATING_CHECK_DAY = today_num
+                    try:
+                        from src.notifications.rating_checker import check_rating_changes, format_rating_alert
+                        changes = await asyncio.to_thread(check_rating_changes)
+                        for change in changes:
+                            text = format_rating_alert(change)
+                            await _send_notification(text, "rating", min_interval=86400)
+                    except Exception as e:
+                        logger.error("Rating check failed: %s", e)
+
+            # ── Drawdown check every 15 min ──────────────────────────
+            now_ts = _msk_now().timestamp()
+            if now_ts - _LAST_DRAWDOWN_CHECK >= 900:
+                _LAST_DRAWDOWN_CHECK = now_ts
+                try:
+                    from src.notifications.drawdown_checker import check_drawdown, format_drawdown_alert
+                    alert = await asyncio.to_thread(check_drawdown)
+                    if alert:
+                        text = format_drawdown_alert(alert)
+                        await _send_notification(text, "drawdown", min_interval=3600)
+                except Exception as e:
+                    logger.error("Drawdown check failed: %s", e)
+
+            # ── Benchmark comparison (Friday at 12:00) ─────────────────
+            if _is_friday() and _is_time(12, 0):
+                week_num = date.today().isocalendar()[1]
+                if week_num != _LAST_BENCHMARK_WEEK:
+                    _LAST_BENCHMARK_WEEK = week_num
+                    try:
+                        from src.notifications.benchmark_comparison import compare_benchmarks, format_benchmark_comparison
+                        cmp = await asyncio.to_thread(compare_benchmarks)
+                        if cmp:
+                            text = format_benchmark_comparison(cmp)
+                            await _send_notification(text, "benchmark", min_interval=86400)
+                    except Exception as e:
+                        logger.error("Benchmark comparison failed: %s", e)
+
+            # ── Purchase planner (23-24th at 10:00) ───────────────────
+            today_day = date.today().day
+            if today_day in (23, 24) and _is_time(10, 0):
+                day_num = date.today().toordinal()
+                if day_num != _LAST_PURCHASE_PLAN_DAY:
+                    _LAST_PURCHASE_PLAN_DAY = day_num
+                    try:
+                        from src.notifications.purchase_planner import format_purchase_plan, generate_purchase_plan
+                        plan = await asyncio.to_thread(generate_purchase_plan)
+                        if plan:
+                            text = format_purchase_plan(plan)
+                            await _send_notification(text, "purchase_plan", min_interval=86400)
+                    except Exception as e:
+                        logger.error("Purchase plan failed: %s", e)
+
+            # ── Tax report (1st of month at 10:00) ────────────────────
+            if _is_first_of_month() and _is_time(10, 0):
+                month_key = date.today().year * 12 + date.today().month
+                if month_key != _LAST_TAX_MONTH:
+                    _LAST_TAX_MONTH = month_key
+                    try:
+                        from src.notifications.tax_report import format_tax_report, generate_tax_report
+                        tax_report = await asyncio.to_thread(generate_tax_report)
+                        if tax_report:
+                            text = format_tax_report(tax_report)
+                            await _send_notification(text, "tax", min_interval=86400)
+                    except Exception as e:
+                        logger.error("Tax report failed: %s", e)
 
         await asyncio.sleep(interval)
 

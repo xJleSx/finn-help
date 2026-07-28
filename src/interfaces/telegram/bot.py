@@ -78,6 +78,13 @@ from src.interfaces.telegram.handlers import (
     weekly,
     whatif,
 )
+from src.interfaces.telegram.handlers.notifications import (
+    benchmark,
+    brief,
+    buy,
+    sell,
+    taxreport,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -120,6 +127,11 @@ async def _set_commands(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
         BotCommand("favorite", "Избранное (add/list/remove)"),
         BotCommand("allocate_interactive", "Интерактивное распределение"),
         BotCommand("status", "Статус бота и подписки"),
+        BotCommand("brief", "Утренний брифинг"),
+        BotCommand("buy", "Купить (тикер кол-во)"),
+        BotCommand("sell", "Продать (тикер кол-во)"),
+        BotCommand("benchmark", "Сравнение с рынком"),
+        BotCommand("tax", "Налоговый отчёт"),
         BotCommand("help", "Помощь"),
     ]
     try:
@@ -227,6 +239,11 @@ async def run_bot() -> None:
     app.add_handler(CommandHandler("bonds", bonds_list))
     app.add_handler(CommandHandler("bond", bond_detail))
     app.add_handler(CommandHandler("newbonds", new_bonds))
+    app.add_handler(CommandHandler("brief", brief))
+    app.add_handler(CommandHandler("buy", buy))
+    app.add_handler(CommandHandler("sell", sell))
+    app.add_handler(CommandHandler("benchmark", benchmark))
+    app.add_handler(CommandHandler("tax", taxreport))
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
