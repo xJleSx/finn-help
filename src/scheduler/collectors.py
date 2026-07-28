@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from src.collectors.cbr import CBRCollector
-from src.collectors.moex import MOEXCollector
+from src.collectors.moex import MOEXCollector, fill_price_gaps
 from src.collectors.news import NewsCollector
 from src.config import (
     DEFAULT_HISTORY_DAYS,
@@ -102,6 +102,10 @@ async def _fetch_prices_for_instrument(db: AsyncSession, inst: Instrument, from_
 
     if not rows_to_upsert:
         return 0
+
+    df = pd.DataFrame(rows_to_upsert)
+    df = fill_price_gaps(df)
+    rows_to_upsert = df.to_dict("records")
 
     return await async_bulk_upsert(
         db, Price, rows_to_upsert,
