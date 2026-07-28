@@ -10,32 +10,14 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
-    ConversationHandler,
     MessageHandler,
     filters,
 )
 
 from src.config import settings
 from src.interfaces.telegram.callbacks import button_callback, reply_keyboard_handler
-from src.interfaces.telegram.conversations import (
-    ALLOC_AMOUNT,
-    ALLOC_EXCLUDE,
-    ALLOC_PROFILE,
-    PRICE,
-    QUANTITY,
-    TICKER,
-    add_cancel,
-    add_price,
-    add_quantity,
-    add_start,
-    add_ticker,
-    alloc_amount,
-    alloc_cancel,
-    alloc_exclude,
-    alloc_profile,
-    alloc_start,
-)
 from src.interfaces.telegram.handlers import (
+    add_start,
     allocate,
     analyze,
     ask,
@@ -125,7 +107,6 @@ async def _set_commands(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
         BotCommand("unsubscribe_author", "Отписаться от автора Pulse"),
         BotCommand("authors", "Мои подписки на авторов"),
         BotCommand("favorite", "Избранное (add/list/remove)"),
-        BotCommand("allocate_interactive", "Интерактивное распределение"),
         BotCommand("status", "Статус бота и подписки"),
         BotCommand("brief", "Утренний брифинг"),
         BotCommand("buy", "Купить (тикер кол-во)"),
@@ -192,17 +173,7 @@ async def run_bot() -> None:
     app.add_handler(CommandHandler("weekly", weekly))
     app.add_handler(CommandHandler("stress", stress))
     app.add_handler(CommandHandler("backtest", backtest))
-    app.add_handler(
-        ConversationHandler(
-            entry_points=[CommandHandler("add", add_start)],
-            states={
-                TICKER: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_ticker)],
-                QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_quantity)],
-                PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_price)],
-            },
-            fallbacks=[CommandHandler("cancel", add_cancel)],
-        )
-    )
+    app.add_handler(CommandHandler("add", add_start))
     app.add_handler(CommandHandler("remove", remove_position))
     app.add_handler(CommandHandler("history", history))
     app.add_handler(CommandHandler("profile", profile))
@@ -216,18 +187,6 @@ async def run_bot() -> None:
     app.add_handler(CommandHandler("pnl", pnl))
     app.add_handler(CommandHandler("channel", channel_cmd))
     app.add_handler(CommandHandler("favorite", favorite))
-    app.add_handler(CommandHandler("allocate_interactive", alloc_start))
-    app.add_handler(
-        ConversationHandler(
-            entry_points=[CommandHandler("allocate_interactive", alloc_start)],
-            states={
-                ALLOC_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, alloc_amount)],
-                ALLOC_EXCLUDE: [MessageHandler(filters.TEXT & ~filters.COMMAND, alloc_exclude)],
-                ALLOC_PROFILE: [MessageHandler(filters.TEXT & ~filters.COMMAND, alloc_profile)],
-            },
-            fallbacks=[CommandHandler("cancel", alloc_cancel)],
-        )
-    )
     app.add_handler(CommandHandler("mute", mute_cmd))
     app.add_handler(CommandHandler("unmute", unmute_cmd))
     app.add_handler(CommandHandler("muted", muted_cmd))

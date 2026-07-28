@@ -1,4 +1,4 @@
-from src.constants import CACHE_TTL
+from src.config import CACHE_TTL
 from src.interfaces.telegram.bot import app, run_bot
 from src.interfaces.telegram_guard import analysis_cache
 

@@ -1,4 +1,3 @@
-from src.interfaces.telegram.conversations import add_start
 from src.interfaces.telegram.handlers.account import (
     favorite,
     my_authors,
@@ -40,6 +39,7 @@ from src.interfaces.telegram.handlers.misc import (
     unmute_cmd,
 )
 from src.interfaces.telegram.handlers.portfolio import (
+    add_start,
     allocate,
     export_portfolio,
     pnl,

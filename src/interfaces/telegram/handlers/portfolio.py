@@ -14,7 +14,7 @@ from src.config import settings
 from src.db.connection import get_session
 from src.db.models import Instrument
 from src.db.models import Portfolio as PortModel
-from src.interfaces.telegram.messages import _reply_with_allocation
+from src.interfaces.telegram.messages import _reply_with_allocation, _save_position
 from src.interfaces.telegram_guard import _check_cooldown, guard
 from src.interfaces.telegram_helpers import (
     _chunk_text,
@@ -217,6 +217,31 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @guard(with_cooldown=True)
+async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    args = context.args or []
+    if len(args) < 2:
+        await update.effective_message.reply_text(
+            "Использование: /add TICKER КОЛИЧЕСТВО [ЦЕНА]\n"
+            "Например: /add SBER 10 250\n"
+            "Цена опциональна (будет определена автоматически)"
+        )
+        return
+    ticker = args[0].upper()
+    try:
+        qty = float(args[1].replace(",", "."))
+    except ValueError:
+        await update.effective_message.reply_text("Количество должно быть числом.")
+        return
+    avg_price = None
+    if len(args) >= 3:
+        try:
+            avg_price = float(args[2].replace(",", "."))
+        except ValueError:
+            await update.effective_message.reply_text("Цена должна быть числом.")
+            return
+    await _save_position(update, ticker, qty, avg_price)
+
+
 async def remove_position(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     args = context.args or []
     if len(args) < 1:

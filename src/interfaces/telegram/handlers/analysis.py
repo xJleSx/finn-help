@@ -6,8 +6,8 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.analysis.backtest import backtest_allocation
-from src.analysis.correlation_analysis import correlation_table
-from src.analysis.sector import sector_analyzer
+from src.analysis.market.correlation_analysis import correlation_table
+from src.analysis.market.sector import sector_analyzer
 from src.analysis.whatif import whatif_macro, whatif_scenario
 from src.db.connection import get_session
 from src.db.models import GeoRiskScore, Instrument

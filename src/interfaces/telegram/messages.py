@@ -5,7 +5,7 @@ import structlog
 from telegram import Update
 
 from src.cli import run_analysis
-from src.constants import CACHE_TTL, MAX_CACHE_SIZE
+from src.config import CACHE_TTL, MAX_CACHE_SIZE
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
 from src.db.models import Portfolio as PortModel
