@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from src.analysis.feature_store import (
+from src.analysis.market.feature_store import (
     _mem_key,
     _MemoryCache,
     cached_or_compute,
@@ -63,15 +63,15 @@ class TestMemKey:
 
 class TestGetCached:
     def test_returns_memory_hit(self):
-        with patch("src.analysis.feature_store._mem") as mock_mem:
+        with patch("src.analysis.market.feature_store._mem") as mock_mem:
             mock_mem.get.return_value = {"cached": True}
             result = get_cached("SBER", "atr")
             assert result == {"cached": True}
 
     def test_returns_none_when_miss(self):
         with (
-            patch("src.analysis.feature_store._mem") as mock_mem,
-            patch("src.analysis.feature_store.get_session") as mock_get_session,
+            patch("src.analysis.market.feature_store._mem") as mock_mem,
+            patch("src.analysis.market.feature_store.get_session") as mock_get_session,
         ):
             mock_mem.get.return_value = None
             mock_db = MagicMock()
@@ -86,8 +86,8 @@ class TestGetCached:
         from datetime import date, datetime, timedelta, timezone
 
         with (
-            patch("src.analysis.feature_store._mem") as mock_mem,
-            patch("src.analysis.feature_store.get_session") as mock_get_session,
+            patch("src.analysis.market.feature_store._mem") as mock_mem,
+            patch("src.analysis.market.feature_store.get_session") as mock_get_session,
         ):
             mock_mem.get.return_value = None
             mock_db = MagicMock()
@@ -108,8 +108,8 @@ class TestGetCached:
         from datetime import date, datetime, timezone
 
         with (
-            patch("src.analysis.feature_store._mem") as mock_mem,
-            patch("src.analysis.feature_store.get_session") as mock_get_session,
+            patch("src.analysis.market.feature_store._mem") as mock_mem,
+            patch("src.analysis.market.feature_store.get_session") as mock_get_session,
         ):
             mock_mem.get.return_value = None
             mock_db = MagicMock()
@@ -129,7 +129,7 @@ class TestGetCached:
 
 class TestSetCache:
     def test_success(self):
-        with patch("src.analysis.feature_store.get_session") as mock_get_session:
+        with patch("src.analysis.market.feature_store.get_session") as mock_get_session:
             mock_db = MagicMock()
             mock_get_session.return_value = mock_db
 
@@ -140,7 +140,7 @@ class TestSetCache:
             mock_db.close.assert_called_once()
 
     def test_exception_rollback(self):
-        with patch("src.analysis.feature_store.get_session") as mock_get_session:
+        with patch("src.analysis.market.feature_store.get_session") as mock_get_session:
             mock_db = MagicMock()
             mock_db.execute.side_effect = Exception("DB error")
             mock_get_session.return_value = mock_db
@@ -152,7 +152,7 @@ class TestSetCache:
 
 class TestClearStale:
     def test_deletes_old(self):
-        with patch("src.analysis.feature_store.get_session") as mock_get_session:
+        with patch("src.analysis.market.feature_store.get_session") as mock_get_session:
             mock_db = MagicMock()
             mock_result = MagicMock()
             mock_result.rowcount = 3
@@ -167,15 +167,15 @@ class TestClearStale:
 
 class TestCachedOrCompute:
     def test_returns_cached(self):
-        with patch("src.analysis.feature_store.get_cached") as mock_get:
+        with patch("src.analysis.market.feature_store.get_cached") as mock_get:
             mock_get.return_value = {"from_cache": True}
             result = cached_or_compute("SBER", "atr", lambda: {"computed": True})
             assert result == {"from_cache": True}
 
     def test_computes_and_caches(self):
         with (
-            patch("src.analysis.feature_store.get_cached") as mock_get,
-            patch("src.analysis.feature_store.set_cache") as mock_set,
+            patch("src.analysis.market.feature_store.get_cached") as mock_get,
+            patch("src.analysis.market.feature_store.set_cache") as mock_set,
         ):
             mock_get.return_value = None
             result = cached_or_compute("SBER", "atr", lambda: {"computed": True})
@@ -185,7 +185,7 @@ class TestCachedOrCompute:
 
 class TestClearMemoryCache:
     def test_clear_ticker(self):
-        from src.analysis.feature_store import _mem
+        from src.analysis.market.feature_store import _mem
 
         _mem.set("SBER:atr", 1)
         _mem.set("SBER:vol", 2)
@@ -196,7 +196,7 @@ class TestClearMemoryCache:
         assert _mem.get("GAZP:atr") == 3
 
     def test_clear_all(self):
-        from src.analysis.feature_store import _mem
+        from src.analysis.market.feature_store import _mem
 
         _mem.set("a", 1)
         _mem.set("b", 2)

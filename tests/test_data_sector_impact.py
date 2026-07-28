@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from unittest.mock import MagicMock
-
-import pytest
 
 from src.data.sector_impact_engine import EWMARiskCalculator, SectorCorrelationTracker, SectorImpactEngine
 

@@ -310,6 +310,9 @@ class BondOffering(Base):
     maturity_date = Column(Date, comment="Дата погашения")
     maturity_years = Column(Float, comment="Срок обращения в годах")
     credit_rating = Column(String(10), comment="Кредитный рейтинг")
+    rating_agency = Column(String(20), comment="Рейтинговое агентство (ACRA/ExpertRA/Moody's/S&P/Fitch)")
+    rating_date = Column(Date, comment="Дата присвоения рейтинга")
+    rating_scale = Column(String(10), comment="Шкала рейтинга (national/international)")
     volume = Column(Float, comment="Объём выпуска (RUB)")
 
     has_amortization = Column(Boolean, default=False)
@@ -376,6 +379,9 @@ class BondOfferingHistory(Base):
     maturity_date = Column(Date, comment="Дата погашения")
     maturity_years = Column(Float, comment="Срок обращения в годах")
     credit_rating = Column(String(10), comment="Кредитный рейтинг")
+    rating_agency = Column(String(20), comment="Рейтинговое агентство (ACRA/ExpertRA/Moody's/S&P/Fitch)")
+    rating_date = Column(Date, comment="Дата присвоения рейтинга")
+    rating_scale = Column(String(10), comment="Шкала рейтинга (national/international)")
     current_price_pct = Column(Float, comment="Цена в % от номинала")
 
     instrument = relationship("Instrument", backref="bond_offering_history")

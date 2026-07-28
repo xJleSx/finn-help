@@ -5,8 +5,7 @@ from unittest.mock import AsyncMock
 import numpy as np
 import pandas as pd
 import pytest
-
-from src.analysis.correlation import CorrelationAnalyzer
+from src.analysis.market.correlation import CorrelationAnalyzer
 
 
 @pytest.fixture

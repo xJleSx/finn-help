@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import numpy as np
 import pytest
 
 from src.analysis.fusion_optimizer import (
-    WalkForwardFold,
     _simulate_trades,
     _walk_forward_split,
     _weighted_score,

@@ -29,6 +29,7 @@ from src.db.models import (
 from src.db.queries import async_bulk_upsert
 from src.geo.risk_scorer import GeoRiskScorer
 from src.geo.sentiment_divergence import SentimentDivergenceDetector
+from src.utils import _safe_float, _safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -792,21 +793,6 @@ def _parse_coupon_date(val: Any) -> Optional[date]:
             logger.debug("Could not parse date: %s", val[:10])
     return None
 
-
-def _safe_int(val: Any) -> Optional[int]:
-    if val is None:
-        return None
-    with contextlib.suppress(ValueError, TypeError):
-        return int(val)
-    return None
-
-
-def _safe_float(val: Any) -> Optional[float]:
-    if val is None:
-        return None
-    with contextlib.suppress(ValueError, TypeError):
-        return float(val)
-    return None
 
 
 def collect_company_profiles(db: Session) -> None:

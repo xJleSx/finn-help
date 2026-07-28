@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
-
-from src.analysis.volatility import (
+from src.analysis.market.volatility import (
     VolatilityForecaster,
     VolatilityRegimeDetector,
     ewma_volatility,

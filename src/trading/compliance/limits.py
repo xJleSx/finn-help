@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from src.config import personal
-from src.constants import SECTOR_LIMITS
+from src.config import SECTOR_LIMITS, personal
 from src.db.connection import get_session
 from src.db.models import Portfolio
 from src.trading.types import ComplianceCheck

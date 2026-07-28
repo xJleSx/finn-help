@@ -148,6 +148,9 @@ class BondOfferingCollector(BaseCollector):
                 result["coupon_type"] = value
             elif name == "CREDITRATING":
                 result["credit_rating"] = value
+                parsed = _parse_rating_meta(value)
+                result["rating_agency"] = parsed["agency"]
+                result["rating_scale"] = parsed["scale"]
             elif name == "ISSUESIZE":
                 with contextlib.suppress(ValueError, TypeError):
                     result["volume"] = float(value) if value else None
@@ -176,6 +179,8 @@ class BondOfferingCollector(BaseCollector):
             elif name == "QUALIFIEDINVESTOR":
                 qual_value = str(value).lower() if value else ""
                 result["qual_investor_only"] = qual_value in ("yes", "1", "true", "да")
+            elif name == "RATINGDATE":
+                result["rating_date"] = _parse_date(value)
             elif name == "EMITTER_ID":
                 with contextlib.suppress(ValueError, TypeError):
                     result["emitter_id"] = int(value) if value else None
@@ -217,6 +222,42 @@ def _parse_date(value: Any) -> Optional[date]:
         except (ValueError, TypeError):
             logger.debug("Could not parse date: %s", value)
     return None
+
+
+def _parse_rating_meta(rating_str: str) -> dict[str, Optional[str]]:
+    if not rating_str:
+        return {"agency": None, "scale": None}
+    s = rating_str.strip()
+    scale = "national"
+    agency = None
+    if "(" in s and ")" in s:
+        base, _, _ = s.partition("(")
+        base = base.strip()
+        rest = s[len(base):].strip("(").strip(")").strip()
+    else:
+        base = s
+        rest = ""
+    ol = s.lower()
+    if "acra" in ol or s.endswith("(RU)") or "(RU)" in s:
+        agency = "ACRA"
+    elif "expert" in ol or "raex" in ol or s.startswith("ru") or s.startswith("RU"):
+        agency = "ExpertRA"
+    elif "moody" in ol or s.startswith("B") or s.startswith("C") or s.startswith("A"):
+        if "moody" in ol:
+            agency = "Moodys"
+        elif "p" in ol or "f" in ol:
+            agency = "S&P" if "p" in ol else "Fitch"
+        else:
+            agency = None
+    elif "fitch" in ol:
+        agency = "Fitch"
+    elif "ra" in ol or "ria" in ol:
+        agency = "NRA"
+    elif base.startswith("AAA") or base.startswith("AA") or base.startswith("A") or base.startswith("BBB"):
+        agency = None
+    if rest and ("AAA" in rest or "AA" in rest or "A" in rest or "BBB" in rest or "BB" in rest or "B" in rest):
+        agency = None
+    return {"agency": agency, "scale": scale if scale else None}
 
 
 def _estimate_duration(maturity_date: date, ytm: Optional[float], amortizing_schedule: Optional[list[dict[str, Any]]] = None) -> Optional[float]:

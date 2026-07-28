@@ -35,7 +35,6 @@ class TestTradingFlow:
     def test_features_module(self):
         import numpy as np
         import pandas as pd
-
         from src.analysis.features import FeatureBuilder
         dates = pd.date_range("2026-01-01", periods=100, freq="D")
         df = pd.DataFrame({
@@ -61,7 +60,6 @@ class TestTradingFlow:
 
     def test_volatility_estimators(self):
         import numpy as np
-
         from src.analysis.volatility import parkinson_volatility
         highs = np.array([105, 110, 108, 112, 115])
         lows = np.array([95, 98, 96, 100, 102])

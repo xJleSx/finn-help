@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.social.sentiment.analyzer import SocialSentimentAnalyzer, _is_finance_post, _get_source_weight
+from src.social.sentiment.analyzer import SocialSentimentAnalyzer, _get_source_weight, _is_finance_post
 
 
 def test_is_finance_post_with_tickers():

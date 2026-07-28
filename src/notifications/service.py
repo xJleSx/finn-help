@@ -8,7 +8,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from src.constants import ACTION_EMOJI
+from src.config import ACTION_EMOJI
 from src.core.executor import get_executor
 from src.db.connection import get_session
 from src.db.models import AuthorSubscription, GeoRiskScore, Instrument, Notification, Portfolio, Price, Subscription

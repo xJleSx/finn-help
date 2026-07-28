@@ -6,8 +6,7 @@ import numpy as np
 import pandas as pd
 
 from src.collectors.base import BaseCollector
-from src.config import settings
-from src.constants import DEFAULT_HISTORY_DAYS
+from src.config import DEFAULT_HISTORY_DAYS, settings
 
 try:
     from tests.data.moex_mock_data import _MOCK_BOND_HISTORY, _MOCK_BONDS, _MOCK_COUPONS, _MOCK_SECURITIES

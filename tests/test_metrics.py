@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.trading.metrics import PerformanceMetrics, compute_metrics
+from src.trading.metrics import compute_metrics
 
 
 class TestComputeMetrics:

@@ -5,8 +5,6 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import numpy as np
 import pandas as pd
-import pytest
-from sqlalchemy.orm import Session
 
 from src.analysis.anomaly.features import (
     article_counts_per_day,

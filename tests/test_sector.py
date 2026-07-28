@@ -3,8 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
-from src.analysis.sector import sector_analyzer
+from src.analysis.market.sector import sector_analyzer
 
 
 class TestSectorFor:

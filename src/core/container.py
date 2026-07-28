@@ -197,12 +197,12 @@ def wire(settings_override: Any = None) -> None:
 
 def _register_analysis() -> None:
     from src.analysis.context import ticker_context_builder
-    from src.analysis.correlation import correlation
     from src.analysis.events import event_features
     from src.analysis.loader import data_loader
+    from src.analysis.market.correlation import correlation
+    from src.analysis.market.sector import sector_analyzer
     from src.analysis.ml_coordinator import ml_coordinator
     from src.analysis.rebalancing import rebalancing_engine
-    from src.analysis.sector import sector_analyzer
     from src.analysis.service import analysis_service
     container.register("analysis_service", analysis_service)
     container.register("sector_analyzer", sector_analyzer)

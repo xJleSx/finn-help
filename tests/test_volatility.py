@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-
-from src.analysis.volatility import VOLATILITY_REGIMES, VolatilityRegimeDetector
+from src.analysis.market.volatility import VOLATILITY_REGIMES, VolatilityRegimeDetector
 
 
 class TestClassify:

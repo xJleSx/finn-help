@@ -7,7 +7,7 @@ from typing import Any
 import structlog
 from jinja2 import BaseLoader, Environment, FileSystemLoader, select_autoescape
 
-from src.constants import ACTION_EMOJI
+from src.config import ACTION_EMOJI
 
 logger = structlog.get_logger(__name__)
 

@@ -103,6 +103,7 @@ class TestGetCurrentUserRole:
 
     def test_raises_on_missing_auth_header(self):
         from fastapi import HTTPException
+
         from src.interfaces.api.rbac.models import get_current_user_role
 
         mock_request = MagicMock()
@@ -114,6 +115,7 @@ class TestGetCurrentUserRole:
 
     def test_raises_on_invalid_role(self):
         from fastapi import HTTPException
+
         from src.interfaces.api.rbac.models import get_current_user_role
 
         mock_request = MagicMock()
@@ -138,6 +140,7 @@ class TestRequirePermission:
 
     def test_denies_viewer_trade_execute(self):
         from fastapi import HTTPException
+
         from src.interfaces.api.rbac.models import Permission, require_permission
 
         mock_request = MagicMock()
@@ -151,6 +154,7 @@ class TestRequirePermission:
 
     def test_denies_analyst_trade_execute(self):
         from fastapi import HTTPException
+
         from src.interfaces.api.rbac.models import Permission, require_permission
 
         mock_request = MagicMock()

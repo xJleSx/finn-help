@@ -12,7 +12,11 @@ export interface BondPosition {
   profit: number;
   profitPercent: number;
   ytm: number;
-  aiScore: number;
+  couponYield: number;
+  duration: number;
   rating: string;
+  maturityDate: string;
+  aiScore: number;
   allocation: number;
+  targetAllocation?: number;
 }

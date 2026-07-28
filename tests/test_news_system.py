@@ -54,7 +54,7 @@ class TestModuleImports:
         assert GeopoliticalRiskEngine is not None
 
     def test_event_detector_import(self):
-        from src.data.event_detector import EventDetector, DataSentimentDivergenceDetector
+        from src.data.event_detector import DataSentimentDivergenceDetector, EventDetector
 
         assert EventDetector is not None
         assert DataSentimentDivergenceDetector is not None

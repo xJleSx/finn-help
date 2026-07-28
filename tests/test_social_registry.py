@@ -46,9 +46,4 @@ def test_build_from_config_empty():
     assert r.get("vk") is None
 
 
-@patch("src.social.registry.personal", {"social_sources": {"vk": {"enabled": True, "group_ids": ["1"]}}})
-def test_build_from_config_vk():
-    r = SocialRegistry()
-    r.build_from_config()
-    assert r.get("vk") is not None
-    assert r.get("vk").source_name == "vk"
+

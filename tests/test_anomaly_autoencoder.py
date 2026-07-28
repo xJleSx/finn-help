@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-import torch
 
 from src.analysis.anomaly.autoencoder import AutoencoderAnomalyDetector
 from src.analysis.ml.news_impact_features import ALL_FEATURE_COLS

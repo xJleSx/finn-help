@@ -11,8 +11,7 @@ import structlog
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from src.config import settings
-from src.constants import COOLDOWN_SECONDS
+from src.config import COOLDOWN_SECONDS, settings
 
 logger = structlog.get_logger(__name__)
 

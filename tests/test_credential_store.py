@@ -1,7 +1,5 @@
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.core.credential_store import (
     delete_broker_token,
     get_broker_token,

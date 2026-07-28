@@ -32,7 +32,7 @@ class NewsCollector(BaseCollector):
 
         Returns number of new articles saved.
         """
-        from src.constants import NEWS_MAX_PER_FEED
+        from src.config import NEWS_MAX_PER_FEED
         from src.db.models import Instrument, News, NewsInstrument
 
         collector = NewsCollector()

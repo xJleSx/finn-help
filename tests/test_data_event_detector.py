@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
-
-import pytest
 
 from src.data.event_detector import DataSentimentDivergenceDetector, EventDetector
 

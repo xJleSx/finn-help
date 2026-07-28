@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
-from src.analysis.self_learning import ModelPerformance, PredictionRecord, SelfLearningEngine
+from src.analysis.self_learning import SelfLearningEngine
 
 
 class TestRecordPrediction:

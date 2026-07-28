@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from src.analysis.feature_store import (
+from src.analysis.market.feature_store import (
     FEATURE_TYPE_TTL,
     _mem,
     _MemoryCache,
     bump_version,
-    clear_stale_async,
     get_cached_async,
     invalidate_async,
-    set_cache_async,
 )
 
 

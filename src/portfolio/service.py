@@ -130,7 +130,7 @@ class PortfolioService:
         return [s.fused_json or {} for s in signals if s.fused_json]
 
     async def get_sectors_for_csv(self) -> tuple[Any, Any]:
-        from src.analysis.sector import sector_analyzer
+        from src.analysis.market.sector import sector_analyzer
 
         perf = await sector_analyzer.compute_sector_performance_async(self.db)
         vol = await sector_analyzer.compute_sector_volatility_async(self.db)

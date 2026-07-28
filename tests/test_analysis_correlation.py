@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
-
-from src.analysis.correlation import (
+from src.analysis.market.correlation import (
     CorrelationAnalyzer,
     ewma_correlation,
     hierarchical_clustering,

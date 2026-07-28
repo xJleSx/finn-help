@@ -24,7 +24,7 @@ BASE_WEIGHTS: dict[str, float] = {
     "company_specific_risk": 0.25,
 }
 
-from src.constants import SECTOR_NAME_MAP
+from src.config import SECTOR_NAME_MAP
 
 SECTOR_BASELINE_RISK: dict[str, float] = {
     "banking": 5.5,

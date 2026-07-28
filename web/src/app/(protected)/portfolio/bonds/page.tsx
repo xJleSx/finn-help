@@ -102,6 +102,76 @@ export default function PortfolioBondsPage() {
         <PortfolioPerformance data={performance} totalReturn={data?.summary?.totalReturn || 0} currentValue={data?.summary?.totalValue || 0} />
       </div>
 
+      {data?.scenarioB && (
+        <div className="rounded-xl border bg-card p-6">
+          <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Сценарий B {data.scenarioB.scenarioBActive ? "🔴 Активен" : "🟢 Не активен"}
+          </h3>
+          <p className="mb-3 text-sm text-muted-foreground">{data.scenarioB.triggerReason}</p>
+          {data.scenarioB.sellRecommendations.length > 0 && (
+            <div className="mb-3">
+              <p className="mb-1 text-xs font-semibold text-red-500">Рекомендации к продаже:</p>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                {data.scenarioB.sellRecommendations.map((s, i) => (
+                  <li key={i}>• {s.ticker}: {s.reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {data.scenarioB.buyRecommendations.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs font-semibold text-emerald-500">Рекомендации к покупке:</p>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                {data.scenarioB.buyRecommendations.map((b, i) => (
+                  <li key={i}>• {b.ticker} ({b.suggestedPct}%) — {b.reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {data?.rebalancing && data.rebalancing.triggerCount > 0 && (
+        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-6">
+          <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Триггеры ребалансировки ({data.rebalancing.triggerCount})
+          </h3>
+          <ul className="space-y-2 text-sm">
+            {data.rebalancing.activeTriggers.map((t, i) => (
+              <li key={i} className={`flex gap-2 ${t.severity === "high" ? "text-red-500" : t.severity === "medium" ? "text-yellow-500" : "text-muted-foreground"}`}>
+                <span>•</span>
+                <span>{t.message}</span>
+              </li>
+            ))}
+          </ul>
+          {data.rebalancing.recommendations.length > 0 && (
+            <div className="mt-3 border-t border-border/50 pt-3">
+              <p className="mb-1 text-xs font-semibold">Рекомендации:</p>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                {data.rebalancing.recommendations.map((r, i) => (
+                  <li key={i}>• {r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {data?.macroScenario && (
+        <div className="rounded-xl border bg-card p-6">
+          <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Макро-сценарий
+          </h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between"><span className="text-muted-foreground">Сценарий</span><span className="font-semibold">{data.macroScenario.selectedScenario}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Оценка</span><span className="font-semibold">{data.macroScenario.score}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Ключевая ставка</span><span className="font-semibold">{(data.macroScenario.keyRate * 100).toFixed(0)}%</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Инфляция</span><span className="font-semibold">{(data.macroScenario.inflation * 100).toFixed(1)}%</span></div>
+            <p className="mt-2 text-xs text-muted-foreground">{data.macroScenario.details}</p>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-2">
         <PortfolioCashFlow events={cashFlow} />
         <PortfolioAI {...aiProps} />

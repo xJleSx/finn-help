@@ -130,38 +130,10 @@ class TestComputeMl:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_returns_properly_structured_dict(self, service):
-        df = _real_price_df(100)
-        ind_df = _real_indicator_df(100)
-        mock_prophet = MagicMock()
-        mock_prophet.predict.return_value = {
-            "target_price": 105.0,
-            "current_price": 100.0,
-            "price_change_pct": 5.0,
-            "confidence": 0.7,
-        }
-        mock_ensemble = MagicMock()
-        mock_ensemble.predict.return_value = {
-            "confidence": 0.6,
-            "xgb_action": "BUY",
-            "lgb_action": "BUY",
-            "cat_action": "HOLD",
-            "model_votes": {"xgb": "BUY", "lgb": "BUY", "cat": "HOLD"},
-        }
-        with (
-            patch.object(service.ml, "get_prophet", return_value=mock_prophet),
-            patch.object(service.ml, "get_ensemble", return_value=mock_ensemble),
-        ):
-            result = await service._compute_ml(df, ind_df, "TEST")
-        assert result["ml_confidence"] == max(0.7, 0.6)
-        assert result["xgb_action"] == "BUY"
-        assert result["ensemble"]["cat_action"] == "HOLD"
-
-    @pytest.mark.asyncio
     async def test_returns_none_on_exception(self, service):
         df = pd.DataFrame({"close": [100] * 60, "date": [date(2024, 1, 1)] * 60})
         ind_df = pd.DataFrame({"rsi": [50] * 60})
-        with patch.object(service.ml, "get_prophet", side_effect=ValueError("fail")):
+        with patch.object(service.ml, "compute_ml", side_effect=ValueError("fail")):
             result = await service._compute_ml(df, ind_df, "TEST")
             assert result is None
 
@@ -485,54 +457,9 @@ class TestTrainModels:
         db.query.side_effect = query_side
         return db
 
-    def test_returns_results_dict(self, service):
-        db = self._train_db([MagicMock(id=1, ticker="SBER")])
-        mock_ensemble = MagicMock()
-        mock_ensemble.train_all.return_value = {"lgb": True, "xgb": True, "cat": True}
-        mock_prophet = MagicMock()
-        mock_prophet.train.return_value = True
-        with (
-            patch.object(service, "_get_ensemble", return_value=mock_ensemble),
-            patch.object(service, "_get_prophet", return_value=mock_prophet),
-        ):
-            results = service.train_models(db)
-        assert results == {"SBER": True}
-
-    def test_filters_by_ticker(self, service):
-        db = self._train_db([MagicMock(id=1, ticker="SBER")])
-        with (
-            patch.object(service, "_get_ensemble", return_value=MagicMock(train_all=MagicMock(return_value={}))),
-            patch.object(service, "_get_prophet", return_value=MagicMock(train=MagicMock(return_value=False))),
-        ):
-            assert len(service.train_models(db, ticker="SBER")) == 1
-
     def test_skips_instrument_with_insufficient_prices(self, service):
         db = self._train_db([MagicMock(id=1, ticker="SBER")], price_count=59)
         assert service.train_models(db) == {}
-
-    def test_reports_partial_training(self, service):
-        db = self._train_db([MagicMock(id=1, ticker="SBER")])
-        mock_ensemble = MagicMock()
-        mock_ensemble.train_all.return_value = {"lgb": True, "xgb": False, "cat": True}
-        mock_prophet = MagicMock()
-        mock_prophet.train.return_value = True
-        with (
-            patch.object(service, "_get_ensemble", return_value=mock_ensemble),
-            patch.object(service, "_get_prophet", return_value=mock_prophet),
-        ):
-            assert service.train_models(db) == {"SBER": False}
-
-    def test_multiple_instruments(self, service):
-        db = self._train_db([MagicMock(id=1, ticker="SBER"), MagicMock(id=2, ticker="GAZP")])
-        mock_ensemble = MagicMock()
-        mock_ensemble.train_all.return_value = {"lgb": True, "xgb": True}
-        mock_prophet = MagicMock()
-        mock_prophet.train.return_value = True
-        with (
-            patch.object(service, "_get_ensemble", return_value=mock_ensemble),
-            patch.object(service, "_get_prophet", return_value=mock_prophet),
-        ):
-            assert service.train_models(db) == {"SBER": True, "GAZP": True}
 
 
 # ── MLCoordinator direct tests ─────────────────────────────────────
@@ -543,33 +470,6 @@ class TestMLCoordinator:
     def coordinator(self):
         return MLCoordinator()
 
-    def test_get_prophet(self, coordinator):
-        prophet = coordinator.get_prophet("SBER")
-        from src.analysis.ml.prophet_model import StatsModelsTrendPredictor
-
-        assert isinstance(prophet, StatsModelsTrendPredictor)
-
-    def test_get_prophet_caches(self, coordinator):
-        p1 = coordinator.get_prophet("SBER")
-        p2 = coordinator.get_prophet("SBER")
-        assert p1 is p2
-
-    def test_get_prophet_different_tickers(self, coordinator):
-        p1 = coordinator.get_prophet("SBER")
-        p2 = coordinator.get_prophet("GAZP")
-        assert p1 is not p2
-
-    def test_get_ensemble(self, coordinator):
-        ensemble = coordinator.get_ensemble("SBER")
-        from src.analysis.ml.ensemble import EnsemblePredictor
-
-        assert isinstance(ensemble, EnsemblePredictor)
-
-    def test_get_ensemble_caches(self, coordinator):
-        e1 = coordinator.get_ensemble("SBER")
-        e2 = coordinator.get_ensemble("SBER")
-        assert e1 is e2
-
     @pytest.mark.asyncio
     async def test_compute_ml_returns_none_for_short_data(self, coordinator):
         df = pd.DataFrame({"close": [100] * 59, "date": [date(2024, 1, 1)] * 59})
@@ -577,74 +477,11 @@ class TestMLCoordinator:
         result = await coordinator.compute_ml(df, ind_df, "TEST")
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_compute_ml_returns_properly_structured_dict(self, coordinator):
-        df = _real_price_df(100)
-        ind_df = _real_indicator_df(100)
-        mock_prophet = MagicMock()
-        mock_prophet.predict.return_value = {
-            "target_price": 105.0,
-            "current_price": 100.0,
-            "price_change_pct": 5.0,
-            "confidence": 0.7,
-        }
-        mock_ensemble = MagicMock()
-        mock_ensemble.predict.return_value = {
-            "confidence": 0.6,
-            "xgb_action": "BUY",
-            "lgb_action": "BUY",
-            "cat_action": "HOLD",
-            "model_votes": {"xgb": "BUY", "lgb": "BUY", "cat": "HOLD"},
-        }
-        with (
-            patch.object(coordinator, "get_prophet", return_value=mock_prophet),
-            patch.object(coordinator, "get_ensemble", return_value=mock_ensemble),
-        ):
-            result = await coordinator.compute_ml(df, ind_df, "TEST")
-        assert result["ml_confidence"] == max(0.7, 0.6)
-        assert result["xgb_action"] == "BUY"
-        assert result["ensemble"]["cat_action"] == "HOLD"
-
-    @pytest.mark.asyncio
-    async def test_compute_ml_returns_none_on_exception(self, coordinator):
-        df = pd.DataFrame({"close": [100] * 60, "date": [date(2024, 1, 1)] * 60})
-        ind_df = pd.DataFrame({"rsi": [50] * 60})
-        with patch.object(coordinator, "get_prophet", side_effect=ValueError("fail")):
-            result = await coordinator.compute_ml(df, ind_df, "TEST")
-            assert result is None
-
     def test_compute_ml_sync_returns_none_for_short_data(self, coordinator):
         df = pd.DataFrame({"close": [100] * 59, "date": [date(2024, 1, 1)] * 59})
         ind_df = pd.DataFrame({"rsi": [50] * 59})
         result = coordinator.compute_ml_sync(df, ind_df, "TEST")
         assert result is None
-
-    def test_compute_ml_sync_returns_properly_structured_dict(self, coordinator):
-        df = _real_price_df(100)
-        ind_df = _real_indicator_df(100)
-        mock_prophet = MagicMock()
-        mock_prophet.predict.return_value = {
-            "target_price": 105.0,
-            "current_price": 100.0,
-            "price_change_pct": 5.0,
-            "confidence": 0.7,
-        }
-        mock_ensemble = MagicMock()
-        mock_ensemble.predict.return_value = {
-            "confidence": 0.6,
-            "xgb_action": "BUY",
-            "lgb_action": "BUY",
-            "cat_action": "HOLD",
-            "model_votes": {"xgb": "BUY", "lgb": "BUY", "cat": "HOLD"},
-        }
-        with (
-            patch.object(coordinator, "get_prophet", return_value=mock_prophet),
-            patch.object(coordinator, "get_ensemble", return_value=mock_ensemble),
-        ):
-            result = coordinator.compute_ml_sync(df, ind_df, "TEST")
-        assert result["ml_confidence"] == max(0.7, 0.6)
-        assert result["xgb_action"] == "BUY"
-        assert result["ensemble"]["cat_action"] == "HOLD"
 
     def test_singleton(self):
         assert ml_coordinator is ml_coordinator

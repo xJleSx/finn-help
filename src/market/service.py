@@ -261,17 +261,17 @@ class MarketService:
         return await MacroCollector.latest_values_async(self.db)
 
     async def get_sector_performance(self, days: int = 30) -> Any:
-        from src.analysis.sector import sector_analyzer
+        from src.analysis.market.sector import sector_analyzer
 
         return await sector_analyzer.compute_sector_performance_async(self.db, days=days)
 
     async def get_sector_correlation(self, days: int = 90) -> Any:
-        from src.analysis.sector import sector_analyzer
+        from src.analysis.market.sector import sector_analyzer
 
         return await sector_analyzer.compute_sector_correlation_async(self.db, days=days)
 
     async def get_sector_volatility(self, days: int = 30) -> Any:
-        from src.analysis.sector import sector_analyzer
+        from src.analysis.market.sector import sector_analyzer
 
         return await sector_analyzer.compute_sector_volatility_async(self.db, days=days)
 

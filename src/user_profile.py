@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from src.constants import RISK_PROFILES
+from src.config import RISK_PROFILES
 from src.db.connection import get_session
 from src.db.models.user import UserProfileModel
 

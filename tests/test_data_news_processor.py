@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import numpy as np
-import pytest
-
 from src.data.news_processor import NewsDeduplicator
 
 

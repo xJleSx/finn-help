@@ -14,6 +14,7 @@ from src.collectors.financials import FinancialReportCollector
 from src.collectors.moex import MOEXCollector
 from src.db.connection import get_async_session, get_session
 from src.db.models import BondCouponSchedule, BondOffering, Dividend, FinancialReport, Instrument, Price
+from src.utils import _safe_float, _safe_int
 
 from . import app
 
@@ -156,23 +157,6 @@ async def _update_ticker(moex: MOEXCollector, tk: str, itype: str = "stock") -> 
                 logger.warning("Coupon schedule fetch failed for %s: %s", tk, e)
                 await db.rollback()
 
-
-def _safe_int(val: object) -> int | None:
-    if val is None:
-        return None
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_float(val: object) -> float | None:
-    if val is None:
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
 
 
 def _parse_cpn_date(val: object) -> date | None:
@@ -326,7 +310,7 @@ def macro() -> None:
 @app.command()
 def sectors() -> None:
     """Показать распределение инструментов по секторам"""
-    from src.constants import SECTOR_NAMES
+    from src.config import SECTOR_NAMES
 
     db = get_session()
     try:

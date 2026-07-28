@@ -131,7 +131,7 @@ class ImpactMatrix:
         Returns:
             Calculated impact (0-10)
         """
-        from src.constants import SECTOR_NAME_MAP
+        from src.config import SECTOR_NAME_MAP
 
         if news_type not in self.matrix:
             news_type = "geopolitical_risk"

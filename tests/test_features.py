@@ -3,8 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-
-from src.analysis.features import (
+from src.analysis.market.features import (
     FeatureBuilder,
     _adf_pvalue,
     _bollinger_bands,

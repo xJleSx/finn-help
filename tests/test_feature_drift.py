@@ -4,8 +4,7 @@ from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from src.analysis.feature_drift import (
+from src.analysis.market.feature_drift import (
     DRIFT_THRESHOLD_DEFAULT,
     _collect_numeric_keys,
     _extract_vectors,
@@ -17,7 +16,7 @@ from src.analysis.feature_drift import (
 
 @pytest.fixture
 def mock_session():
-    with patch("src.analysis.feature_drift.get_session") as mock:
+    with patch("src.analysis.market.feature_drift.get_session") as mock:
         session = MagicMock()
         mock.return_value = session
         yield session
@@ -102,7 +101,7 @@ class TestDetectDrift:
             entries.append(_make_cache_row("AAPL", "technical", day, {"price": float(1.0 if i < 20 else 5.0)}))
         mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = entries
 
-        with patch("src.analysis.feature_drift.ks_2samp") as mock_ks:
+        with patch("src.analysis.market.feature_drift.ks_2samp") as mock_ks:
             mock_ks.return_value = (0.8, 0.001)
             result = detect_drift("technical", threshold=0.1)
             assert len(result) >= 1
@@ -116,7 +115,7 @@ class TestDetectDrift:
             entries.append(_make_cache_row("AAPL", "technical", day, {"price": float(1.0 if i < 10 else 5.0)}))
         mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = entries
 
-        with patch("src.analysis.feature_drift.ks_2samp") as mock_ks:
+        with patch("src.analysis.market.feature_drift.ks_2samp") as mock_ks:
             mock_ks.return_value = (0.5, 0.5)
             result = detect_drift("technical", threshold=0.9)
             assert result == []
@@ -128,7 +127,7 @@ class TestDetectDrift:
             entries.append(_make_cache_row("AAPL", "technical", day, {"price": float(i)}))
         mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = entries
 
-        with patch("src.analysis.feature_drift.ks_2samp", side_effect=ValueError("test")):
+        with patch("src.analysis.market.feature_drift.ks_2samp", side_effect=ValueError("test")):
             result = detect_drift("technical")
             assert result == []
 
@@ -153,9 +152,9 @@ class TestAutoHandleDrift:
         mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = entries
 
         with (
-            patch("src.analysis.feature_drift.ks_2samp") as mock_ks,
-            patch("src.analysis.feature_drift.bump_version") as mock_bump,
-            patch("src.analysis.feature_drift.invalidate") as mock_invalidate,
+            patch("src.analysis.market.feature_drift.ks_2samp") as mock_ks,
+            patch("src.analysis.market.feature_drift.bump_version") as mock_bump,
+            patch("src.analysis.market.feature_drift.invalidate") as mock_invalidate,
         ):
             mock_ks.return_value = (0.8, 0.001)
             result = auto_handle_drift("technical", threshold=0.1, max_fields_drifted=2)
@@ -172,9 +171,9 @@ class TestAutoHandleDrift:
         mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = entries
 
         with (
-            patch("src.analysis.feature_drift.ks_2samp") as mock_ks,
-            patch("src.analysis.feature_drift.bump_version") as mock_bump,
-            patch("src.analysis.feature_drift.invalidate") as mock_invalidate,
+            patch("src.analysis.market.feature_drift.ks_2samp") as mock_ks,
+            patch("src.analysis.market.feature_drift.bump_version") as mock_bump,
+            patch("src.analysis.market.feature_drift.invalidate") as mock_invalidate,
         ):
             mock_ks.return_value = (0.8, 0.001)
             auto_handle_drift("technical", threshold=0.1, max_fields_drifted=3)

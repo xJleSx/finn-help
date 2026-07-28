@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 class TestPortfolioTickers:
     @patch("src.reports.weekly_pdf.get_session")

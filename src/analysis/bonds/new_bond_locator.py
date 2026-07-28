@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 
 from src.db.models import BondCouponSchedule, BondOffering, Instrument
+from src.utils import _safe_float, _safe_int
 
 logger = structlog.get_logger(__name__)
 
@@ -295,22 +296,6 @@ def _parse_coupon_date(val: Any) -> Optional[date]:
             return date.fromisoformat(val[:10])
         except (ValueError, TypeError):
             logger.debug("Could not parse date: %s", val[:10])
-    return None
-
-
-def _safe_int(val: Any) -> Optional[int]:
-    if val is None:
-        return None
-    with contextlib.suppress(ValueError, TypeError):
-        return int(val)
-    return None
-
-
-def _safe_float(val: Any) -> Optional[float]:
-    if val is None:
-        return None
-    with contextlib.suppress(ValueError, TypeError):
-        return float(val)
     return None
 
 

@@ -378,7 +378,7 @@ async def cancel_order(order_id: int, request: Request, user: User = Depends(req
 
 @router.get("/brokers", response_model=list[dict[str, str]])
 async def list_brokers():
-    from src.constants import BROKER_NAMES
+    from src.config import BROKER_NAMES
     from src.trading.brokers.registry import get_default_broker, list_brokers
 
     brokers = []

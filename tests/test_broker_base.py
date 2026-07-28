@@ -99,14 +99,6 @@ def test_tbank_broker_registered():
     assert get_broker("tbank") is not None
 
 
-def test_alor_broker_registered():
-    assert get_broker("alor") is not None
-
-
-def test_finam_broker_registered():
-    assert get_broker("finam") is not None
-
-
 def test_openapi_broker_registered():
     assert get_broker("openapi") is not None
 

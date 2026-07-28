@@ -8,7 +8,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.analysis.metrics import compute_max_drawdown
-from src.constants import (
+from src.config import (
     BASE_POSITION_PCT,
     FUND_RISK_HIGH,
     GEO_RISK_ELEVATED,
@@ -384,15 +384,31 @@ class SignalFusionEngine:
 
         # Bond-specific scoring override
         if is_bond and bond_offering:
+            from src.analysis.bonds.rate_cycle import detect_rate_cycle
             from src.analysis.signals.bond_signals import analyze_bond
 
             key_rate = macro_context.get("key_rate") if macro_context else None
             ofz_yield = macro_context.get("ofz_10y") if macro_context else None
-            bond_signal = analyze_bond(bond_offering, key_rate=key_rate, ofz_yield=ofz_yield)
+
+            # Detect rate cycle from macro context
+            rate_cycle = None
+            if key_rate is not None:
+                rate_data = [{"date": "recent", "value": key_rate}]
+                cycle_info = detect_rate_cycle(rate_data)
+                rate_cycle = cycle_info.get("phase")
+
+            bond_signal = analyze_bond(
+                bond_offering,
+                key_rate=key_rate,
+                ofz_yield=ofz_yield,
+                rate_cycle=rate_cycle,
+            )
             bond_score = bond_signal.get("score", 0.0)
             bond_risk = bond_signal.get("risk", 0.5)
             weighted_score = bond_score * weights["fundamental"] * 2 + weighted_score * 0.5
             reasons.extend(bond_signal.get("reasons", []))
+            if bond_signal.get("rate_cycle"):
+                reasons.append(f"Цикл ставки: {bond_signal['rate_cycle'].get('label', '')}")
             if fundamental:
                 fundamental["risk"] = max(fundamental.get("risk", 0.5), bond_risk)
             else:

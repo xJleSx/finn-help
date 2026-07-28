@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.user_profile import PROFILES_DIR, RISK_PROFILES, UserProfile, UserProfileManager
+from src.user_profile import RISK_PROFILES, UserProfile, UserProfileManager
 
 
 class TestUserProfile:

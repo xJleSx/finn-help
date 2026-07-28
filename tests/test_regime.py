@@ -3,8 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-
-from src.analysis.regime import (
+from src.analysis.market.regime import (
     RegimeDetector,
     atr_percentile,
     bb_width_percentile,
@@ -27,7 +26,7 @@ def _make_ohlc_df(n=200, seed=42) -> pd.DataFrame:
 class TestTrueRange:
     def test_basic_calculation(self):
         df = _make_ohlc_df(50)
-        from src.analysis.regime import _true_range
+        from src.analysis.market.regime import _true_range
         tr = _true_range(df["high"], df["low"], df["close"])
         assert len(tr) == 50
         assert tr.iloc[0] == df["high"].iloc[0] - df["low"].iloc[0]
@@ -37,7 +36,7 @@ class TestTrueRange:
         high = pd.Series([10, 12, 15])
         low = pd.Series([8, 9, 10])
         close = pd.Series([9, 11, 14])
-        from src.analysis.regime import _true_range
+        from src.analysis.market.regime import _true_range
         tr = _true_range(high, low, close)
         assert tr.iloc[0] == 2.0
 

@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.analysis.feature_store import set_cache
+from src.analysis.market.feature_store import set_cache
 from src.db.connection import get_session
 from src.db.models import SentimentSignal
 

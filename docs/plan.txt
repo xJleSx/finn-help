@@ -1,0 +1,116 @@
+Что УБРАТЬ (over-engineering, которое ест ресурсы)
+1. Celery — полностью выпилить
+Почему: у тебя уже есть inline scheduler (src/scheduler/service.py, 489 строк). Celery дублирует его функциональность, добавляет Redis как обязательную зависимость и усложняет деплой.
+Что делать:
+Перенести 14 задач из Celery beat в scheduler/tasks.py
+Использовать Redis только для кэша и pub/sub (SSE)
+Убрать src/tasks/, celery worker, celery beat из docker-compose
+Экономия: −1 сервис в Docker, −1 зависимость, −1 точка отказа.
+2. Микро-модули анализа, которые не используются
+Что убрать:
+src/analysis/real_yield.py — не интегрирован, дублирует after_tax_yield.py
+src/analysis/fx_exposure.py — не интегрирован, портфель только в рублях
+src/analysis/onchain_sentiment.py — крипта? У тебя MOEX-only. Если нет крипты — выпилить.
+src/social/vk.py + src/social/pulse.py — если VK token невозможно получить стабильно, это мёртвый код
+Правило: если модуль не вызывается из service.py или API routes → в архив.
+3. Брокеры-заглушки (BCS, Finam, Alor)
+Почему: 3 брокера = 3 интерфейса без реализации. Это не «архитектура на будущее», это техдолг.
+Что делать:
+Оставить только BaseBroker (абстракцию) и TBankBroker (реализацию)
+BCS/Finam/Alor — удалить файлы. Когда понадобится — добавишь за 2 часа по шаблону T-Bank
+Экономия: −3 файла, −1 папка, чище код.
+4. NLQ (Natural Language Query)
+Почему: нет команды в Telegram, используется только через API. Если нет пользователей API → мёртвый код.
+Что делать:
+Выпилить src/interfaces/nlq/
+Если нужно — вернуть как /ask команда в Telegram, но сразу с Groq-роутингом, без отдельного движка
+5. ML Ensemble (CatBoost, LightGBM, XGBoost, Prophet)
+Почему: ты сам сказал — «quality неизвестен, нет A/B теста». Это не ML-продукт, это облигационный портфельный трекер.
+Что делать:
+Оставить одну модель (CatBoost — самая быстрая и предсказуемая)
+Остальные — в ml/archive/
+Или вообще заменить на простые эвристики: «если YTM > 15% и рейтинг AAA → BUY»
+Честно: для облигаций ML не нужен. YTM, рейтинг, дюрация — это детерминированные формулы. ML имеет смысл только для акций/сентимента.
+🟡 Что УПРОСТИТЬ (дублирование и сложность)
+6. Config.py + Constants.py → слить в один источник
+Проблема: «часть конфига размазана между config.py и constants.py».
+Решение:
+Python
+# src/config.py — только Pydantic BaseSettings (env vars)
+# src/constants.py — только кодовые константы (словари, пороги)
+# НЕ должно быть пересечений
+Проверка: если константа меняется при деплое → в config.py. Если она всегда одинакова → в constants.py.
+7. Analysis/ (28 файлов + 9 подпапки) → реорганизовать
+Сейчас: хаос. backtest.py в корне, bonds/ отдельно, ml/ отдельно, signals/ отдельно.
+Должно быть:
+plain
+src/analysis/
+├── bonds/          # ВСЁ про облигации (ytm, duration, tax, kelly, rebalancing)
+├── portfolio/      # Метрики портфеля (sharpe, drawdown, stress)
+├── market/         # Рыночные данные (regime, technical, sector)
+├── ml/             # Только если оставляешь CatBoost
+└── backtest.py     # Единый бэктест
+Убрать папки: anomaly/ (если не используется), inference/ (Granger causality — overkill для облигаций), fundamental/ (если это про акции, а не облигации).
+8. Telegram bot (44 файла, ~3500 строк) → упростить
+Проблемы: нет webhook, нет персистентного состояния, кнопки не работают.
+Решение:
+Убрать conversations.py (сложно, теряется при рестарте)
+Заменить на stateless команды с inline-кнопками (callback_data хранит всё состояние)
+Реализовать /buy и /sell callback handlers (это 2 часа работы, а критично)
+Пример stateless кнопки:
+Python
+# Вместо хранения диалога в RAM:
+callback_data = f"buy:{isin}:{qty}:{price}"  # всё в кнопке
+9. Scheduler (inline) → заменить на APScheduler
+Сейчас: самописный цикл с _is_time(), который может пропускать моменты.
+Решение: APScheduler (уже есть в Python ecosystem):
+Python
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+scheduler.add_job(morning_brief, 'cron', hour=9, minute=0)
+scheduler.add_job(check_contributions, 'cron', day=25, hour=10, minute=0)
+Почему: надёжнее, не пропускает, не нужен PID-lock.
+🟢 Что ДОБАВИТЬ (критичные пробелы)
+10. Таблица defaulted_bonds — MUST HAVE
+Сейчас: survivorship bias в бэктесте.
+Решение:
+sql
+CREATE TABLE defaulted_bonds (
+    isin VARCHAR(12) PRIMARY KEY,
+    default_date DATE NOT NULL,
+    recovery_rate DECIMAL(5,2),
+    rating_at_default VARCHAR(10),
+    sector VARCHAR(50),
+    prices_before_default JSONB  -- цены за 90 дней
+);
+Данные: забить вручную 50 дефолтов 2024–2025 (2 часа работы). Источники: АКРА отчёты, Cbonds.
+11. Парсер АКРА/Эксперт РА — MUST HAVE
+Сейчас: rating_checker.py работает через MOEX ISS, где credit_rating не у всех.
+Решение: отдельный collector, который раз в неделю:
+Скачивает PDF с acra-ratings.ru
+Парсит таблицу (pdfplumber или tabula-py)
+Обновляет BondOffering.credit_rating
+Альтернатива: ручное обновление раз в квартал (30 минут), но автоматизация надёжнее.
+12. fill_price_gaps() — интегрировать в пайплайн
+Сейчас: функция написана, но не вызывается.
+Решение: в moex.py после получения истории:
+Python
+df = fetch_history(...)
+df = fill_price_gaps(df, max_gap_days=5)
+save_to_db(df)
+13. Feature flags — для A/B и безопасного деплоя
+Сейчас: включение/выключение через .env, но нет гибкости.
+Решение: простая таблица в БД:
+sql
+CREATE TABLE feature_flags (
+    name VARCHAR(50) PRIMARY KEY,
+    enabled BOOLEAN DEFAULT false,
+    rollout_pct INTEGER DEFAULT 100  -- для постепенного включения
+);
+Зачем: можно включить новый purchase_planner для 10% пользователей, проверить, не сломалось.
+14. Тесты на notification modules — MUST HAVE
+Сейчас: 7 модулей, 0 тестов.
+Минимум: по 1 тесту на каждый модуль (happy path):
+morning_brief → проверить, что не падает с пустым портфелем
+calendar_checker → проверить, что находит купон через 3 дня
+drawdown_checker → проверить, что не шлёт ложный алерт при рыночном падении

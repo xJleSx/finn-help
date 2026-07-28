@@ -88,6 +88,7 @@ def test_traced_decorator_error_sets_status():
 def test_middleware_captures_method_and_path():
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+
     from src.core.observability.tracing import AsyncTraceMiddleware
 
     mock_span = MagicMock()
@@ -124,6 +125,7 @@ def test_middleware_sets_status_code():
     from fastapi import FastAPI
     from fastapi.responses import JSONResponse
     from fastapi.testclient import TestClient
+
     from src.core.observability.tracing import AsyncTraceMiddleware
 
     mock_span = MagicMock()
@@ -294,11 +296,11 @@ def test_module_exports():
         inject_trace_context,
         setup_metrics,
         setup_tracing,
+        traced,
         track_error,
         track_inference,
         track_signal,
         track_trade,
-        traced,
     )
 
     assert callable(setup_tracing)

@@ -185,6 +185,7 @@ class TestLogin:
 
     async def test_login_rate_limited(self, auth_service, mock_db):
         from datetime import datetime, timezone
+
         from src.core.auth_service import _LOGIN_ATTEMPTS
         now = datetime.now(timezone.utc).timestamp()
         _LOGIN_ATTEMPTS["testuser"] = [now] * 5

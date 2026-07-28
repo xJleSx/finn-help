@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
-
-from src.analysis.sector import SectorAnalyzer
+from src.analysis.market.sector import SectorAnalyzer
 
 
 class TestSectorAnalyzer:

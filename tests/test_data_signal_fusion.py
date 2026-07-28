@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from src.data.signal_fusion_integration import SignalFusionIntegration
 
 

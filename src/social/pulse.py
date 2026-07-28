@@ -7,8 +7,10 @@ from typing import Any, cast
 
 import httpx
 
+from src.notifications.retry import retry_async
 from src.social.base import RawPost, SocialDataSource
-from src.social.utils import async_retry, clean_text, extract_tickers
+from src.social.utils import extract_tickers
+from src.utils import clean_text
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ class PulseAdapter(SocialDataSource):
         )
         self._last_request_time: float = 0.0
 
-    @async_retry(max_attempts=3, base_delay=2.0)
+    @retry_async(max_attempts=3, base_delay=2.0)
     async def fetch_posts(self, since: datetime | None = None) -> list[RawPost]:
         all_posts: list[RawPost] = []
         for nick in self._authors:
@@ -126,7 +128,7 @@ class PulseAdapter(SocialDataSource):
         logger.info("Pulse: collected %d posts from @%s", len(result), author_nick)
         return result
 
-    @async_retry(max_attempts=3, base_delay=2.0)
+    @retry_async(max_attempts=3, base_delay=2.0)
     async def fetch_author_stats(self, author_nick: str) -> dict[str, Any] | None:
         await self._rate_limit()
         try:

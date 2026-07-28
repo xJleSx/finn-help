@@ -80,7 +80,7 @@ EVENT_PATTERNS: list[dict[str, Any]] = [
 ]
 
 # Sector sensitivity to geopolitical subcategories
-from src.constants import SECTOR_NAME_MAP
+from src.config import SECTOR_NAME_MAP
 
 SECTOR_GEO_SENSITIVITY: dict[str, dict[str, float]] = {
     "energy": {"sanctions": 1.4, "conflict": 1.3, "trade_war": 1.2, "diplomacy": 0.8},

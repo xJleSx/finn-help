@@ -133,6 +133,79 @@ export async function getBondAnalysis(ticker: string): Promise<BondAnalysis> {
       ],
       allocation: 18,
       updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      rateCycleAdvice: {
+        phase: "hiking",
+        label: "Повышение",
+        description: "Цикл повышения ключевой ставки — флоатеры и короткие облигации предпочтительны",
+        confidence: 0.85,
+        ruoniaSpreadBps: 75,
+        ofzShortYield: 16.5,
+        cbrRhetoric: "Жёсткий сигнал",
+        recommendation: {
+          preferred_duration: "short (< 2 years)",
+          preferred_coupon_type: "floating",
+          strategy: "Флоатеры, короткие облигации, депозиты",
+        },
+        bondFit: "Отлично подходит — флоатер защищает от роста ставок",
+      },
+      defaultImpact: {
+        positionSeverity: "low",
+        positionValue: 24687.5,
+        portfolioValue: 246875,
+        rating: "AAA",
+        ytm: 16.7,
+        potentialLoss: 493.75,
+        lossPct: 2.0,
+      },
+      afterTaxYield: {
+        ytmGross: 16.7,
+        ytmAfterCouponTax: 14.53,
+        ytmAfterCosts: 14.20,
+        realYield: 7.70,
+        inflationForecast: 6.5,
+        brokerCommissionPct: 0.06,
+        ldvEligible: true,
+      },
+      liquidity: {
+        liquidityScore: "high",
+        liquidityPct: 85,
+        warnings: [],
+      },
+      realYield: {
+        ytmGross: 16.7,
+        realYield: 7.70,
+        chain: [
+          { step: "YTM (gross)", value: 16.7, delta: 0 },
+          { step: "Налог на купон (13%)", value: 14.53, delta: -2.17 },
+          { step: "Комиссия брокера + MOEX", value: 14.20, delta: -0.06 },
+          { step: "Инфляция", value: 7.70, delta: -6.50 },
+        ],
+      },
+      putOption: {
+        hasPut: false,
+        putValue: 0,
+        protectionPct: 0,
+      },
+      kellySizer: {
+        kellyFraction: 0.0,
+        cappedFraction: 0.0,
+        suggestedAmount: 0,
+        notes: ["Премия за риск отсутствует — не использовать"],
+      },
+      ldvEligibility: {
+        ldvEligible: true,
+        reasons: ["ЛДВ применима: ОФЗ + 3+ года + брокерский счёт"],
+      },
+      spreadInfo: {
+        spreadPct: 0.08,
+        maxAcceptable: 3.0,
+      },
+      portfolioContext: {
+        recommendedAllocationPct: 25,
+        investmentHorizon: "3-5 лет",
+        suitableForSmallPortfolio: "Да — высокий рейтинг, подходит для малого портфеля",
+        rateCycleFit: "hiking",
+      },
     };
   }
   const res = await fetch(`/api/proxy/instruments/${ticker}/analysis`);

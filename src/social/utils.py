@@ -1,49 +1,10 @@
-import asyncio
 import logging
 import re
-from functools import wraps
-from typing import Any, Callable, TypeVar
 
-F = TypeVar("F", bound=Callable[..., Any])
+from src.notifications.retry import retry_async  # noqa: F401
+from src.utils import clean_text  # noqa: F401
 
 logger = logging.getLogger(__name__)
-
-
-def async_retry(max_attempts: int = 3, base_delay: float = 1.0, backoff: float = 2.0) -> Callable[[F], F]:
-    def decorator(func: F) -> F:
-        @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_exc: Exception | None = None
-            for attempt in range(max_attempts):
-                try:
-                    return await func(*args, **kwargs)
-                except Exception as e:
-                    last_exc = e
-                    if attempt < max_attempts - 1:
-                        delay = base_delay * (backoff**attempt)
-                        logger.warning(
-                            "%s attempt %d/%d failed: %s, retry in %.1fs",
-                            func.__name__,
-                            attempt + 1,
-                            max_attempts,
-                            e,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-            raise last_exc
-
-        return wrapper
-
-    return decorator
-
-
-def clean_text(text: str, max_length: int = 2000) -> str:
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"@\w+", "", text)
-    text = re.sub(r"https?://\S+", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:max_length]
-
 
 _KNOWN_TICKERS: set[str] | None = None
 _FALLBACK_TICKERS = {"SBER", "GAZP", "LKOH", "YNDX", "TATN", "VTBR", "ROSN", "NVTK", "MOEX"}

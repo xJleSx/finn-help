@@ -14,6 +14,7 @@ import { PriceChartCard } from "@/features/bonds/components/details/PriceChartCa
 import { CouponHistoryCard } from "@/features/bonds/components/details/CouponHistoryCard";
 import { CashFlowCard } from "@/features/bonds/components/details/CashFlowCard";
 import { AIAnalysisCard } from "@/features/bonds/components/details/AIAnalysisCard";
+import AnalyticsDetailCard from "@/features/bonds/components/details/AnalyticsDetailCard/AnalyticsDetailCard";
 import { CardErrorBoundary } from "@/features/bonds/components/details/ErrorBoundary";
 
 import AISummarySkeleton from "@/features/bonds/components/details/skeleton/AISummarySkeleton";
@@ -103,6 +104,12 @@ export default function BondDetailPage({ params }: { params: Promise<{ ticker: s
           ) : null}
         </CardErrorBoundary>
       </div>
+
+      <CardErrorBoundary name="Расширенный анализ">
+        {analysis && (
+          <AnalyticsDetailCard analysis={analysis} />
+        )}
+      </CardErrorBoundary>
     </main>
   );
 }

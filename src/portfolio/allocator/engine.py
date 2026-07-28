@@ -6,7 +6,7 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.constants import (
+from src.config import (
     ALLOCATOR_CAPITAL_TIERS,
     ALLOCATOR_LEFTOVER_MIN_ABS,
     ALLOCATOR_LEFTOVER_THRESHOLD,
@@ -664,7 +664,7 @@ class PortfolioAllocator:
                 score += 0.5
                 reason_parts.append("уже в портфеле")
 
-            from src.analysis.correlation import correlation as corr_analyzer
+            from src.analysis.market.correlation import correlation as corr_analyzer
 
             penalty = await corr_analyzer.diversification_penalty_async(c["ticker"], existing_tickers_list, db)
             if penalty > 0:
@@ -781,7 +781,7 @@ class PortfolioAllocator:
         if not candidates:
             return []
 
-        from src.analysis.correlation import correlation as corr_analyzer
+        from src.analysis.market.correlation import correlation as corr_analyzer
 
         return self._score_candidates_core(
             candidates,

@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from src.constants import NEWS_SENTIMENT_DAYS
+from src.config import NEWS_SENTIMENT_DAYS
 from src.db.models import News
 
 logger = logging.getLogger(__name__)
