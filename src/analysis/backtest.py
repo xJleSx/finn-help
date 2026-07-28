@@ -1,10 +1,13 @@
 import logging
+import random
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Optional, cast
 
 import numpy as np
 
 from src.analysis.metrics import compute_calmar, compute_max_drawdown, compute_sharpe, compute_sortino
+from src.constants import DEFAULT_PROBABILITY_BY_RATING
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
 from src.portfolio.allocator import allocator
@@ -15,6 +18,89 @@ SLIPPAGE_BPS = 5  # 0.05% slippage per trade
 COMMISSION_PCT = 0.0004  # 0.04% broker commission
 COMMISSION_FIXED = 0.0  # no fixed commission
 REBALANCE_THRESHOLD = 0.05  # 5% drift triggers rebalance
+
+MONTHLY_CPI: dict[str, float] = {
+    "2024-01": 0.074, "2024-02": 0.076, "2024-03": 0.077,
+    "2024-04": 0.078, "2024-05": 0.081, "2024-06": 0.084,
+    "2024-07": 0.086, "2024-08": 0.087, "2024-09": 0.088,
+    "2024-10": 0.086, "2024-11": 0.085, "2024-12": 0.083,
+    "2025-01": 0.091, "2025-02": 0.095, "2025-03": 0.098,
+    "2025-04": 0.099, "2025-05": 0.098, "2025-06": 0.097,
+    "2025-07": 0.096, "2025-08": 0.095, "2025-09": 0.093,
+    "2025-10": 0.091, "2025-11": 0.089, "2025-12": 0.088,
+    "2026-01": 0.088, "2026-02": 0.089, "2026-03": 0.090,
+    "2026-04": 0.091, "2026-05": 0.090, "2026-06": 0.089,
+    "2026-07": 0.088,
+}
+
+
+def _cpi_for_month(year: int, month: int) -> float:
+    key = f"{year:04d}-{month:02d}"
+    return MONTHLY_CPI.get(key, 0.08)
+
+
+def real_return_adjustment(nominal_return: float, start_date: date, end_date: date) -> float:
+    cpi_start = _cpi_for_month(start_date.year, start_date.month)
+    cpi_end = _cpi_for_month(end_date.year, end_date.month)
+    inflation_factor = (1 + cpi_end) / (1 + cpi_start)
+    return (1 + nominal_return) / inflation_factor - 1
+
+
+DEFAULTED_BONDS_SYNTHETIC: list[dict[str, Any]] = [
+    {"ticker": "RU000A1066A4", "default_date": "2024-03-15", "recovery": 0.25, "rating": "BB", "sector": "retail"},
+    {"ticker": "RU000A105Y89", "default_date": "2024-06-01", "recovery": 0.30, "rating": "B", "sector": "construction"},
+    {"ticker": "RU000A1067A3", "default_date": "2024-09-10", "recovery": 0.20, "rating": "CCC", "sector": "retail"},
+    {"ticker": "RU000A1068A2", "default_date": "2025-01-20", "recovery": 0.35, "rating": "BB+", "sector": "real_estate"},
+]
+
+
+def inject_synthetic_defaults(
+    positions: list[dict[str, Any]],
+    current_date: date,
+    rating_field: str = "rating",
+) -> list[dict[str, Any]]:
+    result = list(positions)
+    for i, pos in enumerate(positions):
+        rating = (pos.get(rating_field) or "NR").upper()
+        p_default = 1.0 - DEFAULT_PROBABILITY_BY_RATING.get(rating, 0.90)
+        if random.random() < p_default:  # noqa: S311
+            recovery = 0.35
+            result[i] = dict(pos)
+            result[i]["defaulted"] = True
+            result[i]["recoveryRate"] = recovery
+            result[i]["value"] = pos.get("value", 0) * recovery
+            logger.info("Synthetic default injected for %s (rating=%s, recovery=%.0f%%)", pos.get("ticker", "?"), rating, recovery * 100)
+    return result
+
+
+def bond_stop_loss_trigger(
+    ticker: str,
+    current_price: float,
+    entry_price: float,
+    current_ytm: Optional[float] = None,
+    entry_ytm: Optional[float] = None,
+    rating_downgrade: int = 0,
+    instrument_type: str = "stock",
+) -> Optional[str]:
+    if instrument_type != "bond":
+        pnl_pct = (current_price - entry_price) / entry_price if entry_price > 0 else 0
+        if pnl_pct <= -0.05:
+            return "stop_loss"
+        if pnl_pct >= 0.10:
+            return "take_profit"
+        return None
+
+    price_drop = (current_price - entry_price) / entry_price if entry_price > 0 else 0
+
+    if rating_downgrade >= 2:
+        return "rating_downgrade"
+
+    if price_drop < -0.15:
+        ytm_change = (current_ytm or 0) - (entry_ytm or 0)
+        if ytm_change < 0.01:
+            return "default_risk_stop"
+
+    return None
 
 
 @dataclass
@@ -70,6 +156,8 @@ class BacktestResult:
     total_slippage: float = 0.0
     monte_carlo: Optional[MonteCarloResult] = None
     regime: Optional[RegimeInfo] = None
+    _start_date: Optional[date] = None
+    _end_date: Optional[date] = None
 
     def add_snapshot(self, date_str: str, port_ret: float, bench_ret: float) -> None:
         self.dates.append(date_str)
@@ -134,6 +222,13 @@ class BacktestResult:
         losses = abs(sum(r for r in self.portfolio_returns if r < 0))
         return wins / losses if losses > 0 else float("inf")
 
+    @property
+    def inflation_adjusted_return(self) -> float:
+        ret = self.portfolio_return
+        if not self._start_date or not self._end_date:
+            return ret
+        return real_return_adjustment(ret, self._start_date, self._end_date)
+
     def summary(self) -> str:
         text = (
             f"📊 *Результат бэктеста*\n\n"
@@ -148,6 +243,7 @@ class BacktestResult:
             f"📊 Периодов: {len(self.dates)}\n"
             f"🎯 Win Rate: {self.win_rate:.1%}\n"
             f"📈 Фактор прибыли: {self.profit_factor:.2f}\n"
+            f"📊 Реальная доходность (с поправкой на инфляцию): {self.inflation_adjusted_return:+.1%}\n"
             f"💸 Комиссии: {self.total_commission:,.0f} ₽\n"
             f"⚡ Проскальзывание: {self.total_slippage:,.0f} ₽\n"
         )
@@ -307,8 +403,6 @@ def backtest_allocation(
 
         result.positions = picks[: config.max_positions]
         portfolio_prices: dict[str, list[float]] = {}
-        portfolio_highs: dict[str, list[float]] = {}
-        portfolio_lows: dict[str, list[float]] = {}
         for p in result.positions:
             prices = (
                 db.query(Price)
@@ -318,12 +412,8 @@ def backtest_allocation(
                 .all()
             )
             vals = [cast(float, x.close) for x in reversed(prices) if x.close]
-            highs = [cast(float, x.high) for x in reversed(prices) if x.high]
-            lows = [cast(float, x.low) for x in reversed(prices) if x.low]
             if vals:
                 portfolio_prices[p["ticker"]] = vals
-                portfolio_highs[p["ticker"]] = highs if len(highs) == len(vals) else vals
-                portfolio_lows[p["ticker"]] = lows if len(lows) == len(vals) else vals
 
         if not portfolio_prices or len(benchmark_vals) < 20:
             logger.warning("Not enough historical data for backtest")
@@ -342,12 +432,22 @@ def backtest_allocation(
         entry_prices: dict[str, float] = {}
         stopped_out: dict[str, bool] = {}
         last_rebalance_day = 0
+        defaulted_bonds: dict[str, float] = {}
+        entry_ytm: dict[str, float] = {}
+        start_date: Optional[date] = None
 
         for p in result.positions:
             t = p["ticker"]
             if t in portfolio_prices and portfolio_prices[t]:
                 entry_prices[t] = portfolio_prices[t][0]
                 stopped_out[t] = False
+                entry_ytm[t] = p.get("ytm", 0.0)
+
+        position_instrument_types: dict[str, str] = {}
+        for p in result.positions:
+            t = p["ticker"]
+            inst = db.query(Instrument.instrument_type).filter(Instrument.id == p["id"]).scalar()
+            position_instrument_types[t] = inst or "stock"
 
         for i in range(1, min_len):
             port_ret = 0.0
@@ -359,23 +459,63 @@ def backtest_allocation(
             if config.rebalance_frequency_days > 0 and (i - last_rebalance_day) >= config.rebalance_frequency_days:
                 should_rebalance = True
 
+            if start_date is None:
+                price_rec = db.query(Price).join(Instrument).filter(Instrument.ticker.in_(tickers_with_prices)).first()
+                if price_rec:
+                    start_date = price_rec.date
+                    if isinstance(start_date, str):
+                        from datetime import datetime as dt
+                        start_date = dt.strptime(start_date, "%Y-%m-%d").date()
+
+            current_positions = []
             for ticker in tickers_with_prices:
                 if stopped_out.get(ticker, False):
+                    continue
+                if ticker in defaulted_bonds:
                     continue
                 vals = portfolio_prices[ticker]
                 if i >= len(vals):
                     continue
-                high = portfolio_highs.get(ticker, vals)[i]
-                low = portfolio_lows.get(ticker, vals)[i]
+                current_positions.append({
+                    "ticker": ticker,
+                    "value": vals[i] * weight_map.get(ticker, 0),
+                    "rating": next((p.get("rating", "NR") for p in result.positions if p["ticker"] == ticker), "NR"),
+                })
+
+            updated_positions = inject_synthetic_defaults(current_positions, start_date or date.today())
+            for up in updated_positions:
+                if up.get("defaulted"):
+                    defaulted_bonds[up["ticker"]] = up.get("recoveryRate", 0.35)
+                    weight_map[up["ticker"]] = 0.0
+                    logger.info("Synthetic default for %s, removed from portfolio", up["ticker"])
+
+            for ticker in tickers_with_prices:
+                if stopped_out.get(ticker, False):
+                    continue
+                if ticker in defaulted_bonds:
+                    continue
+                vals = portfolio_prices[ticker]
+                if i >= len(vals):
+                    continue
                 prev_close = vals[i - 1]
                 curr_close = vals[i]
                 gross_ret = (curr_close - prev_close) / prev_close
 
                 ep = entry_prices.get(ticker, vals[0])
-                sl_result = _check_stop_take(curr_close, ep, high, low, config.stop_loss_pct, config.take_profit_pct)
+                inst_type = position_instrument_types.get(ticker, "stock")
+                rating_change = 0
+                sl_result = bond_stop_loss_trigger(
+                    ticker=ticker,
+                    current_price=curr_close,
+                    entry_price=ep,
+                    current_ytm=entry_ytm.get(ticker),
+                    entry_ytm=entry_ytm.get(ticker),
+                    rating_downgrade=rating_change,
+                    instrument_type=inst_type,
+                )
                 if sl_result is not None:
                     stopped_out[ticker] = True
-                    gross_ret = min(gross_ret, 0.0) if sl_result == "stop_loss" else max(gross_ret, 0.0)
+                    gross_ret = min(gross_ret, 0.0) if sl_result in ("stop_loss", "default_risk_stop") else max(gross_ret, 0.0)
                     should_rebalance = True
 
                 w = weight_map.get(ticker, 0.0)
@@ -456,6 +596,22 @@ def backtest_allocation(
         bench_prices = np.array(benchmark_vals[:min_len])
         bench_returns = (bench_prices[1:] - bench_prices[:-1]) / bench_prices[:-1]
         result.regime = detect_regime(bench_returns)
+
+        end_date = start_date
+        if result.dates:
+            try:
+                from datetime import datetime as dt
+                last_idx = int(result.dates[-1])
+                if price_rec:
+                    end_date = price_rec.date
+                    if isinstance(end_date, str):
+                        end_date = dt.strptime(end_date, "%Y-%m-%d").date()
+                    from datetime import timedelta
+                    end_date = end_date + timedelta(days=last_idx)
+            except (ValueError, TypeError):
+                pass
+        result._start_date = start_date
+        result._end_date = end_date
 
         return result
     finally:
