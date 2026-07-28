@@ -367,6 +367,76 @@ async def get_bond_analysis(ticker: str, db: AsyncSession = Depends(get_db)) -> 
     else:
         verdict = "sell"
 
+    # ── Extended analytics ────────────────────────────────────────────────
+    from src.analysis.bonds.after_tax_yield import calc_after_tax_yield
+    from src.analysis.bonds.default_risk_analyzer import get_default_impact_for_position
+    from src.analysis.bonds.dynamic_spread_filter import estimate_spread
+    from src.analysis.bonds.inflation_fetcher import get_inflation_forecast
+    from src.analysis.bonds.kelly_position_sizer import kelly_speculative_size
+    from src.analysis.bonds.liquidity_analyzer import analyze_liquidity
+    from src.analysis.bonds.put_option_valuator import valuate_put_option
+    from src.analysis.bonds.rate_cycle import detect_rate_cycle, get_rate_cycle_recommendation
+    from src.analysis.bonds.real_yield import real_yield_chain
+    from src.analysis.bonds.tax_calculator_ldv import check_ldv_eligibility
+
+    rate_cycle = detect_rate_cycle()
+    rate_cycle_rec = get_rate_cycle_recommendation(rate_cycle.get("phase", "stable"))
+
+    nominal = offering.nominal_price or inst.nominal or 1000
+    price_pct = offering.current_price_pct or 100.0
+    market_price = nominal * price_pct / 100.0
+
+    ytm = offering.yield_to_maturity or 0
+    years_to_mat = (offering.maturity_date - date.today()).days / 365.25 if offering.maturity_date else 1.0
+
+    liquidity = analyze_liquidity(
+        ticker=ticker,
+        value_today=None,
+        rating=offering.credit_rating,
+    )
+
+    spread_info = estimate_spread(
+        ticker=ticker,
+        rating=offering.credit_rating,
+    )
+
+    inflation = get_inflation_forecast(
+        official_rate=rate_cycle.get("keyRate"),
+    )
+
+    after_tax = calc_after_tax_yield(
+        ytm_gross=ytm,
+        clean_price=price_pct,
+        accrued_interest=0,
+        nominal=nominal,
+        inflation_forecast=inflation.get("inflationForecast"),
+        years_to_maturity=years_to_mat,
+        ldv_eligible=bool(offering.bond_type == "ofz" or inst.ticker.startswith("SU")),
+    )
+
+    put_val = valuate_put_option(
+        has_offer=bool(offering.offer_date),
+        modified_duration=offering.duration_years,
+        years_to_maturity=years_to_mat,
+        years_to_put=offering.duration_years / 2 if offering.offer_date else None,
+        coupon_rate=offering.coupon_rate,
+        ytm=ytm,
+        rate_cycle_phase=rate_cycle.get("phase", "stable"),
+    )
+
+    kelly = kelly_speculative_size(
+        rating=offering.credit_rating or "NR",
+        ytm_speculative=ytm,
+        ytm_risk_free=8.0,
+        portfolio_value=market_price * 10,
+    )
+
+    ldv = check_ldv_eligibility(
+        is_ofz=(offering.bond_type == "ofz" or inst.ticker.startswith("SU")),
+        purchase_date="",
+        account_type="broker",
+    )
+
     return {
         "score": score,
         "verdict": verdict,
@@ -375,7 +445,103 @@ async def get_bond_analysis(ticker: str, db: AsyncSession = Depends(get_db)) -> 
         "risks": risks,
         "allocation": allocation,
         "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "rateCycleAdvice": {
+            "phase": rate_cycle.get("phase"),
+            "label": rate_cycle.get("label"),
+            "description": rate_cycle.get("description"),
+            "confidence": rate_cycle.get("confidence"),
+            "ruoniaSpreadBps": rate_cycle.get("ruoniaSpreadBps"),
+            "ofzShortYield": rate_cycle.get("ofzShortYield"),
+            "cbrRhetoric": rate_cycle.get("cbrRhetoric"),
+            "recommendation": rate_cycle_rec,
+            "bondFit": _rate_cycle_bond_fit(
+                rate_cycle.get("phase", "stable"),
+                offering.duration_years,
+                offering.coupon_type,
+            ),
+        },
+        "defaultImpact": get_default_impact_for_position(
+            position_value=market_price,
+            portfolio_value=market_price * 10,
+            rating=offering.credit_rating,
+            ytm=ytm,
+        ),
+        "afterTaxYield": after_tax,
+        "liquidity": liquidity,
+        "realYield": real_yield_chain(
+            ytm_gross=ytm,
+            clean_price=price_pct,
+            nominal=nominal,
+            inflation_forecast=inflation.get("inflationForecast"),
+            years_to_maturity=years_to_mat,
+            ticker=ticker,
+            rating=offering.credit_rating,
+        ),
+        "putOption": put_val,
+        "kellySizer": kelly,
+        "ldvEligibility": ldv,
+        "spreadInfo": spread_info,
+        "portfolioContext": {
+            "recommendedAllocationPct": allocation,
+            "investmentHorizon": _suggest_horizon(offering.duration_years, offering.maturity_date),
+            "suitableForSmallPortfolio": _suitable_for_small(offering.credit_rating),
+            "rateCycleFit": rate_cycle.get("phase", "stable"),
+        },
     }
+
+
+def _rate_cycle_bond_fit(
+    phase: str,
+    duration_years: float | None,
+    coupon_type: str | None,
+) -> str:
+    if phase == "cutting":
+        if duration_years and duration_years > 5:
+            return "Отлично подходит — длинная облигация выигрывает от снижения ставки"
+        if duration_years and duration_years > 3:
+            return "Хорошо подходит — умеренная дюрация даст прирост цены"
+        return "Нейтрально — короткая дюрация не даст прироста цены"
+    if phase == "hiking":
+        ct = (coupon_type or "").lower()
+        if ct in ("float", "floating", "floater"):
+            return "Отлично подходит — флоатер защищает от роста ставок"
+        if duration_years and duration_years < 2:
+            return "Хорошо подходит — короткая дюрация минимально реагирует на рост ставок"
+        if duration_years and duration_years > 5:
+            return "Плохо подходит — длинная фиксированная облигация упадёт в цене"
+    return "Нейтрально — стандартные условия"
+
+
+def _suggest_horizon(duration_years: float | None, maturity_date: date | None) -> str:
+    if duration_years:
+        if duration_years > 5:
+            return "5+ лет"
+        if duration_years > 3:
+            return "3-5 лет"
+        if duration_years > 1:
+            return "1-3 года"
+        return "до 1 года"
+    if maturity_date:
+        days = (maturity_date - date.today()).days
+        if days > 1825:
+            return "5+ лет"
+        if days > 1095:
+            return "3-5 лет"
+        if days > 365:
+            return "1-3 года"
+        return "до 1 года"
+    return "3-5 лет"
+
+
+def _suitable_for_small(rating: str | None) -> str:
+    if not rating:
+        return "Не определено"
+    r = rating.upper()
+    if r in ("AAA", "AA+", "AA", "AA-"):
+        return "Да — высокий рейтинг, подходит для малого портфеля"
+    if r in ("A+", "A", "A-", "BBB+", "BBB", "BBB-"):
+        return "С осторожностью — инвестиционный уровень, но проверьте долю в портфеле"
+    return "Нет — спекулятивный рейтинг, не рекомендуется для малого портфеля"
 
 
 @router.get("/api/instruments/{ticker}/ai-analysis", response_model=BondAIAnalysisResponse)
