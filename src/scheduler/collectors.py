@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from src.collectors.cbr import CBRCollector
 from src.collectors.moex import MOEXCollector
 from src.collectors.news import NewsCollector
-from src.constants import (
+from src.config import (
     DEFAULT_HISTORY_DAYS,
     DIVIDEND_CHECK_DAYS,
     NEWS_MAX_PER_FEED,
@@ -387,11 +387,12 @@ async def compute_geo_risk(db: AsyncSession, news_list: list[dict[str, Any]]) ->
         db, GeoRiskScore,
         [{
             "date": today,
+            "country": "global",
             "score": risk["score"],
             "components_json": dict(risk.get("components") or {}),
             "sources_json": {"sentiment_divergence": sent, "news_count": len(news_list)},
         }],
-        conflict_columns=["date"],
+        conflict_columns=["date", "country"],
         update_columns=["score", "components_json", "sources_json"],
     )
     await db.commit()

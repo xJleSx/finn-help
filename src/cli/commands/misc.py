@@ -34,9 +34,9 @@ def bot() -> None:
 @app.command()
 def scheduler() -> None:
     """Запустить фоновый scheduler (обновление каждый час)"""
-    from src.scheduler.service import run_forever
+    from src.scheduler.service import start
 
-    asyncio.run(run_forever())
+    asyncio.run(start())
 
 
 @paper_app.command()

@@ -31,7 +31,7 @@ from src.interfaces.api.routes.trading_v2 import router as trading_v2_router
 from src.interfaces.api.routes_instruments import router as instruments_router
 from src.interfaces.api.routes_market import router as market_router
 from src.interfaces.api.routes_portfolio import router as portfolio_router
-from src.scheduler.service import run_forever
+from src.scheduler.service import start as start_scheduler
 from src.scheduler.service import stop as stop_scheduler
 
 PRODUCTION = os.getenv("FINN_ENV", "").lower() == "production"
@@ -59,17 +59,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.warning("db_migration_failed", error=str(e))
     setup_sentry()
     logger.info("startup.trade_mode", mode="DRY_RUN" if not settings.enable_trading else "AUTO")
-    scheduler_task = asyncio.create_task(run_forever())
+    start_scheduler()
     yield
     logger.info("shutdown.stopping_scheduler")
     stop_scheduler()
-    scheduler_task.cancel()
-    try:
-        await asyncio.wait_for(scheduler_task, timeout=10.0)
-    except asyncio.CancelledError:
-        pass
-    except asyncio.TimeoutError:
-        logger.warning("shutdown.scheduler_timeout")
 
     loop = asyncio.get_running_loop()
     try:

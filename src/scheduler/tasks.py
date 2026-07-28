@@ -181,6 +181,6 @@ async def train_models_background() -> None:
 
 
 async def clear_stale_feature_cache_background() -> None:
-    from src.analysis.feature_store import clear_stale
+    from src.analysis.market.feature_store import clear_stale
     count = clear_stale(max_age_days=7)
     logger.info("Cleared %d stale feature cache entries", count)

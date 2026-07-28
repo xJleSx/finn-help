@@ -48,9 +48,9 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         components["instruments"] = None
 
     try:
-        from src.scheduler.service import _running
+        from src.scheduler.service import is_running
 
-        components["scheduler_running"] = _running
+        components["scheduler_running"] = is_running()
     except Exception:
         logger.exception("Unhandled exception")
         components["scheduler_running"] = None
