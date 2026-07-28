@@ -1,5 +1,3 @@
-import src.trading.brokers.alor  # noqa: F401
-import src.trading.brokers.finam  # noqa: F401
 import src.trading.brokers.openapi  # noqa: F401
 import src.trading.brokers.tbank  # noqa: F401
 from src.trading.brokers.base import BaseBrokerClient, BrokerAccount, BrokerOrderResult, BrokerPosition

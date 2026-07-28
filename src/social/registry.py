@@ -32,12 +32,7 @@ class SocialRegistry:
 
             self.register(PulseAdapter(authors=pulse_cfg["authors"]))
 
-        vk_cfg = cfg.get("vk", {})
-        if vk_cfg.get("enabled"):
-            group_ids = vk_cfg.get("group_ids")
-            from src.social.vk import VKAdapter
 
-            self.register(VKAdapter(group_ids=group_ids))
 
 
 registry = SocialRegistry()

@@ -15,15 +15,11 @@ _default_broker: str = "tbank"
 
 _BROKER_TOKEN_ATTRS: dict[str, str] = {
     "tbank": "tinkoff_token",
-    "bcs": "bcs_refresh_token",
-    "finam": "finam_token",
-    "alor": "alor_token",
     "openapi": "openapi_token",
 }
 
 _BROKER_SANDBOX_ATTRS: dict[str, str] = {
     "tbank": "tinkoff_sandbox",
-    "bcs": "bcs_sandbox",
 }
 
 
