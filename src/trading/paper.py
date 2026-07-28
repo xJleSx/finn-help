@@ -71,7 +71,7 @@ class PaperState:
         for t, pos in self.positions.items():
             price = prices.get(t, pos.avg_price)
             pos_value += pos.quantity * price
-        for t, pos in self.short_positions.items():
+        for t, pos in self.short_positions.items():  # type: ignore[assignment]
             price = prices.get(t, pos.avg_price)
             short_value += pos.quantity * price
         return self.balance + pos_value - short_value

@@ -126,7 +126,7 @@ def start() -> AsyncIOScheduler:
     sched.add_job(_smart_rules, CronTrigger(minute="*/30"), id="smart_rules", replace_existing=True)
 
     # Retry receipts every 60 min
-    sched.add_job(_retry_receipts, CronTrigger(minute="*/60"), id="retry_receipts", replace_existing=True)
+    sched.add_job(_retry_receipts, CronTrigger(hour="*"), id="retry_receipts", replace_existing=True)
 
     sched.start()
     scheduler = sched

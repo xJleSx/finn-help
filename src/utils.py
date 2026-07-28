@@ -10,7 +10,7 @@ def _safe_int(val: object) -> int | None:
     if val is None:
         return None
     try:
-        return int(val)
+        return int(val)  # type: ignore[call-overload]
     except (ValueError, TypeError):
         return None
 
@@ -19,7 +19,7 @@ def _safe_float(val: object) -> float | None:
     if val is None:
         return None
     try:
-        return float(val)
+        return float(val)  # type: ignore[arg-type]
     except (ValueError, TypeError):
         return None
 
