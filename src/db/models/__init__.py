@@ -1,5 +1,6 @@
 from src.db.models.audit import AuditLog
 from src.db.models.base import Base
+from src.db.models.defaulted_bond import DefaultedBond
 from src.db.models.instrument import (
     BondCouponSchedule,
     BondOffering,
@@ -137,5 +138,6 @@ __all__ = [
     "MarketEvent",
     "ModelFeedback",
     "DailyReport",
+    "DefaultedBond",
     "AuditLog",
 ]
