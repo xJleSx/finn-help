@@ -171,13 +171,6 @@ class Settings(BaseSettings):
     db_pool_pre_ping: bool = True
     db_read_replica_url: str = ""
 
-    celery_broker_url: str = "redis://localhost:6379/1"
-    celery_result_backend: str = "redis://localhost:6379/2"
-    celery_task_always_eager: bool = False
-    celery_worker_concurrency: int = 2
-    celery_task_soft_time_limit: int = 300
-    celery_task_hard_time_limit: int = 600
-
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

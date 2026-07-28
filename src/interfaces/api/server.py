@@ -59,23 +59,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.warning("db_migration_failed", error=str(e))
     setup_sentry()
     logger.info("startup.trade_mode", mode="DRY_RUN" if not settings.enable_trading else "AUTO")
-    use_celery = not settings.celery_task_always_eager and settings.celery_broker_url.startswith("redis")
-    if use_celery:
-        logger.info("startup.celery_mode", broker=settings.celery_broker_url)
-        scheduler_task = None
-    else:
-        scheduler_task = asyncio.create_task(run_forever())
+    scheduler_task = asyncio.create_task(run_forever())
     yield
-    if scheduler_task is not None:
-        logger.info("shutdown.stopping_scheduler")
-        stop_scheduler()
-        scheduler_task.cancel()
-        try:
-            await asyncio.wait_for(scheduler_task, timeout=10.0)
-        except asyncio.CancelledError:
-            pass
-        except asyncio.TimeoutError:
-            logger.warning("shutdown.scheduler_timeout")
+    logger.info("shutdown.stopping_scheduler")
+    stop_scheduler()
+    scheduler_task.cancel()
+    try:
+        await asyncio.wait_for(scheduler_task, timeout=10.0)
+    except asyncio.CancelledError:
+        pass
+    except asyncio.TimeoutError:
+        logger.warning("shutdown.scheduler_timeout")
 
     loop = asyncio.get_running_loop()
     try:

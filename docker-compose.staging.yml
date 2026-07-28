@@ -41,47 +41,6 @@ services:
       redis:
         condition: service_started
 
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: celery -A src.tasks worker --loglevel=DEBUG --concurrency=${CELERY_CONCURRENCY:-2}
-    stop_grace_period: 60s
-    stop_signal: SIGTERM
-    environment:
-      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-staging_dev_password}@db:5432/finn
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      - FINN_ENV=staging
-    volumes:
-      - finn_data_staging:/app/data
-    depends_on:
-      db:
-        condition: service_started
-      redis:
-        condition: service_started
-
-  beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: celery -A src.tasks beat --loglevel=DEBUG --scheduler celery.beat.PersistentScheduler
-    stop_grace_period: 30s
-    environment:
-      - DATABASE_URL=postgresql://finn:${DB_PASSWORD:-staging_dev_password}@db:5432/finn
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      - FINN_ENV=staging
-    volumes:
-      - finn_data_staging:/app/data
-    depends_on:
-      db:
-        condition: service_started
-      redis:
-        condition: service_started
-
 volumes:
   finn_postgres_staging:
   finn_redis_staging:

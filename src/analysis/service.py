@@ -397,7 +397,7 @@ class AnalysisService:
         )
 
     def analyze_all_sync(self, db: Any, updated_ids: set[int] | None = None, with_ml: bool = True) -> list[dict[str, Any]]:
-        """Synchronous variant of analyze_all for Celery workers."""
+        """Synchronous variant of analyze_all for CLI / inline usage."""
         instruments = db.query(Instrument)
         if updated_ids is not None:
             instruments = instruments.filter(Instrument.id.in_(updated_ids))

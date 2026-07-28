@@ -1,0 +1,397 @@
+# Finn-Help: архитектурный обзор (июль 2026)
+
+## Блок 1. Общая архитектура
+
+### Стек технологий
+
+- **Язык**: Python 3.13 (основной бэкенд), TypeScript (Next.js фронтенд)
+- **Фреймворки**: FastAPI (REST API), python-telegram-bot v20 (Telegram bot), Celery (background workers)
+- **База данных**: PostgreSQL 16 (основная), SQLite (dev/тесты), Redis 7 (кэш, брокер Celery, SSE pub/sub)
+- **ML**: scikit-learn, XGBoost, LightGBM, CatBoost, Prophet (statsmodels), PyTorch + transformers (on-demand, extra dep group)
+- **LLM**: Groq API (основной), Ollama (локальный fallback)
+- **Контейнеризация**: Docker, docker-compose (10 сервисов: api, worker, beat, db, pgbouncer, redis, prometheus, grafana, web, mlflow)
+- **CI/CD**: GitHub Actions (ruff, mypy, pytest, bandit, pip-audit на push/PR; деплой по тэгу v* на production через SSH + docker compose)
+- **Мониторинг**: Prometheus + Grafana (метрики), Sentry (ошибки), OpenTelemetry (Jaeger — опционально)
+
+### Коммуникация между сервисами
+
+- **REST** (FastAPI) — основной протокол для внешних клиентов и микросервисов
+- **Celery** (Redis broker) — асинхронные задачи (ML training, price collection, signal generation)
+- **PostgreSQL** — общее состояние (портфель, инструменты, сигналы)
+- **Redis** — кэш (TTL), очереди Celery, pub/sub для SSE
+- **SSE** (Server-Sent Events) — реальном времени для веб-фронтенда
+- **Telegram Bot API** — внешний канал для пользовательских уведомлений (outbound polling, без webhook из-за отсутствия публичного HTTPS)
+
+### Монорепозиторий
+
+Единый монорепозиторий (`D:\finn-help\`) содержит:
+- `src/` — весь Python бэкенд
+- `web/` — Next.js фронтенд
+- `deploy/` — инфраструктурные конфиги (Prometheus, Grafana, Nginx, PgBouncer)
+- `alembic/` — миграции БД
+- `tests/` — 138 тестовых файлов
+
+---
+
+## Блок 2. По папкам src/ — детально
+
+### src/config.py
+Назначение: единый центр конфигурации через Pydantic BaseSettings (читает .env).
+Ключевые переменные: DATABASE_URL, TELEGRAM_BOT_TOKEN, TINKOFF_TOKEN, GROQ_API_KEY, JWT_SECRET и ~80 других.
+Статус: готово.
+Проблемы: нет валидации на старте (например, если TINKOFF_TOKEN невалидный — узнаётся только при первом запросе к API).
+
+### src/constants.py
+Назначение: все константы и справочные словари (рейтинги, комиссии, риск-профили, пороги).
+Ключевые структуры: DEFAULT_PROBABILITY_BY_RATING (15 уровней), BROKER_COMMISSION_CONFIG (7 брокеров), REBALANCING_TRIGGERS, RISK_PROFILES и ~30 других словарей.
+Статус: готово.
+Проблемы: дублирование — часть конфига размазана между config.py (настройки окружения) и constants.py (код), что путает.
+
+### src/db/
+Назначение: SQLAlchemy модели, connection management, миграции (Alembic).
+Модели (10 файлов, 79 таблиц):
+- instrument.py — Instrument, Price, Dividend, BondOffering, BondCouponSchedule, FundamentalMetric, FinancialReport и др.
+- portfolio.py — Portfolio, Transaction, Order, ShortPosition, MarginAccount, TradeLog, TaxReportRecord и др.
+- user.py — User, Subscription, Notification, SmartAlertRule, AlertLog и др.
+- news.py — News, NewsInstrument, NewsSectorImpact
+- risk.py — AMLState, GeoRiskScore, SectorRiskHistory
+- social.py — SocialPost, AuthorProfile, SentimentSignal
+- paper.py — PaperAccount, PaperOrder, PaperTradeLog
+- misc.py — MacroIndicator, FeatureCache, DailyReport
+- audit.py — AuditLog
+
+Миграции: 33 файла в alembic/versions/.
+Статус: готово (79 моделей, 33 миграции).
+Проблемы:
+- BondOffering содержит credit_rating, maturity_date, но эти поля заполняются не у всех выпусков — часть облигаций в портфеле остаются без рейтинга
+- BondCouponSchedule заполняется через парсинг MOEX, но у многих выпусков история купонов неполная
+- Portfolio.avg_price может быть NULL для позиций, добавленных до реализации этой колонки
+- Отсутствует таблица defaulted_bonds для отслеживания синтетических дефолтов (пока только в runtime в backtest.py)
+
+### src/collectors/
+Назначение: сбор внешних данных.
+15 файлов, ключевые:
+- **moex.py** (MOEX ISS) — цены, свечи, облигации, купоны. Частота: по запросу. Endpoint'ы: `/history/engines/stock/markets/bonds/boards/{board}/securities/{ticker}.json`, `/iss/securities/{ticker}.json`. Есть мок-режим для тестов.
+- **bonds.py** — агрегация данных облигаций (ставки, купоны, амортизация)
+- **cbr.py** — курсы ЦБ РФ и макро-индикаторы
+- **news.py** — RSS новости
+- **social.py** — ВК Pulse (посты авторов)
+- **alternative.py** — Google Trends и прочие альтернативные данные
+- **sentiment.py**, **financemarker.py**, **fundamental.py**, **macro.py**, **profiles.py**, **financials.py**
+
+Статус: готово (15 коллекторов).
+Проблемы:
+- MOEX ISS имеет 15-минутную задерчку по умолчанию; real-time данные только при платной подписке
+- fill_price_gaps() написана, но не интегрирована в пайплайн — gaps не заполняются автоматически
+- adjust_for_splits() написана, но список ETF_SPLITS хардкодный (TMON, LQDT)
+- Нет автоматического реконнекта при падении MOEX ISS
+- Парсинг АКРА/Эксперт РА для рейтингов реализован только через MOEX ISS (credit_rating поле), отдельного парсера нет
+
+### src/analysis/
+Назначение: вся аналитика (бонды, ML, сигналы, бэктест, стресс-тесты, оценки рисков).
+28 корневых файлов + 9 подпапок (anomaly, bonds, fundamental, inference, ml, portfolio, scenario, signals, technical).
+
+Ключевые модули:
+- **backtest.py** — бэктест аллокации с Monte-Carlo симуляцией, синтетическими дефолтами, bond stop-loss, инфляцией (CPI). Статус: готово. Проблемы: см. ниже.
+- **bonds_math.py** — YTM solver, дюрация (Macaulay, floater, put-adjusted), Current Yield. Статус: готово (все формулы из аудита исправлены).
+- **metrics.py** — Sharpe, Sortino, Calmar, Max Drawdown. Статус: готово.
+- **stress.py** — стресс-тест портфеля (кризисные сценарии + секторальные шоки). Статус: готово.
+- **regime.py** — определение рыночного режима (BULL/BEAR/SIDEWAYS/HIGH_VOL). Статус: готово.
+- **ml/** — ML ensemble (CatBoost, LightGBM, XGBoost, Prophet), walk-forward, feature drift. Статус: готово. Проблемы: модели train'ятся, но quality неизвестен (нет систематического A/B теста).
+- **signals/bond_signals.py** — 200+ строк скоринга облигаций. Статус: готово. Проблемы: 3 unused переменных (F841) — ruff их найдёт, но код рабочий.
+- **bonds/** (19 файлов) — detailed bond analysis:
+  - after_tax_yield.py — доходность с учётом налога (вкл. Fisher equation)
+  - rebalancing_triggers.py — 5 триггеров с динамическим порогом от комиссий
+  - tax_calculator_ldv.py — налоговый вычет по ИИС-3
+  - kelly_position_sizer.py — Kelly Criterion для размера позиции
+  - default_probability_fetcher.py — вероятности дефолта по рейтингу
+  - put_option_valuator.py — оценка пут-опционов (weighted duration)
+  - bond_ladder_generator.py — генерация лесенок погашения
+  - Статус: 19/19 файлов, все готовы. Проблемы: real_yield.py, fx_exposure.py — написаны, но не интегрированы в основной пайплайн.
+
+### src/trading/
+Назначение: торговые операции, брокеры, risk management, compliance, налоги.
+
+Брокеры (8 файлов):
+- tbank.py — T-Банк Invest API (gRPC). Реальное подключение работает (при наличии TINKOFF_TOKEN). Sandbox mode поддерживается.
+- alor.py, bcs.py, finam.py — только интерфейсы/заглушки (OpenAPI схемы), реального подключения нет
+- base.py — абстрактный BaseBroker
+- sync.py — синхронизация портфеля из T-Банка
+
+Risk management:
+- guards.py — stop-loss check, daily P&L, position limits
+- manager.py — PortfolioRiskManager
+
+Execution:
+- engine.py — TradeExecutionEngine
+- loop.py — ExecutionLoop (запуск/остановка торговли)
+- stoploss.py — StoplossEngine с ATR и trailing stop
+- audit.py — TradeAudit (логирование сделок, P&L)
+
+Paper trading:
+- paper.py — PaperEngine (полная симуляция с комиссиями, slippage, шортами)
+- Статус: paper trading — готово. Реальная торговля через T-Банк — готово (но disable по умолчанию, ENABLE_TRADING=false).
+
+Проблемы:
+- paper.py имеет ошибку в SELL/SHORT/COVER cash accounting (см. коммит 864073d — исправлено, но может быть регрессия)
+- bcs.py, finam.py, alor.py — только схемы, реальные API не подключены
+- Нет интеграционного теста с T-Банком (зависит от реальных денег)
+
+### src/interfaces/
+Назначение: пользовательские интерфейсы (API, Telegram bot, NLQ).
+
+**FastAPI** (api/):
+- server.py — FastAPI app entry (CORS, auth, middleware, routes)
+- 10 route файлов: auth, analysis, backtest, bonds, health, paper_trading, portfolio_bonds, trading_v2, alert_preferences, instruments, market
+- server.py — 205 строк, все routes зарегистрированы
+- auth.py — JWT + RBAC
+- Статус: готово (~35 endpoint'ов). Проблемы: нет автоматической генерации OpenAPI документации (хотя FastAPI её создаёт по умолчанию); rate limiter есть, но настройки по умолчанию консервативны (60 req/min).
+
+**Telegram bot** (telegram/):
+- bot.py — python-telegram-bot Application (polling mode, proxy support, 30+ commands)
+- handlers/ (8 файлов) — portfolio, analysis, bonds, market, account, misc, notifications и __init__
+- callbacks.py — inline button handlers
+- conversations.py — add/allocate диалоги
+- messages.py — шаблоны сообщений
+- telegram_broadcaster.py — broadcast сигналов, дивидендов, enrichment alerts
+- telegram_alerter.py — отправка/форматирование алертов
+- telegram_guard.py — access control по allowlist + cooldown
+- telegram_helpers.py — html_escape, get_portfolio_positions, chunk_text, build_analyze_keyboard и др.
+- Статус: 44 файла, ~3500 строк. Проблемы:
+  - polling mode (нет webhook) — задержка до 30 секунд при проблемах с сетью
+  - Нет button callback для /buy и /sell — расчёт показывает кнопку, но она не обрабатывается (только текст)
+  - Нет персистентного состояния диалогов (хранится в RAM, теряется при рестарте)
+  - quiet mode и grouping работают, но отключаются только через код (_QUIET_MODE_ENABLED = True)
+
+**NLQ** (nlq/):
+- engine.py — Natural Language Query (понимание намерений типа "покажи ОФЗ с YTM > 15%")
+- constants.py — карта интентов, секторов
+- Статус: готово, но используется редко (нет явной команды в Telegram, только через API).
+
+### src/notifications/
+Назначение: автоматические уведомления (новые модули, июль 2026).
+10 файлов:
+- calendar_checker.py — купонный календарь + погашения (с советами по НКД)
+- morning_brief.py — утренний брифинг (P&L, события, движения, риски)
+- drawdown_checker.py — мониторинг просадки (рыночный vs кредитный риск)
+- benchmark_comparison.py — сравнение с RGBI и депозитом
+- tax_report.py — ежемесячный налоговый отчёт
+- purchase_planner.py — план покупок на 25-е число
+- rating_checker.py — проверка изменения рейтинга через MOEX ISS
+- service.py — NotificationService (управление подписками)
+- channels.py — EmailPushChannel и другие каналы
+- retry.py — повторная отправка неудачных уведомлений
+
+Статус: 10/10 файлов. Все написаны в рамках последних 4 коммитов.
+Проблемы:
+- rating_checker.py использует MOEX ISS для получения рейтинга, но поле credit_rating в BondOffering не у всех инструментов заполнено — будет пропускать много изменений
+- purchase_planner.py использует allocator.recommend() внутри asyncio.run() — может вызвать проблемы в синхронном контексте (Celery worker)
+- drawdown_checker.py считает просадку по последним 60 дням — для долгосрочного портфеля этого может быть недостаточно
+
+### src/scheduler/
+Назначение: планировщик задач (inline, без Celery).
+- service.py — 489 строк, цикл с интервалом 5 мин.
+- tasks.py — daily_update, weekly_update
+- collectors.py — сбор данных по расписанию
+- reporting.py — генерация отчётов
+
+Статус: готово. Проблемы:
+- Дублирование с Celery beat — часть задач запускается и в Celery, и в inline scheduler'е
+- lock file (PID-based) не работает в распределённой среде (K8s) — в коде есть warning об этом
+- Время проверяется по `_is_time()` — если цикл стартует не ровно в 0 минут, момент может быть пропущен
+
+### src/tasks/
+Назначение: Celery tasks.
+- __init__.py — Celery app + beat schedule (14 recurring tasks)
+- worker.py — запуск Celery worker
+- ml_tasks.py, scheduler_tasks.py — реализация задач
+- _utils.py — вспомогательные функции
+
+Статус: готово. Проблемы: Celery worker может не стартовать, если Redis недоступен — нет graceful degradation.
+
+### src/alerts/
+Назначение: система алертов.
+- engine.py — AlertEngine (оценка, дедупликация, приоритизация)
+- generators.py — генерация алертов из данных
+- deduplicator.py — предотвращение повторных алертов
+- history.py — логирование алертов
+- preferences.py — настройки пользователя
+- prioritizer.py — приоритизация (critical/high/medium/low)
+- push.py — PUSH-уведомления
+- scorer.py — скоринг алертов
+- smart.py — SmartAlertEngine (правила пользователя)
+
+Статус: готово (9 файлов). Проблемы: слабо протестирована интеграция с Telegram bot (большая часть алертов только через API).
+
+### src/social/
+Назначение: социальные данные (ВК Pulse, sentiment analysis).
+- pulse.py — парсер ВК Pulse
+- vk.py — VK API adapter
+- sentiment/ — aggregator, analyzer, prompts
+- onchain_sentiment.py, topics.py, utils.py
+
+Статус: готово (9 файлов). Проблемы: VK API token обязателен — без него модуль не работает.
+
+### src/portfolio/
+Назначение: управление портфелем.
+- service.py — PortfolioService
+- risk.py — PortfolioRisk
+- allocator/engine.py — allocator (рекомендации по распределению капитала)
+- allocator/profiles.py — профили риска
+
+Статус: готово. Проблемы: allocator не учитывает текущие позиции при рекомендации — может предлагать то, что уже есть.
+
+### src/llm/
+Назначение: интеграция с LLM.
+- router.py — GroqClient (основной) + OllamaClient (fallback)
+- cost_tracker.py — трекинг токенов и стоимости
+- rate_limiter.py — лимиты запросов
+- prompts/ — YAML и Python промпты для анализа, вопросов, отчётов
+- tools/ — db_query.py (SQL генерация), wolfram.py (WolframAlpha)
+
+Статус: готово (7 файлов). Проблемы:
+- Groq API key обязателен — без него LLM-функции не работают
+- Ollama — fallback, но требует локального запуска модели
+- rate_limiter не различает пользователей (общий лимит на всех)
+
+---
+
+## Блок 3. Интеграции
+
+### MOEX ISS
+- Endpoint'ы: `/history/engines/stock/markets/bonds/boards/{board}/securities/{ticker}.json`, `/iss/securities/{ticker}.json`, `/history/engines/stock/markets/shares/boards/{board}/securities/{ticker}.json`
+- Частота опроса: по запросу (нет автоматического polling для real-time)
+- Формат ответа: JSON (ISS JSON schema — вложенные таблицы с columns/data)
+- Проблемы:
+  - 15-минутная задержка для бесплатного доступа
+  - Нет streaming/websocket — только poll
+  - fill_price_gaps() существует, но не включена в пайплайн
+  - Рейтинги через MOEX доступны не для всех выпусков
+
+### Брокеры
+- **T-Банк Invest API** (gRPC, tinkoff_token): реальное подключение работает. Возможности: получение портфеля, счетов, баланса, сделок. Торговля: paper trading (всегда) + real trading (ENABLE_TRADING=true + token).
+- **BCS, Finam, Alor**: только OpenAPI схемы — реальные API не подключены.
+- Статус: 1 рабочий брокер (T-Банк), 3 заглушки.
+
+### LLM
+- **Groq** (основной, groq_api_key): работает. Модель: по умолчанию llama-3.3-70b (через groq_model).
+- **Ollama** (локальный fallback, ollama_url): работает, если запущен локально.
+- Использование: анализ вопросов пользователя, генерация отчётов, NLQ, sentiment analysis.
+
+### Новости/сентимент
+- **RSS** (feedparser): новостные ленты (news.py + data/news_*.py)
+- **ВК Pulse** (vk_api_token): посты авторов, социальный сентимент
+- **FinanceMarker API** (fm_api_token): финансовые данные (опционально)
+- Google Trends через alternative.py
+
+---
+
+## Блок 4. База данных
+
+### Схема (79 таблиц)
+
+Основные группы:
+- **Инструменты**: instruments, prices, dividends, bond_offerings, bond_coupon_schedules
+- **Портфель**: portfolio, transactions, orders, short_positions, margin_accounts
+- **Пользователи**: users, user_settings, subscriptions, broker_credentials, channel_preferences
+- **Новости**: news, news_instruments, news_sector_impacts
+- **Риски**: geo_risk_scores, sector_risk_history, company_risk_history, aml_state
+- **Социальные**: social_posts, author_profiles, sentiment_signals
+- **Сигналы/ML**: signals, predictions, feature_cache, model_feedback
+- **Алерты**: alert_logs, smart_alert_rules, notification_receipts
+- **Paper trading**: paper_accounts, paper_orders, paper_trade_logs
+- **Метрики**: metric_snapshots, daily_reports, macro_indicators
+
+### Исторические данные
+- Prices: накоплено больше года дневных цен для большинства инструментов
+- BondCouponSchedule: история купонов (зависит от глубины парсинга MOEX)
+- BondOffering: данные о выпусках облигаций
+- Signals, Predictions: результаты ML моделей
+
+### Миграции
+- Alembic, 33 миграции
+- Запускаются автоматически при старте API (через init_db)
+- Поддерживаются как sync (CLI), так и async (FastAPI) режимы
+- Production: PostgreSQL 16; Dev/тесты: SQLite
+
+### Проблемы
+- Нет таблицы defaulted_bonds (синтетические дефолты живут в runtime в backtest.py)
+- BondOffering.credit_rating заполнен не для всех записей
+- Portfolio.avg_price может быть NULL для старых записей
+- Нет полноценной ER-диаграммы (только код моделей)
+
+---
+
+## Блок 5. Тестирование и CI/CD
+
+### Тесты
+- **138 тестовых файлов** в `tests/`
+- Покрытие: unit-тесты (основной объём), mock-тесты (MOEX), интеграционные тесты (БД)
+- Фреймворки: pytest, pytest-asyncio, pytest-cov, pytest-httpx, hypothesis
+- Запуск: `pytest tests/ --cov=src --timeout=120`
+- Проблемы:
+  - Нет тестов на новые notification modules (написаны в июле, тесты ещё не добавлены)
+  - Coverage < 70% (точный % неизвестен — нет gates в CI)
+  - Тесты с реальной БД (postgres) не входят в стандартный CI — используются SQLite и моки
+
+### CI/CD (GitHub Actions)
+- **lint**: ruff check (обязательный), mypy (non-fatal)
+- **test**: PostgreSQL 16 + Redis 7 services, pytest с --cov
+- **security**: bandit + pip-audit
+- **deploy**: по тэгу `v*.*.*` — сборка Docker images, SSH deploy на production
+
+### Deploy
+- Production: Docker Compose (10 сервисов) на выделенном сервере
+- Staging: упрощённый Compose (без observability)
+- Требования: Docker, docker-compose, PostgreSQL 16, Redis 7
+- Min spec: 4 CPU, 8 GB RAM (рекомендуется для ML компонентов)
+
+### Проблемы
+- Тесты notifications (benchmark_comparison, morning_brief, calendar_checker, и др.) не написаны
+- В CI нет gates на coverage — можно сломать покрытие и не заметить
+- Нет нагрузочного тестирования для эндпоинтов (Locust есть в dev deps, но не запускается в CI)
+- Нет E2E тестов для Telegram bot
+
+---
+
+## Блок 6. Что болит прямо сейчас
+
+### Известные проблемы (честно)
+
+1. **Survivorship bias в бэктесте** — частично исправлено (inject_synthetic_defaults), но дефолты симулируются случайно, а не на основе исторических данных MOEX. Нет таблицы defaulted_bonds.
+
+2. **MOEX gaps** — fill_price_gaps() написана, но не интегрирована в пайплайн сбора данных. Цены в портфеле могут иметь пробелы, влияющие на расчёт P&L и просадки.
+
+3. **Рейтинги** — проверка изменений (rating_checker.py) работает только через MOEX ISS, где credit_rating поле есть не для всех выпусков. Отдельного парсера АКРА/Эксперт РА нет.
+
+4. **Сплиты ETF** — adjust_for_splits() написана, но список хардкодный (TMON, LQDT). Новые сплиты нужно добавлять вручную.
+
+5. **Дублирование scheduler'ов** — часть задач запускается и в Celery (14 задач в beat schedule), и в inline scheduler'е (service.py). Нет единого источника истины для расписания.
+
+6. **Нет тестов на notification modules** — 7 новых модулей написаны, но не покрыты тестами. Reviewer может попросить тесты.
+
+7. **Telegram bot в polling mode** — нет webhook (требует публичного HTTPS). Зависит от стабильности сети на сервере.
+
+8. **Status of callbacks** — `/buy` и `/sell` показывают расчёт с кнопкой "[Подтвердить покупку]", но callback handler не реализован — кнопка не работает.
+
+9. **allocator не учитывает текущие позиции** — allocator.recommend() делает рекомендации без оглядки на то, что уже есть в портфеле. Ребаланс может предлагать купить то, что уже есть.
+
+10. **ML quality неизвестен** — ensemble моделей train'ятся, но нет A/B теста или сравнения с baseline. Feature drift есть, но метрик качества в проде нет.
+
+### Что тормозит разработку
+
+- **Размер кодовой базы** — `tree` показывает огромное количество файлов (только в analysis/ 28 + 70 файлов в подпапках). Ориентироваться становится сложно.
+- **Дублирование функциональности** — часть модулей делают одно и то же (например, несколько способов рассчитать доходность).
+- **Недостаток тестов** — новые фичи пишутся без тестов, что замедляет рефакторинг.
+- **Отсутствие feature flags** — включение/отключение фич через .env, но нет гибкой системы A/B тестирования.
+
+### Что хотелось бы изменить
+
+1. Выпилить Celery в пользу единого inline scheduler'а (упрощение архитектуры)
+2. Добавить defaulted_bonds таблицу и исторические данные о дефолтах
+3. Написать полноценный парсер АКРА/Эксперт РА (отдельный collector)
+4. Интегрировать fill_price_gaps в пайплайн MOEX collector
+5. Перевести Telegram bot на webhook (требует публичный HTTPS endpont)
+6. Убрать дублирующиеся модули анализа (real_yield, fx_exposure не используются в основном цикле)
+7. Добавить кнопки подтверждения для /buy и /sell
+8. Настроить gates на coverage в CI

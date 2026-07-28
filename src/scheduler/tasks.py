@@ -148,3 +148,39 @@ async def weekly_update() -> None:
             logger.info("prune_models: %s", result)
     except Exception as e:
         logger.warning("prune_models failed: %s", e)
+
+
+async def collect_prices_background() -> None:
+    logger.info("Collecting prices...")
+    async with get_async_session() as db:
+        try:
+            updated = await collect_prices(db)
+            logger.info("Prices collected: %d instruments updated", len(updated))
+        except Exception as e:
+            logger.error("Price collection failed: %s", e)
+
+
+async def generate_signals_background() -> None:
+    logger.info("Generating signals...")
+    async with get_async_session() as db:
+        try:
+            await generate_signals(db, instrument_ids=None)
+            logger.info("Signals generated")
+        except Exception as e:
+            logger.error("Signal generation failed: %s", e)
+
+
+async def train_models_background() -> None:
+    logger.info("Training ML models...")
+    try:
+        from src.analysis.service import analysis_service
+        await analysis_service.train_models_async()
+        logger.info("Model training completed")
+    except Exception as e:
+        logger.error("Model training failed: %s", e)
+
+
+async def clear_stale_feature_cache_background() -> None:
+    from src.analysis.feature_store import clear_stale
+    count = clear_stale(max_age_days=7)
+    logger.info("Cleared %d stale feature cache entries", count)

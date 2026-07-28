@@ -52,8 +52,6 @@ UPDATE_INTERVAL = 300  # 5 min (aggressive 24h mode)
 
 # Architecture reference:
 #   - docs/ARCHITECTURE.md — scheduler overview
-#   - docs/FinAdvisor_Technical_Documentation.docx — daily/weekly cycle spec
-#   - src/tasks/__init__.py — Celery beat schedule definitions
 #   - src/scheduler/tasks.py — daily_update / weekly_update implementations
 
 _running = False
@@ -461,6 +459,38 @@ async def run_forever(interval: int = UPDATE_INTERVAL) -> None:
                             await _send_notification(text, "tax", min_interval=86400)
                     except Exception as e:
                         logger.error("Tax report failed: %s", e)
+
+            # ── Price collection every 6h ─────────────────────────
+            if _is_time(3, 0) or _is_time(9, 0) or _is_time(15, 0) or _is_time(21, 0):
+                try:
+                    from src.scheduler.tasks import collect_prices_background
+                    await collect_prices_background()
+                except Exception as e:
+                    logger.error("Price collection failed: %s", e)
+
+            # ── Signal generation every 4h ─────────────────────────
+            if _is_time(2, 0) or _is_time(6, 0) or _is_time(10, 0) or _is_time(14, 0) or _is_time(18, 0) or _is_time(22, 0):
+                try:
+                    from src.scheduler.tasks import generate_signals_background
+                    await generate_signals_background()
+                except Exception as e:
+                    logger.error("Signal generation failed: %s", e)
+
+            # ── ML model training daily at 1:00 ────────────────────
+            if _is_time(1, 0):
+                try:
+                    from src.scheduler.tasks import train_models_background
+                    await train_models_background()
+                except Exception as e:
+                    logger.error("Model training failed: %s", e)
+
+            # ── Stale cache cleanup daily at 0:00 ──────────────────
+            if _is_time(0, 0):
+                try:
+                    from src.scheduler.tasks import clear_stale_feature_cache_background
+                    await clear_stale_feature_cache_background()
+                except Exception as e:
+                    logger.error("Cache cleanup failed: %s", e)
 
         await asyncio.sleep(interval)
 

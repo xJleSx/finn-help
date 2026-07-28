@@ -44,7 +44,7 @@ dependencies = [
     "tenacity>=9.0.0",
     "sentry-sdk>=2.0",
     "mlflow>=2.15.0",
-    "celery>=5.5.0",
+    # "celery>=5.5.0",  # removed — tasks migrated to inline scheduler
     "cryptography>=42.0.0",
     "lxml>=6.1.1",
     "python-docx>=1.2.0",
@@ -152,7 +152,7 @@ module = ["torch.*", "jose.*", "yaml.*", "opentelemetry.*", "cloudpickle.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["src.tasks.*"]
+# module = ["src.tasks.*"]  # removed — Celery removed
 ignore_errors = true
 
 [[tool.mypy.overrides]]
@@ -292,7 +292,7 @@ ignore = ["E501"]
 "src/interfaces/api/schemas.py" = ["N815"]
 "src/analysis/portfolio/black_litterman.py" = ["N803", "N806"]
 "src/analysis/ml/drift/incremental.py" = ["N803", "N806"]
-"src/tasks/ml_tasks.py" = ["N806"]
+# "src/tasks/ml_tasks.py" = ["N806"]  # removed
 "src/trading/tax/reporter.py" = ["E741"]
 "src/analysis/fusion_optimizer.py" = ["S311", "S112"]
 "src/collectors/base.py" = ["S311"]
@@ -307,7 +307,7 @@ ignore = ["E501"]
 "src/interfaces/api/routes/trading_v2.py" = ["S110"]
 "src/interfaces/api/server.py" = ["E402"]
 "src/signals/engine.py" = ["S110", "E701"]
-"src/tasks/scheduler_tasks.py" = ["E402"]
+# "src/tasks/scheduler_tasks.py" = ["E402"]  # removed
 
 [tool.ruff.format]
 line-ending = "auto"

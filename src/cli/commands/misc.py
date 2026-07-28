@@ -39,22 +39,6 @@ def scheduler() -> None:
     asyncio.run(run_forever())
 
 
-@app.command()
-def celery_worker() -> None:
-    """Запустить Celery worker для фоновых задач"""
-    from src.tasks import app as celery_app
-
-    celery_app.start(argv=["celery", "worker", "-A", "src.tasks", "-l", "INFO"])
-
-
-@app.command()
-def celery_beat() -> None:
-    """Запустить Celery beat для расписания задач"""
-    from src.tasks import app as celery_app
-
-    celery_app.start(argv=["celery", "beat", "-A", "src.tasks", "-l", "INFO", "--scheduler", "celery.beat.PersistentScheduler"])
-
-
 @paper_app.command()
 def reset(
     capital: float = typer.Option(1_000_000, "--capital", "-c", help="Начальный капитал"),
