@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any
 
 import pandas as pd
 from prometheus_client import Counter, Gauge, Histogram
@@ -101,39 +101,24 @@ def _train_news_impact_sync(sym: str) -> bool:
 
 class MLCoordinator:
     def __init__(self, cache_ttl_seconds: int = 3600) -> None:
-        self._prophet_cache: dict[str, tuple[Any, float]] = {}
-        self._ensemble_cache: dict[str, tuple[Any, float]] = {}
+        self._cat_cache: dict[str, tuple[Any, float]] = {}
         self._cache_ttl = cache_ttl_seconds
 
     def _evict_expired(self) -> None:
         now = datetime.now(timezone.utc).timestamp()
-        self._prophet_cache = {
-            k: v for k, v in self._prophet_cache.items()
-            if now - v[1] < self._cache_ttl
-        }
-        self._ensemble_cache = {
-            k: v for k, v in self._ensemble_cache.items()
+        self._cat_cache = {
+            k: v for k, v in self._cat_cache.items()
             if now - v[1] < self._cache_ttl
         }
 
-    def get_prophet(self, ticker: str = "") -> Any:
+    def get_catboost(self, ticker: str = "") -> Any:
         self._evict_expired()
-        if ticker in self._prophet_cache:
-            return self._prophet_cache[ticker][0]
-        from src.analysis.ml.prophet_model import StatsModelsTrendPredictor
+        if ticker in self._cat_cache:
+            return self._cat_cache[ticker][0]
+        from src.analysis.ml.catboost_model import CatBoostClassifierModel
 
-        instance = StatsModelsTrendPredictor(ticker=ticker)
-        self._prophet_cache[ticker] = (instance, datetime.now(timezone.utc).timestamp())
-        return instance
-
-    def get_ensemble(self, ticker: str = "") -> Any:
-        self._evict_expired()
-        if ticker in self._ensemble_cache:
-            return self._ensemble_cache[ticker][0]
-        from src.analysis.ml.ensemble import EnsemblePredictor
-
-        instance = EnsemblePredictor(ticker=ticker)
-        self._ensemble_cache[ticker] = (instance, datetime.now(timezone.utc).timestamp())
+        instance = CatBoostClassifierModel(ticker=ticker)
+        self._cat_cache[ticker] = (instance, datetime.now(timezone.utc).timestamp())
         return instance
 
     def _prepare_events(
@@ -153,20 +138,6 @@ class MLCoordinator:
             ind_df = ind_df.drop(columns=["is_anomaly"])
         return ind_df, anomaly_mask
 
-    def _build_result(self, pr: dict[str, Any], ensemble_res: dict[str, Any]) -> dict[str, Any]:
-        MLflowTracker.log_metrics(
-            {"prophet_confidence": pr.get("confidence", 0), "ensemble_confidence": ensemble_res.get("confidence", 0)},
-        )
-        ml = pr
-        ml["ml_confidence"] = max(pr.get("confidence", 0), ensemble_res.get("confidence", 0))
-        ml["xgb_action"] = ensemble_res.get("xgb_action", "NEUTRAL")
-        ml["ensemble"] = {
-            "lgb_action": ensemble_res.get("lgb_action", "NEUTRAL"),
-            "cat_action": ensemble_res.get("cat_action", "NEUTRAL"),
-            "model_votes": ensemble_res.get("model_votes", {}),
-        }
-        return cast(dict[str, Any], ml)
-
     async def compute_ml(
         self,
         df: pd.DataFrame,
@@ -176,25 +147,22 @@ class MLCoordinator:
         event_builder: EventFeatureBuilder | None = None,
     ) -> dict[str, Any] | None:
         if len(df) < 60:
-            ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="skipped").inc()
+            ml_prediction_count.labels(model_type="catboost", ticker=ticker or "unknown", status="skipped").inc()
             return None
         try:
             ind_df, anomaly_mask = self._prepare_events(ind_df, events, event_builder)
             loop = asyncio.get_running_loop()
-            prophet = self.get_prophet(ticker)
-            ensemble = self.get_ensemble(ticker)
-            with ml_inference_latency.labels(model_type="prophet", ticker=ticker or "unknown").time():
-                pr = await loop.run_in_executor(get_executor(), prophet.predict, df)
-            ml_prediction_count.labels(model_type="prophet", ticker=ticker or "unknown", status="success").inc()
-            with ml_inference_latency.labels(model_type="ensemble", ticker=ticker or "unknown").time():
-                ensemble_res = await loop.run_in_executor(get_executor(), ensemble.predict, ind_df, anomaly_mask)
-            ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="success").inc()
-            return self._build_result(pr, ensemble_res)
+            catboost = self.get_catboost(ticker)
+            with ml_inference_latency.labels(model_type="catboost", ticker=ticker or "unknown").time():
+                result = await loop.run_in_executor(get_executor(), catboost.predict, ind_df, anomaly_mask)
+            ml_prediction_count.labels(model_type="catboost", ticker=ticker or "unknown", status="success").inc()
+            result["ml_confidence"] = result.get("confidence", 0.0)
+            return result
         except Exception:
             logger.exception("Unhandled exception")
             logger.warning("ML prediction failed", exc_info=True)
-            ml_error_count.labels(model_type="ensemble", ticker=ticker or "unknown").inc()
-            ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="error").inc()
+            ml_error_count.labels(model_type="catboost", ticker=ticker or "unknown").inc()
+            ml_prediction_count.labels(model_type="catboost", ticker=ticker or "unknown", status="error").inc()
             return None
 
     def price_df(self, prices: list[Any]) -> pd.DataFrame:
@@ -234,26 +202,22 @@ class MLCoordinator:
         event_builder: EventFeatureBuilder | None = None,
     ) -> dict[str, Any] | None:
         if len(df) < 60:
-            ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="skipped").inc()
+            ml_prediction_count.labels(model_type="catboost", ticker=ticker or "unknown", status="skipped").inc()
             return None
         try:
             ind_df, anomaly_mask = self._prepare_events(ind_df, events, event_builder)
-            prophet = self.get_prophet(ticker)
-            ensemble = self.get_ensemble(ticker)
+            catboost = self.get_catboost(ticker)
             t0 = time.monotonic()
-            pr = prophet.predict(df)
-            ml_inference_latency.labels(model_type="prophet", ticker=ticker or "unknown").observe(time.monotonic() - t0)
-            ml_prediction_count.labels(model_type="prophet", ticker=ticker or "unknown", status="success").inc()
-            t0 = time.monotonic()
-            ensemble_res = ensemble.predict(ind_df, anomaly_mask=anomaly_mask)
-            ml_inference_latency.labels(model_type="ensemble", ticker=ticker or "unknown").observe(time.monotonic() - t0)
-            ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="success").inc()
-            return self._build_result(pr, ensemble_res)
+            result = catboost.predict(ind_df, anomaly_mask=anomaly_mask)
+            ml_inference_latency.labels(model_type="catboost", ticker=ticker or "unknown").observe(time.monotonic() - t0)
+            ml_prediction_count.labels(model_type="catboost", ticker=ticker or "unknown", status="success").inc()
+            result["ml_confidence"] = result.get("confidence", 0.0)
+            return result
         except Exception:
             logger.exception("Unhandled exception")
             logger.warning("Sync ML prediction failed", exc_info=True)
-            ml_error_count.labels(model_type="ensemble", ticker=ticker or "unknown").inc()
-            ml_prediction_count.labels(model_type="ensemble", ticker=ticker or "unknown", status="error").inc()
+            ml_error_count.labels(model_type="catboost", ticker=ticker or "unknown").inc()
+            ml_prediction_count.labels(model_type="catboost", ticker=ticker or "unknown", status="error").inc()
             return None
 
     async def _train_single(
@@ -295,38 +259,27 @@ class MLCoordinator:
                     anomaly_mask = train_df["is_anomaly"].fillna(False).to_numpy(dtype=bool)
                     train_df = train_df.drop(columns=["is_anomaly"])
 
-            ensemble = self.get_ensemble(sym)
-            prophet = self.get_prophet(sym)
+            catboost = self.get_catboost(sym)
 
-            ensemble_fut = loop.run_in_executor(None, ensemble.train_all, train_df, anomaly_mask)
-            prophet_fut = loop.run_in_executor(get_executor(), prophet.train, df)
+            cat_fut = loop.run_in_executor(None, catboost.train, train_df, anomaly_mask)
             news_fut = loop.run_in_executor(get_executor(), _train_news_impact_sync, sym)
 
-            ensemble_ok, prophet_ok, news_ok = await asyncio.gather(ensemble_fut, prophet_fut, news_fut)
-
-            ok = all(ensemble_ok.values()) and prophet_ok
+            cat_ok, news_ok = await asyncio.gather(cat_fut, news_fut)
 
             MLflowTracker.log_model_params(
-                "ensemble",
+                "catboost",
                 sym,
                 {"n_estimators": 100, "max_depth": 6},
-                {"accuracy": float(ensemble_ok.get("accuracy", 0)) if isinstance(ensemble_ok, dict) else 0.0},
-            )
-            MLflowTracker.log_model_params(
-                "prophet",
-                sym,
-                {"seasonality_mode": "multiplicative"},
-                {"rmse": 0.0},
+                {"trained": bool(cat_ok)},
             )
 
             logger.info(
-                "Model training for %s: ensemble=%s prophet=%s news=%s",
+                "Model training for %s: catboost=%s news=%s",
                 sym,
-                "OK" if ensemble_ok and all(ensemble_ok.values()) else "partial",
-                "OK" if prophet_ok else "FAIL",
+                "OK" if cat_ok else "FAIL",
                 "OK" if news_ok else "SKIP",
             )
-            return sym, ok
+            return sym, cat_ok
 
     async def train_models(
         self,

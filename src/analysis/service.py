@@ -83,12 +83,6 @@ class AnalysisService:
     def _dividend_df(self, divs: Sequence[Dividend]) -> pd.DataFrame:
         return self.ml.dividend_df(list(divs))
 
-    def _get_prophet(self, ticker: str = "") -> Any:
-        return self.ml.get_prophet(ticker)
-
-    def _get_ensemble(self, ticker: str = "") -> Any:
-        return self.ml.get_ensemble(ticker)
-
     async def _compute_ml(
         self,
         df: pd.DataFrame,
@@ -485,16 +479,13 @@ class AnalysisService:
                 if "is_anomaly" in train_df.columns:
                     anomaly_mask = train_df["is_anomaly"].fillna(False).to_numpy(dtype=bool)
                     train_df = train_df.drop(columns=["is_anomaly"])
-            ensemble = self._get_ensemble(sym)
-            ensemble_ok = ensemble.train_all(train_df, anomaly_mask=anomaly_mask)
-            prophet = self._get_prophet(sym)
-            prophet_ok = prophet.train(df)
-            all_results[sym] = all(ensemble_ok.values()) and prophet_ok
+            catboost = self.ml.get_catboost(sym)
+            cat_ok = catboost.train(train_df, anomaly_mask=anomaly_mask)
+            all_results[sym] = bool(cat_ok)
             logger.info(
-                "Model training for %s: ensemble=%s prophet=%s",
+                "Model training for %s: catboost=%s",
                 sym,
-                "OK" if ensemble_ok and all(ensemble_ok.values()) else "partial",
-                "OK" if prophet_ok else "FAIL",
+                "OK" if cat_ok else "FAIL",
             )
         elapsed = time.monotonic() - _train_start
         logger.info("Model training completed in %.2fs for %d instruments", elapsed, len(all_results))
