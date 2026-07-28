@@ -2,6 +2,9 @@ import logging
 from datetime import date, timedelta
 from typing import Any, Optional
 
+import numpy as np
+import pandas as pd
+
 from src.collectors.base import BaseCollector
 from src.config import settings
 from src.constants import DEFAULT_HISTORY_DAYS
@@ -27,6 +30,45 @@ BOARD_MAP = {
 }
 
 BOND_BOARDS = ["TQCB", "TQBD", "TQOB"]
+
+ETF_SPLITS: dict[str, list[dict[str, Any]]] = {
+    "TMON": [
+        {"date": "2024-03-15", "ratio": 2.0},
+    ],
+    "LQDT": [
+        {"date": "2024-06-20", "ratio": 2.0},
+    ],
+}
+
+
+def adjust_for_splits(
+    ticker: str,
+    prices: list[dict[str, Any]],
+    date_col: str = "date",
+    price_cols: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    splits = ETF_SPLITS.get(ticker.upper())
+    if not splits or not prices:
+        return prices
+    if price_cols is None:
+        price_cols = ["close", "open", "high", "low"]
+    sorted_splits = sorted(splits, key=lambda s: s["date"])
+    adjusted = []
+    for row in prices:
+        row_date = row.get(date_col, "")
+        cumulative_ratio = 1.0
+        for sp in sorted_splits:
+            if row_date < sp["date"]:
+                cumulative_ratio *= sp["ratio"]
+        if cumulative_ratio != 1.0:
+            row = dict(row)
+            for col in price_cols:
+                if col in row and row[col] is not None:
+                    row[col] = round(row[col] / cumulative_ratio, 4)
+            if "volume" in row and row["volume"] is not None:
+                row["volume"] = int(row["volume"] * cumulative_ratio)
+        adjusted.append(row)
+    return adjusted
 
 
 class MOEXCollector(BaseCollector):
@@ -239,3 +281,66 @@ class MOEXCollector(BaseCollector):
             {"iss.meta": "off"},
         )
         return self._parse_table(data, "description")
+
+    async def get_orderbook(self, ticker: str) -> Optional[dict[str, Any]]:
+        """Get order book (BID, ASK, BIDDEPTH, ASKDEPTH) from MOEX."""
+        for board_id in BOND_BOARDS:
+            try:
+                data = await self._fetch_json(
+                    f"/engines/stock/markets/bonds/boards/{board_id}/securities/{ticker}/orderbook.json",
+                    {"iss.meta": "off"},
+                )
+                rows = self._parse_table(data, "orderbook")
+                if rows:
+                    return rows[0]
+            except Exception as e:
+                logger.debug("Orderbook not found on %s for %s: %s", board_id, ticker, e)
+                continue
+        return None
+
+    async def get_candles(
+        self,
+        ticker: str,
+        interval: int = 24,
+        limit: int = 30,
+    ) -> list[dict[str, Any]]:
+        """Get candle data for liquidity analysis (Amihud ratio)."""
+        for board_id in BOND_BOARDS:
+            try:
+                data = await self._fetch_json(
+                    f"/engines/stock/markets/bonds/boards/{board_id}/securities/{ticker}/candles.json",
+                    {"iss.meta": "off", "interval": str(interval), "iss.only": "candles", "start": 0, "limit": str(limit)},
+                )
+                rows = self._parse_table(data, "candles")
+                if rows:
+                    return rows
+            except Exception as e:
+                logger.debug("Candles not found on %s for %s: %s", board_id, ticker, e)
+                continue
+        return []
+
+
+def fill_price_gaps(
+    df: pd.DataFrame,
+    date_col: str = "date",
+    price_col: str = "close",
+    max_gap_days: int = 5,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+    df = df.sort_values(date_col).reset_index(drop=True)
+    dates = pd.to_datetime(df[date_col])
+    full_range = pd.date_range(start=dates.min(), end=dates.max(), freq="B")
+    df = df.set_index(date_col)
+    df.index = pd.to_datetime(df.index)
+    df = df.reindex(full_range)
+    gap_mask = df[price_col].isna()
+    fill_count = gap_mask.astype(int).groupby((~gap_mask).cumsum()).cumsum()
+    for col in df.columns:
+        if col in (price_col, "open", "high", "low"):
+            df[col] = df[col].ffill(limit=max_gap_days)
+        elif col == "volume":
+            df[col] = df[col].fillna(0)
+    df.loc[fill_count > max_gap_days, [c for c in df.columns if c != "volume"]] = np.nan
+    df.index.name = date_col
+    return df.reset_index()
