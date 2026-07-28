@@ -7,7 +7,7 @@ from typing import Any, Optional, cast
 import numpy as np
 
 from src.analysis.metrics import compute_calmar, compute_max_drawdown, compute_sharpe, compute_sortino
-from src.constants import DEFAULT_PROBABILITY_BY_RATING
+from src.config import DEFAULT_PROBABILITY_BY_RATING
 from src.db.connection import get_session
 from src.db.models import Instrument, Price
 from src.portfolio.allocator import allocator

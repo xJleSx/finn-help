@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.collectors.macro import MacroCollector
-from src.constants import NEWS_SENTIMENT_DAYS
+from src.config import NEWS_SENTIMENT_DAYS
 from src.db.models import (
     BondOffering,
     FinancialReport,

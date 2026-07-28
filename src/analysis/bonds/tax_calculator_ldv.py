@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.constants import TAX_RATES
+from src.config import TAX_RATES
 
 
 def calc_tax_base(

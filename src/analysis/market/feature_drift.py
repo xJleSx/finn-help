@@ -8,7 +8,7 @@ from typing import Any
 from scipy.stats import ks_2samp
 from sqlalchemy import func
 
-from src.analysis.feature_store import bump_version, invalidate
+from src.analysis.market.feature_store import bump_version, invalidate
 from src.db.connection import get_session
 from src.db.models import FeatureCache
 

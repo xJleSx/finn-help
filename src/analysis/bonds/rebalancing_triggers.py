@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from src.constants import BROKER_COMMISSION_CONFIG, REBALANCING_TRIGGERS
+from src.config import BROKER_COMMISSION_CONFIG, REBALANCING_TRIGGERS
 
 
 def get_min_rebalance_threshold(portfolio_value: float, broker_key: str = "tbank") -> float:

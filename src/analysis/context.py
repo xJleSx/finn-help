@@ -6,7 +6,7 @@ from typing import Any
 
 from src.analysis.fundamental import FundamentalAnalyzer
 from src.collectors.news import NewsCollector
-from src.constants import NEWS_STALE_HOURS
+from src.config import NEWS_STALE_HOURS
 from src.db.models import Dividend, Indicator, Instrument, News, NewsInstrument, Price
 
 logger = logging.getLogger(__name__)

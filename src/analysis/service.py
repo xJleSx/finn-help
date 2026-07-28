@@ -13,13 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.analysis.events import EventFeatureBuilder, event_features
 from src.analysis.fundamental import FundamentalAnalyzer
 from src.analysis.loader import DataLoader, data_loader
+from src.analysis.market.volatility import VolatilityRegimeDetector
 from src.analysis.ml.price_targets import build_trade_plan
 from src.analysis.ml.price_targets import to_dict as trade_plan_to_dict
 from src.analysis.ml_coordinator import MLCoordinator, ml_coordinator
 from src.analysis.multi_timeframe import MultiTimeframeAnalyzer
 from src.analysis.technical import TechnicalAnalyzer
-from src.analysis.volatility import VolatilityRegimeDetector
-from src.constants import (
+from src.config import (
     ANALYSIS_CONCURRENCY,
     MIN_INDICATOR_ROWS,
     MIN_PLAN_ROWS,
